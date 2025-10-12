@@ -8,7 +8,7 @@ services:
     container_name: codespace_redis
     command: redis-server --appendonly yes
     ports: 
-      - 6379:6379 
+      - "6379:6379"
     volumes:
       - redis_data:/data 
 
@@ -19,27 +19,51 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: user
       RABBITMQ_DEFAULT_PASS: password
-      # RABBITMQ_LOOPBACK_USERS: '' 
     ports:
-      - 5672:5672
-      - 15672:15672
-
-  # 3. Development Environment: The Workspace Container (Primary Dev Spot)
-  workspace:
-    # Build the image using our local Dockerfile
-    build: 
-      context: ./.devcontainer
-      dockerfile: devcontainer.Dockerfile
-    container_name: codespace_workspace
+      - "5672:5672"
+      - "15672:15672"
     volumes:
-      # Mount the repository into the workspace container
-      - .:/workspaces:cached
-      
-    # Ensure this container is attached to the same network as Redis/RabbitMQ
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  # 3. Infrastructure: MongoDB Database Service
+  mongo:
+    image: mongo:latest
+    container_name: codespace_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  # 4. Backend Service: Assessment API
+  assessment-api:
+    build:
+      context: ./assessment-api
+      dockerfile: Dockerfile
+    container_name: codespace_assessment_api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./assessment-api:/usr/src/app
+      - /usr/src/app/node_modules
     depends_on:
       - redis
       - rabbitmq
-    
+      - mongo
+
+  # 5. Backend Service: Judge Service
+  judge-service:
+    build:
+      context: ./judge-service
+      dockerfile: Dockerfile
+    container_name: codespace_judge_service
+    volumes:
+      - ./judge-service:/usr/src/app
+      - /usr/src/app/node_modules
+    depends_on:
+      - rabbitmq
+      - mongo
+
 volumes:
   redis_data:
   rabbitmq_data:
+  mongo_data:
