@@ -25,5 +25,5 @@ EXPOSE 3000
 
 # 6. Use the entrypoint script to set permissions at runtime 
 # (for mounted files) and then run the development command.
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["npm", "run", "dev"]
