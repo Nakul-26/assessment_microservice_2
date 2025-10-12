@@ -2,19 +2,24 @@
 {
   "name": "Assessment Hybrid Dev",
   
+  // NOTE: If your docker-compose.yml is in the parent directory, this path is correct.
   "dockerComposeFile": [
     "../docker-compose.yml" 
   ],
   
-  // CRITICAL: Point to the 'workspace' service, not 'redis'
-  "service": "workspace", 
+  // *** CRITICAL FIX: Point to a DEFINED service (e.g., assessment-api) ***
+  "service": "assessment-api", 
   
-  "workspaceFolder": "/workspaces",
+  // CRITICAL FIX: Set the workspace folder to the app's WORKDIR
+  // This must match the WORKDIR in your assessment-api/Dockerfile (/usr/src/app)
+  "workspaceFolder": "/usr/src/app",
 
-  // REMOVE THE "features" SECTION ENTIRELY
-  
+  // CRITICAL FIX: Specify the user to run the terminal as, matching the Dockerfile
+  "remoteUser": "node",
+
   // Forward all necessary ports
-  "forwardPorts": [6379, 5672, 15672], 
+  "forwardPorts": [3000, 6379, 5672, 15672], 
+  // ADD port 3000 for the assessment-api service!
 
   "customizations": {
     "vscode": {
