@@ -13,18 +13,7 @@ import mongoose from "mongoose";
 
 
 
-// test-rabbitmq.js
-import amqp from 'amqplib';
 
-const url = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672/';
-
-try {
-  const conn = await amqp.connect(url);
-  console.log('✅ Connected to RabbitMQ');
-  await conn.close();
-} catch (err) {
-  console.error('❌ RabbitMQ connection failed:', err.message);
-}
 
 
 
