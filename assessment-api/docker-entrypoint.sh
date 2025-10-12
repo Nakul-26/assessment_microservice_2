@@ -1,15 +1,12 @@
 #!/bin/sh
+set -e
 
-# This script runs before the main application command (npm run dev).
+# 1. Set ownership of the application directory to the 'node' user.
+# This runs as root successfully because it's the first step in the entrypoint.
+echo "Setting runtime ownership of /usr/src/app to 'node' user..."
+chown -R node:node /usr/src/app
 
-# Check if the working directory (/usr/src/app) exists and is not empty.
-# Since we are using volume mounts, this directory contains the code from the host.
-# We explicitly change the ownership of the mounted files to the container's 
-# non-root 'node' user to prevent "Permission denied" errors on execution.
-if [ -d /usr/src/app ]; then
-    echo "Setting ownership of mounted files to 'node' user..."
-    chown -R node:node /usr/src/app
-fi
-
-# Execute the main command passed to the container (i.e., npm run dev)
-exec "$@"
+# 2. Execute the main command using the absolute path to the nodemon binary.
+# This bypasses shell PATH resolution conflicts that cause the "Permission denied" error.
+echo "Starting application as 'node' user using absolute path..."
+exec su node -c "/usr/src/app/node_modules/.bin/nodemon index.js"
