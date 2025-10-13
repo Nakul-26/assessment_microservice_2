@@ -44,6 +44,11 @@ services:
     volumes:
       - ./assessment-api:/usr/src/app
       - /usr/src/app/node_modules
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - PORT=3000
+      - REDIS_URI=redis://redis:6379
+      - RABBITMQ_URI=amqp://rabbitmq
     depends_on:
       - redis
       - rabbitmq
@@ -58,6 +63,10 @@ services:
     volumes:
       - ./judge-service:/usr/src/app
       - /usr/src/app/node_modules
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - RABBITMQ_URI=amqp://rabbitmq
+      - REDIS_URI=redis://redis:6379
     depends_on:
       - rabbitmq
       - mongo
