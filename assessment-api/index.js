@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ServerApiVersion } from "mongodb";
-import API from "./models/routes/api.js"; // ensure this uses ESM too
+import API from "./routes/api.js"; // ensure correct relative path
 import mongoose from "mongoose";
 
 
@@ -27,10 +27,8 @@ dotenv.config();
 const app = express();
 
 // --- MongoDB Client ---
-const uri = process.env.MONGO_URI;
-if (!uri) {
-  throw new Error("❌ MONGO_URI is not defined in .env");
-}
+// Use provided MONGO_URI or default to the docker-compose service name so it works inside Codespaces
+const uri = process.env.MONGO_URI || 'mongodb://mongo:27017';
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -99,11 +97,15 @@ app.get("/", (req, res) => {
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
-    console.log(`Error: ${err.message}`);
-    // Close server & exit process
+  console.log(`Error: ${err && err.message ? err.message : err}`);
+  // Close server & exit process
+  if (typeof server !== 'undefined') {
     server.close(() => process.exit(1));
+  } else {
+    process.exit(1);
+  }
 });
 
 // --- Start Server ---
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
