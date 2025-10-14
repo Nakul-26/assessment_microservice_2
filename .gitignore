@@ -29,3 +29,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment and node
+node_modules/
+# .env
+# *.env
+dist/
+build/
+.vscode/
+.DS_Store
+/tmp
+/*.log
+
+# Docker
+docker-compose.override.yml
+
+# Secrets
+secrets/

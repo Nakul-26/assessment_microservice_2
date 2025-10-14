@@ -13,7 +13,8 @@ const ProblemPage = () => {
         const fetchProblem = async () => {
             console.log(`Fetching problem with id: ${id}`);
             try {
-                const res = await axios.get(`http://localhost:5000/api/problems/${id}`);
+                    const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                    const res = await axios.get(`${base}/api/problems/${id}`);
                 setProblem(res.data);
                 console.log('Problem fetched successfully:', res.data);
             } catch (err) {
@@ -34,7 +35,8 @@ const ProblemPage = () => {
     const checkStatus = async (submissionId) => {
         console.log(`Checking status for submission: ${submissionId}`);
         try {
-            const res = await axios.get(`http://localhost:5000/api/submissions/${submissionId}`);
+                const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const res = await axios.get(`${base}/api/submissions/${submissionId}`);
             const currentSubmission = res.data;
             setSubmission(currentSubmission);
             console.log('Submission status updated:', currentSubmission);
@@ -66,7 +68,8 @@ const ProblemPage = () => {
         try {
             console.log('Submitting code...', payload);
             setSubmission({ status: 'Submitting...', output: '' });
-            const res = await axios.post('http://localhost:5000/api/submit', payload);
+                const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const res = await axios.post(`${base}/api/submit`, payload);
             const newSubmission = res.data;
             setSubmission(newSubmission);
             console.log('Submission successful:', newSubmission);

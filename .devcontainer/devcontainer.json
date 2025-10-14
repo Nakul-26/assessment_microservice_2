@@ -12,15 +12,32 @@
   // The actual contents of your mounted project folder are here on the host side.
   "workspaceFolder": "/workspaces/assessment_microservice_2",
 
+  // --- CRITICAL STEP: Enable Docker in Docker (DinD) Feature ---
+    // This allows the Judge Worker to run 'docker run' commands to sandbox user code.
+    "features": {
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {
+            "version": "latest",
+            "mobsy": "false" // Default to not running Docker-in-Docker services automatically
+        }
+    },
+
   // The 'node' user is configured in your Dockerfile and entrypoint.
   "remoteUser": "node",
 
   // Forward all necessary ports
   "forwardPorts": [3000, 6379, 5672, 15672], 
 
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y python3-pip && pip install -r backend/requirements.txt && docker compose up -d rabbitmq redis db",
+
   "customizations": {
     "vscode": {
       "extensions": [
+        "ms-azuretools.vscode-docker",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.python-requirements",
+        "dbaeumer.vscode-eslint",
+        "humao.rest-client",
         "ms-azuretools.vscode-docker"
       ]
     }
