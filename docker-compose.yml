@@ -39,16 +39,17 @@ services:
       context: ./assessment-api
       dockerfile: Dockerfile
     container_name: codespace_assessment_api
+    command: npm run dev
     ports:
       - "3000:3000"
     volumes:
       - ./assessment-api:/usr/src/app
       - /usr/src/app/node_modules
     environment:
-      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_URI=mongodb://mongo:27017/assessment_db
       - PORT=3000
       - REDIS_URI=redis://redis:6379
-      - RABBITMQ_URI=amqp://rabbitmq
+      - RABBITMQ_URI=amqp://user:password@rabbitmq:5672
     depends_on:
       - redis
       - rabbitmq
@@ -60,16 +61,34 @@ services:
       context: ./judge-service
       dockerfile: Dockerfile
     container_name: codespace_judge_service
+    command: npm run dev
     volumes:
       - ./judge-service:/usr/src/app
       - /usr/src/app/node_modules
     environment:
-      - MONGO_URI=mongodb://mongo:27017
-      - RABBITMQ_URI=amqp://rabbitmq
+      - MONGO_URI=mongodb://mongo:27017/assessment_db
+      - RABBITMQ_URI=amqp://user:password@rabbitmq:5672
       - REDIS_URI=redis://redis:6379
     depends_on:
       - rabbitmq
       - mongo
+      - redis
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: codespace_frontend
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:3000
+    depends_on:
+      - assessment-api
 
 volumes:
   redis_data:
