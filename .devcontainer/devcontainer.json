@@ -23,9 +23,11 @@
     "5173": { "label": "Frontend" },
     "15672": { "label": "RabbitMQ Dashboard" }
   },
-  "remoteUser": "vscode",
 
+  // ✅ Fix: run as root (since vscode user doesn’t exist)
+  "remoteUser": "root",
+  "updateRemoteUserUID": false,
+
+  // Start Docker Compose automatically after attaching
   "postAttachCommand": "docker-compose up --build"
-
 }
-
