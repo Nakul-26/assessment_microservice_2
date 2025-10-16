@@ -1,4 +1,5 @@
-FROM node:18-alpine
+# Upgrade to Node 20 (Vite requires Node 20+)
+FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
@@ -6,7 +7,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 RUN npm install
 
-# Copy source
+# Copy source code
 COPY . .
 
 EXPOSE 5173
