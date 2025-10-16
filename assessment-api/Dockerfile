@@ -7,6 +7,9 @@ WORKDIR /usr/src/app
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Install Gemini CLI
+RUN npm install -g @google/gemini-cli
+
 # 2. Grant ownership of the workdir to the node user for the build steps
 # This fixes the EACCES error during 'npm install'
 RUN chown -R node:node /usr/src/app
