@@ -1,64 +1,31 @@
 {
-  "name": "Assessment Hybrid Dev",
-  
-  "dockerComposeFile": [
-    "../docker-compose.yml" 
-  ],
-  
-  // CRITICAL FIX: The primary container used by Codespaces/VS Code
-  "service": "assessment-api", 
-  
-  // *** CRITICAL FIX: Use the standard Codespace volume mount path ***
-  // The actual contents of your mounted project folder are here on the host side.
-  "workspaceFolder": "/workspaces/assessment_microservice_2",
-
-  // --- CRITICAL STEP: Enable Docker in Docker (DinD) Feature ---
-    // This allows the Judge Worker to run 'docker run' commands to sandbox user code.
-    "features": {
-        "ghcr.io/devcontainers/features/docker-in-docker:2": {
-            "version": "latest",
-            "mobsy": "false" // Default to not running Docker-in-Docker services automatically
-        }
-    },
-
-  // The 'node' user is configured in your Dockerfile and entrypoint.
-  "remoteUser": "node",
-
-  // Forward all necessary ports
-  "forwardPorts": [3000, 6379, 5672, 15672], 
-
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y python3-pip && pip install -r backend/requirements.txt && docker compose up -d rabbitmq redis db",
-
+  "name": "Assessment Platform Codespace",
+  "build": {
+    "dockerfile": "devcontainer.Dockerfile",
+    "context": ".."
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
   "customizations": {
     "vscode": {
+      "settings": {
+        "terminal.integrated.shell.linux": "/bin/bash"
+      },
       "extensions": [
-        "ms-azuretools.vscode-docker",
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "ms-python.python-requirements",
         "dbaeumer.vscode-eslint",
-        "humao.rest-client",
+        "esbenp.prettier-vscode",
         "ms-azuretools.vscode-docker"
       ]
     }
-  }
+  },
+  "forwardPorts": [3000, 5173, 6379, 27017, 15672],
+  "portsAttributes": {
+    "3000": { "label": "Backend API" },
+    "5173": { "label": "Frontend" },
+    "15672": { "label": "RabbitMQ Dashboard" }
+  },
+  "remoteUser": "vscode",
 
-  // {
-  //   "name": "Full Stack + Gemini",
-  //   "image": "mcr.microsoft.com/devcontainers/javascript-node:20", 
-  //   "postCreateCommand": "bash .devcontainer/setup.sh",
-  //   "forwardPorts": [3000, 5000],
-  //   "customizations": {
-  //     "vscode": {
-  //       "extensions": [
-  //         "ms-azuretools.vscode-docker",
-  //         "dbaeumer.vscode-eslint"
-  //       ],
-  //       "settings": {
-  //         "terminal.integrated.defaultProfile.linux": "bash"
-  //       }
-  //     }
-  //   }
-  // }
+  "postAttachCommand": "docker-compose up --build"
 
 }
+
