@@ -6,11 +6,11 @@ import { Link } from 'react-router-dom';
 const ProblemListPage = () => {
     const [problems, setProblems] = useState([]);
 
-    useEffect(() => {
+    useEffect(() => { 
         const fetchProblems = async () => {
             console.log('Fetching problems...');
             try {
-                const base = import.meta.env.VITE_API_URL2;
+                const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
                 console.log("base url:",base);
                 const res = await axios.get(`${base}/api/problems`);
                 setProblems(res.data);

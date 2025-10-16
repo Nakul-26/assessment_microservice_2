@@ -13,7 +13,7 @@ const ProblemPage = () => {
         const fetchProblem = async () => {
             console.log(`Fetching problem with id: ${id}`);
             try {
-                    const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                    const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
                     const res = await axios.get(`${base}/api/problems/${id}`);
                 setProblem(res.data);
                 console.log('Problem fetched successfully:', res.data);
@@ -35,7 +35,7 @@ const ProblemPage = () => {
     const checkStatus = async (submissionId) => {
         console.log(`Checking status for submission: ${submissionId}`);
         try {
-                const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
                 const res = await axios.get(`${base}/api/submissions/${submissionId}`);
             const currentSubmission = res.data;
             setSubmission(currentSubmission);
@@ -68,7 +68,7 @@ const ProblemPage = () => {
         try {
             console.log('Submitting code...', payload);
             setSubmission({ status: 'Submitting...', output: '' });
-                const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
                 const res = await axios.post(`${base}/api/submit`, payload);
             const newSubmission = res.data;
             setSubmission(newSubmission);

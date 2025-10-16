@@ -1,68 +1,115 @@
 import express from 'express';
+import amqp from 'amqplib';
+import { createClient } from 'redis';
+
 import Problem from '../models/Problem.js';
 import Submission from '../models/Submission.js';
-import amqp from 'amqplib';
 
 const router = express.Router();
 
 const RABBITMQ_URI = process.env.RABBITMQ_URI || 'amqp://localhost';
+const REDIS_URI = process.env.REDIS_URI || 'redis://localhost:6379';
 const QUEUE_NAME = 'submission_queue';
 
-let amqpChannel = null;
+// Redis client
+const redisClient = createClient({ url: REDIS_URI });
+redisClient.on('error', (err) => console.log('Redis Client Error', err));
+redisClient.connect().then(() => {
+    console.log('Connected to Redis');
+}).catch(err => {
+    console.error('Redis connection error:', err);
+});
 
-// Initialize AMQP connection lazily
-async function initAmqp() {
-  if (amqpChannel) return amqpChannel;
-
-  const conn = await amqp.connect(RABBITMQ_URI);
-  const channel = await conn.createChannel();
-  await channel.assertQueue(QUEUE_NAME, { durable: true });
-  amqpChannel = channel;
-  return channel;
-}
-
-// List problems
+// @route   GET /api/problems
+// @desc    Get all problems
 router.get('/problems', async (req, res) => {
-  const problems = await Problem.find({});
-  res.json(problems);
+    try {
+        const problems = await Problem.find().select('-testCases');
+        res.json(problems);
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
 });
 
-// Get a single problem
+// @route   GET /api/problems/:id
+// @desc    Get a problem by ID
 router.get('/problems/:id', async (req, res) => {
-  const problem = await Problem.findById(req.params.id);
-  if (!problem) return res.status(404).json({ error: 'Not found' });
-  res.json(problem);
+    try {
+        const problem = await Problem.findById(req.params.id).select('-testCases');
+        if (!problem) {
+            return res.status(404).json({ msg: 'Problem not found' });
+        }
+        res.json(problem);
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
 });
 
-// Create submission: save to DB, enqueue submission ID for judge-service
+// @route   POST /api/submit
+// @desc    Submit code for a problem asynchronously
 router.post('/submit', async (req, res) => {
-  try {
     const { problemId, code, language } = req.body;
-    if (!problemId || !code || !language) return res.status(400).json({ error: 'Missing fields' });
 
-    const submission = await Submission.create({ problem: problemId, code, language, status: 'Pending' });
+    try {
+        // 1. Create submission with "Pending" status
+        const submission = new Submission({ 
+            problem: problemId, 
+            code, 
+            language, 
+            status: 'Pending' 
+        });
+        await submission.save();
 
-    // Ensure AMQP channel is ready and publish submission id
-    const channel = await initAmqp();
-    channel.sendToQueue(QUEUE_NAME, Buffer.from(submission._id.toString()), { persistent: true });
+        // 2. Publish submission ID to RabbitMQ
+        const connection = await amqp.connect(RABBITMQ_URI);
+        const channel = await connection.createChannel();
+        await channel.assertQueue(QUEUE_NAME, { durable: true });
+        channel.sendToQueue(QUEUE_NAME, Buffer.from(submission._id.toString()), { persistent: true });
+        
+        console.log(`Sent submission ID ${submission._id} to queue.`);
+        await channel.close();
+        await connection.close();
 
-    res.status(201).json(submission);
-  } catch (err) {
-    console.error('Error creating submission:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        // 3. Respond to user immediately
+        res.status(202).json(submission);
+
+    } catch (err) {
+        console.error('Submit Error:', err);
+        res.status(500).send('Server Error');
+    }
 });
 
-// Get submission status
+// @route   GET /api/submissions/:id
+// @desc    Get submission status and result
 router.get('/submissions/:id', async (req, res) => {
-  try {
-    const submission = await Submission.findById(req.params.id);
-    if (!submission) return res.status(404).json({ error: 'Not found' });
-    res.json(submission);
-  } catch (err) {
-    console.error('Error fetching submission:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    const { id } = req.params;
+
+    try {
+        // 1. Check Redis cache first
+        const cachedResult = await redisClient.get(`submission:${id}`);
+        if (cachedResult) {
+            console.log(`Cache hit for submission: ${id}`);
+            return res.json(JSON.parse(cachedResult));
+        }
+
+        // 2. If not in cache, get from MongoDB
+        console.log(`Cache miss for submission: ${id}. Checking DB.`);
+        const submission = await Submission.findById(id);
+        if (!submission) {
+            return res.status(404).json({ msg: 'Submission not found' });
+        }
+
+        // Optional: Cache the result if it's final (Success/Fail)
+        if (submission.status === 'Success' || submission.status === 'Fail') {
+            await redisClient.set(`submission:${id}`, JSON.stringify(submission), { EX: 3600 }); // Cache for 1 hour
+        }
+
+        res.json(submission);
+
+    } catch (err) {
+        console.error('Get Submission Error:', err);
+        res.status(500).send('Server Error');
+    }
 });
 
 export default router;
