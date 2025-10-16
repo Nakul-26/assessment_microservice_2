@@ -10,7 +10,8 @@ const ProblemListPage = () => {
         const fetchProblems = async () => {
             console.log('Fetching problems...');
             try {
-                const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const base = import.meta.env.VITE_API_URL2;
+                console.log("base url:",base);
                 const res = await axios.get(`${base}/api/problems`);
                 setProblems(res.data);
                 console.log('Problems fetched successfully:', res.data);

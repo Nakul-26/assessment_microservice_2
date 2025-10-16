@@ -6,23 +6,6 @@ import { MongoClient, ServerApiVersion } from "mongodb";
 import API from "./routes/api.js"; // ensure correct relative path
 import mongoose from "mongoose";
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 dotenv.config();
 const app = express();
 
@@ -51,11 +34,7 @@ connectDB();
 
 // --- Middleware ---
 const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "https://timetable-generator-3tvm-git-main-nakul-26s-projects.vercel.app",
-    "https://timetable-generator-3tvm.vercel.app",
-  ],
+  origin: "*",
   optionsSuccessStatus: 200,
   credentials: true
 };
