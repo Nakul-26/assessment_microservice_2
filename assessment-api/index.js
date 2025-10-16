@@ -9,6 +9,19 @@ import mongoose from "mongoose";
 dotenv.config();
 const app = express();
 
+app.use((req, res, next) => {
+  console.log(`📥 Incoming request: ${req.method} , ${req.url}`);
+  console.log("👉 Headers:", req.headers.origin);
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log("👉 Body:", req.body);
+  }
+  console.log("👉 Query:", req.query);
+  console.log("👉 Params:", req.params);
+  console.log("👉 IP:", req.ip);
+  console.log("⏰ Time:", new Date().toISOString());
+  next();
+});
+
 // --- MongoDB Client ---
 // Use provided MONGO_URI or default to the docker-compose service name so it works inside Codespaces
 const uri = process.env.MONGO_URI || 'mongodb://mongo:27017';
@@ -74,7 +87,12 @@ app.get("/", (req, res) => {
   res.send("API is working 2");
 });
 
+// app.get("/problems", (req, res) => {
+//   res.send("/problems is working");
+// });
+
 // Handle unhandled promise rejections
+
 process.on('unhandledRejection', (err) => {
   console.log(`Error: ${err && err.message ? err.message : err}`);
   // Close server & exit process

@@ -18,7 +18,7 @@ const SubmissionSchema = new Schema({
     },
     status: {
         type: String,
-        enum: ['Pending', 'Success', 'Fail'],
+        enum: ['Pending', 'Running', 'Success', 'Fail'],
         default: 'Pending'
     },
     output: {
