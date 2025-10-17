@@ -2,8 +2,8 @@ import express from 'express';
 import amqp from 'amqplib';
 import { createClient } from 'redis';
 
-import Problem from '../models/Problem.js';
-import Submission from '../models/Submission.js';
+import Problem from '../models/Problem.mjs';
+import Submission from '../models/Submission.mjs';
 
 const router = express.Router();
 
@@ -35,7 +35,7 @@ router.get('/problems', async (req, res) => {
 // @desc    Get a problem by ID
 router.get('/problems/:id', async (req, res) => {
     try {
-        const problem = await Problem.findById(req.params.id).select('-testCases');
+        const problem = await Problem.findById(req.params.id);
         if (!problem) {
             return res.status(404).json({ msg: 'Problem not found' });
         }

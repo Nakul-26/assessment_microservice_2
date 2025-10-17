@@ -27,7 +27,13 @@ const ProblemSchema = new Schema({
                 required: true
             }
         }
-    ]
+    ],
+    boilerplates: {
+        type: Map,
+        of: String,
+        default: {}
+    },
+
 });
 
 export default mongoose.model('Problem', ProblemSchema);

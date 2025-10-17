@@ -5,7 +5,8 @@ import axios from 'axios';
 const ProblemPage = () => {
     const { id } = useParams();
     const [problem, setProblem] = useState(null);
-    const [code, setCode] = useState('// Write your code here\n// For this problem, your code should read from process.argv[2] and print to console.log\n// Example: const input = process.argv[2].split(\' \');');
+    const [code, setCode] = useState('');
+    const [selectedLanguage, setSelectedLanguage] = useState('javascript');
     const [submission, setSubmission] = useState(null);
     const intervalRef = useRef(null);
 
@@ -16,6 +17,12 @@ const ProblemPage = () => {
                     const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
                     const res = await axios.get(`${base}/api/problems/${id}`);
                 setProblem(res.data);
+                // Set initial code based on fetched problem's boilerplate for the selected language
+                if (res.data.boilerplates && res.data.boilerplates[selectedLanguage]) {
+                    setCode(res.data.boilerplates[selectedLanguage]);
+                } else {
+                    setCode('// Write your code here'); // Fallback boilerplate
+                }
                 console.log('Problem fetched successfully:', res.data);
             } catch (err) {
                 console.error(`❌ Error fetching problem ${id}:`, err);
@@ -31,6 +38,15 @@ const ProblemPage = () => {
             }
         };
     }, [id]);
+
+    // Update code when selectedLanguage changes, using problem's boilerplates
+    useEffect(() => {
+        if (problem && problem.boilerplates && problem.boilerplates[selectedLanguage]) {
+            setCode(problem.boilerplates[selectedLanguage]);
+        } else if (problem) {
+            setCode('// Write your code here'); // Fallback boilerplate if no specific boilerplate for language
+        }
+    }, [selectedLanguage, problem]);
 
     const checkStatus = async (submissionId) => {
         console.log(`Checking status for submission: ${submissionId}`);
@@ -62,7 +78,7 @@ const ProblemPage = () => {
         const payload = {
             problemId: id,
             code,
-            language: 'javascript'
+            language: selectedLanguage
         };
 
         try {
@@ -101,6 +117,19 @@ const ProblemPage = () => {
                 cols="75"
                 disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
             />
+            <br />
+            <label htmlFor="language-select">Language: </label>
+            <select 
+                id="language-select" 
+                value={selectedLanguage} 
+                onChange={(e) => setSelectedLanguage(e.target.value)}
+                disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
+            >
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="java">Java</option>
+                <option value="cpp">C++</option>
+            </select>
             <br />
             <button 
                 onClick={handleSubmit} 
