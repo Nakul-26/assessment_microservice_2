@@ -18,8 +18,8 @@ const ProblemPage = () => {
                     const res = await axios.get(`${base}/api/problems/${id}`);
                 setProblem(res.data);
                 // Set initial code based on fetched problem's boilerplate for the selected language
-                if (res.data.boilerplates && res.data.boilerplates[selectedLanguage]) {
-                    setCode(res.data.boilerplates[selectedLanguage]);
+                if (res.data.functionSignatures && res.data.functionSignatures[selectedLanguage]) {
+                    setCode(res.data.functionSignatures[selectedLanguage]);
                 } else {
                     setCode('// Write your code here'); // Fallback boilerplate
                 }
@@ -41,8 +41,8 @@ const ProblemPage = () => {
 
     // Update code when selectedLanguage changes, using problem's boilerplates
     useEffect(() => {
-        if (problem && problem.boilerplates && problem.boilerplates[selectedLanguage]) {
-            setCode(problem.boilerplates[selectedLanguage]);
+        if (problem && problem.functionSignatures && problem.functionSignatures[selectedLanguage]) {
+            setCode(problem.functionSignatures[selectedLanguage]);
         } else if (problem) {
             setCode('// Write your code here'); // Fallback boilerplate if no specific boilerplate for language
         }

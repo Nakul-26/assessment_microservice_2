@@ -19,16 +19,16 @@ const ProblemSchema = new Schema({
     testCases: [
         {
             input: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             },
             expectedOutput: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             }
         }
     ],
-    boilerplates: {
+    functionSignatures: {
         type: Map,
         of: String,
         default: {}

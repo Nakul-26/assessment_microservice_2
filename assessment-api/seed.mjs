@@ -24,16 +24,16 @@ const ProblemSchema = new Schema({
     testCases: [
         {
             input: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             },
             expectedOutput: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             }
         }
     ],
-    boilerplates: {
+    functionSignatures: {
         type: Map,
         of: String,
         default: {}
@@ -48,19 +48,31 @@ const sampleProblem = {
     difficulty: 'Easy',
     testCases: [
         {
-            input: '[2,7,11,15] 9',
-            expectedOutput: '0,1'
+            input: { "nums": [2, 7, 11, 15], "target": 9 },
+            expectedOutput: [0, 1]
         },
         {
-            input: '[3,2,4] 6',
-            expectedOutput: '1,2'
+            input: { "nums": [3, 2, 4], "target": 6 },
+            expectedOutput: [1, 2]
         }
     ],
-    boilerplates: {
-        javascript: `// JavaScript boilerplate for Two Sum\n// Example: function twoSum(nums, target) { ... }`,
-        python: `# Python boilerplate for Two Sum\n# Example: def two_sum(nums, target): ...`,
-        java: `// Java boilerplate for Two Sum\n// Example: class Solution { public int[] twoSum(int[] nums, int target) { ... } }`,
-        cpp: `// C++ boilerplate for Two Sum\n// Example: class Solution { public: vector<int> twoSum(vector<int>& nums, int target) { ... } };`
+    functionSignatures: {
+        javascript: `function twoSum(nums, target) {
+  // Write your code here
+}`,
+        python: `def two_sum(nums, target):
+  # Write your code here`,
+        java: `class Solution {
+    public int[] twoSum(int[] nums, int target) {
+        // Write your code here
+    }
+}`,
+        cpp: `class Solution {
+public:
+    vector<int> twoSum(vector<int>& nums, int target) {
+        // Write your code here
+    }
+};`
     }
 };
 
