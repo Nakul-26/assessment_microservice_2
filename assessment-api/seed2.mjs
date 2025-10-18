@@ -25,16 +25,16 @@ const ProblemSchema = new Schema({
     testCases: [
         {
             input: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             },
             expectedOutput: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             }
         }
     ],
-    boilerplates: {
+    functionSignatures: {
         type: Map,
         of: String,
         default: {}
@@ -49,19 +49,19 @@ const sampleProblem2 = {
     difficulty: 'Easy',
     testCases: [
         {
-            input: '1 2',
-            expectedOutput: '3'
+            input: { "num1": 1, "num2": 2 },
+            expectedOutput: 3
         },
         {
-            input: '10 20',
-            expectedOutput: '30'
+            input: { "num1": 10, "num2": 20 },
+            expectedOutput: 30
         }
     ],
-    boilerplates: {
-        javascript: `// JavaScript boilerplate for Add Two Numbers\n// Example: function addTwoNumbers(num1, num2) { return num1 + num2; }`,
-        python: `# Python boilerplate for Add Two Numbers\n# Example: def add_two_numbers(num1, num2): return num1 + num2`,
-        java: `// Java boilerplate for Add Two Numbers\n// Example: class Solution { public int addTwoNumbers(int num1, int num2) { return num1 + num2; } }`,
-        cpp: `// C++ boilerplate for Add Two Numbers\n// Example: int addTwoNumbers(int num1, int num2) { return num1 + num2; }`
+    functionSignatures: {
+        javascript: `function addTwoNumbers(num1, num2) {\n  // Write your code here\n}`,
+        python: `def add_two_numbers(num1, num2):\n  # Write your code here`,
+        java: `class Solution {\n    public int addTwoNumbers(int num1, int num2) {\n        // Write your code here\n    }\n}`,
+        cpp: `int addTwoNumbers(int num1, int num2) {\n    // Write your code here\n}`
     }
 };
 

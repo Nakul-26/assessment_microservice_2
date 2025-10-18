@@ -5,24 +5,25 @@ import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import { createClient } from 'redis';
 
+import isEqual from 'lodash.isequal';
+
 const languageConfigs = {
     javascript: {
         fileExtension: 'js',
         compileCommand: null, // No compilation needed for JavaScript
-        runCommand: (filePath, input) => `node ${filePath} ${input}`
+        runCommand: (filePath, functionName, input) => `node wrappers/javascript_runner.js ${filePath} ${functionName} '${JSON.stringify(input)}'`
     },
     python: {
         fileExtension: 'py',
         compileCommand: null, // No compilation needed for Python
-        runCommand: (filePath, input) => `python3 ${filePath} '${input}'`
+        runCommand: (filePath, functionName, input) => `python3 wrappers/python_runner.py ${filePath} ${functionName} '${JSON.stringify(input)}'`
     },
     java: {
         fileExtension: 'java',
-        compileCommand: (filePath) => `javac ${filePath}`,
-        runCommand: (filePath, input) => {
+        compileCommand: (filePath) => `javac -parameters -cp /usr/local/lib/gson/gson-2.10.1.jar ${filePath} ${path.join(path.dirname(filePath), 'JavaRunner.java')} -d ${path.dirname(filePath)}`,
+        runCommand: (filePath, functionName, input) => {
             const dir = path.dirname(filePath);
-            const fileName = path.basename(filePath, '.java');
-            return `java -cp ${dir} ${fileName} ${input}`;
+            return `java -cp ${dir}:/usr/local/lib/gson/gson-2.10.1.jar JavaRunner ${functionName} '${JSON.stringify(input)}'`;
         }
     },
     cpp: {
@@ -83,14 +84,26 @@ export const executeCode = async (submissionId) => {
         return;
     }
 
-    const baseFileName = `code-${Date.now()}`;
+    const baseFileName = language === 'java' ? 'Solution' : `code-${Date.now()}`;
     const sourceFileName = `${baseFileName}.${config.fileExtension}`;
     const sourceFilePath = path.join(tempDir, sourceFileName);
-    fs.writeFileSync(sourceFilePath, submission.code);
+    const codeContent = submission.code
+        .replace(/\\r\\n/g, '\n') // handle Windows-style newlines
+        .replace(/\\n/g, '\n')    // handle escaped newlines
+        .replace(/\r\n/g, '\n');  // normalize any stray CRLF
+    fs.writeFileSync(sourceFilePath, codeContent);
+
     console.log(`Wrote submission code to: ${sourceFilePath}`);
 
     let executablePath = sourceFilePath;
     const filesToCleanUp = [sourceFilePath];
+
+    if (language === 'java') {
+        const runnerSourcePath = path.join(__dirname, 'wrappers', 'JavaRunner.java');
+        const runnerDestPath = path.join(tempDir, 'JavaRunner.java');
+        fs.copyFileSync(runnerSourcePath, runnerDestPath);
+        filesToCleanUp.push(runnerDestPath);
+    }
 
     try {
         // Compilation step for compiled languages
@@ -121,9 +134,33 @@ export const executeCode = async (submissionId) => {
         let passedAllTests = true;
         let finalOutput = '';
 
+        const signature = problem.functionSignatures.get(language);
+        if (!signature) {
+            submission.status = 'Fail';
+            submission.output = `Function signature for language \"${language}\" not found.`;
+            await submission.save();
+            return;
+        }
+
+        let functionNameMatch;
+        if (language === 'javascript') {
+            functionNameMatch = signature.match(/function\s+([a-zA-Z0-9_]+)\s*\(/);
+        } else if (language === 'python') {
+            functionNameMatch = signature.match(/def\s+([a-zA-Z0-9_]+)\s*\(/);
+        } else if (language === 'java') {
+            functionNameMatch = signature.match(/public\s+(?:static\s+)?(?:[a-zA-Z0-9_<>[\]]+\s+)?([a-zA-Z0-9_]+)\s*\(/);
+        }
+        if (!functionNameMatch || !functionNameMatch[1]) {
+            submission.status = 'Fail';
+            submission.output = `Could not extract function name from signature: ${signature}`;
+            await submission.save();
+            return;
+        }
+        const functionName = functionNameMatch[1];
+
         for (const [index, testCase] of problem.testCases.entries()) {
             console.log(`Running test case ${index + 1}/${problem.testCases.length}`);
-            const command = config.runCommand(executablePath, testCase.input);
+            const command = config.runCommand(executablePath, functionName, testCase.input);
 
             const execution = new Promise((resolve, reject) => {
                 exec(command, { timeout: 5000 }, (error, stdout, stderr) => { // 5 second timeout for execution
@@ -135,9 +172,19 @@ export const executeCode = async (submissionId) => {
             });
 
             const output = await execution;
-            if (output !== testCase.expectedOutput) {
+            let parsedOutput;
+            try {
+                parsedOutput = JSON.parse(output);
+            } catch (e) {
                 passedAllTests = false;
-                finalOutput = `Test failed on input: ${testCase.input}\nExpected: ${testCase.expectedOutput}\nGot: ${output}`;
+                finalOutput = `Test failed on input: ${JSON.stringify(testCase.input)}\nExpected: ${JSON.stringify(testCase.expectedOutput)}\nGot invalid JSON: ${output}`;
+                console.log(`Test case ${index + 1} failed due to invalid JSON output`);
+                break;
+            }
+
+            if (!isEqual(parsedOutput, testCase.expectedOutput)) {
+                passedAllTests = false;
+                finalOutput = `Test failed on input: ${JSON.stringify(testCase.input)}\nExpected: ${JSON.stringify(testCase.expectedOutput)}\nGot: ${JSON.stringify(parsedOutput)}`;
                 console.log(`Test case ${index + 1} failed`);
                 break;
             }

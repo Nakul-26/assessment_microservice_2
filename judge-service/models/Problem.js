@@ -19,15 +19,20 @@ const ProblemSchema = new Schema({
     testCases: [
         {
             input: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             },
             expectedOutput: {
-                type: String,
+                type: Schema.Types.Mixed,
                 required: true
             }
         }
-    ]
+    ],
+    functionSignatures: {
+        type: Map,
+        of: String,
+        default: {}
+    }
 });
 
 export default mongoose.model('Problem', ProblemSchema);
