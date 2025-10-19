@@ -65,6 +65,8 @@ services:
     volumes:
       - ./judge-service:/usr/src/app
       - /usr/src/app/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./judge-service/temp:/usr/src/app/temp
     environment:
       - MONGO_URI=mongodb://mongo:27017/assessment_db
       - RABBITMQ_URI=amqp://user:password@rabbitmq:5672
@@ -73,6 +75,18 @@ services:
       - rabbitmq
       - mongo
       - redis
+  judge-python:
+    build:
+      context: .
+      dockerfile: judge-service/runtimes/python.Dockerfile
+  judge-javascript:
+    build:
+      context: .
+      dockerfile: judge-service/runtimes/javascript.Dockerfile
+  judge-java:
+    build:
+      context: .
+      dockerfile: judge-service/runtimes/java.Dockerfile
 
   frontend:
     build:
