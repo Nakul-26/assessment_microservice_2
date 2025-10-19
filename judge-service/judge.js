@@ -20,11 +20,10 @@ const languageConfigs = {
     },
     java: {
         fileExtension: 'java',
-        compileCommand: (filePath) => `javac -parameters -cp /usr/local/lib/gson/gson-2.10.1.jar ${filePath} ${path.join(path.dirname(filePath), 'JavaRunner.java')} -d ${path.dirname(filePath)}`,
-        runCommand: (filePath, functionName, input) => {
-            const dir = path.dirname(filePath);
-            return `java -cp ${dir}:/usr/local/lib/gson/gson-2.10.1.jar JavaRunner ${functionName} '${JSON.stringify(input)}'`;
-        }
+        compileCommand: (filePath) => 
+          `docker run --rm -v /workspaces/assessment_microservice_2/judge-service/:/app -w /app assessment_microservice_2-judge-java javac -cp target/dependency/gson-2.10.1.jar -d /app/temp /app/temp/${path.basename(filePath)}`,
+        runCommand: (filePath, functionName, input) => 
+          `docker run --rm -v /workspaces/assessment_microservice_2/judge-service/:/app -w /app assessment_microservice_2-judge-java java -cp .:target/dependency/*:/app/temp JavaRunner ${functionName} '${JSON.stringify(input)}'`
     },
     cpp: {
         fileExtension: 'cpp',
