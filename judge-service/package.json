@@ -17,7 +17,8 @@
     "dotenv": "^17.2.3",
     "lodash.isequal": "^4.5.0",
     "mongoose": "^8.19.0",
-    "redis": "^5.8.3"
+    "redis": "^5.8.3",
+    "vm2": "^3.9.19"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

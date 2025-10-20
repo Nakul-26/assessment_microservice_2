@@ -1,29 +1,52 @@
-
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-import java.io.FileReader;
+import javax.tools.JavaCompiler;
+import javax.tools.ToolProvider;
+import java.io.File;
+import java.io.FileWriter;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.List;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Map;
 
 public class JavaRunner {
     public static void main(String[] args) {
-        if (args.length < 2) {
-            System.err.println("Usage: java JavaRunner <functionName> <jsonInput>");
+        if (args.length < 1) {
+            System.err.println("Usage: java JavaRunner <inputJson>");
             return;
         }
 
-        String functionName = args[0];
-        String jsonInput = args[1];
+        String inputJson = args[0];
         Gson gson = new Gson();
 
         try {
-            Solution solution = new Solution();
-            Method method = null;
+            Map<String, Object> inputMap = gson.fromJson(inputJson, new TypeToken<Map<String, Object>>() {}.getType());
+            String code = (String) inputMap.get("code");
+            String functionName = (String) inputMap.get("functionName");
+            Map<String, Object> input = (Map<String, Object>) inputMap.get("input");
 
-            // Find the method with the given name
-            for (Method m : solution.getClass().getMethods()) {
+            // Save the user's code to a .java file
+            File sourceFile = new File("Solution.java");
+            try (FileWriter writer = new FileWriter(sourceFile)) {
+                writer.write(code);
+            }
+
+            // Compile the .java file
+            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+            int compilationResult = compiler.run(null, null, null, sourceFile.getPath());
+            if (compilationResult != 0) {
+                System.err.println("Compilation failed.");
+                return;
+            }
+
+            // Load the compiled class
+            URLClassLoader classLoader = URLClassLoader.newInstance(new URL[]{new File("").toURI().toURL()});
+            Class<?> solutionClass = Class.forName("Solution", true, classLoader);
+            Object solutionInstance = solutionClass.getDeclaredConstructor().newInstance();
+
+            // Find the method
+            Method method = null;
+            for (Method m : solutionClass.getMethods()) {
                 if (m.getName().equals(functionName)) {
                     method = m;
                     break;
@@ -35,35 +58,17 @@ public class JavaRunner {
                 return;
             }
 
-            // Dynamically determine parameter types
-            Class<?>[] paramTypes = method.getParameterTypes();
-            Object[] params = new Object[paramTypes.length];
-            Map<String, Object> inputMap = gson.fromJson(jsonInput, new TypeToken<Map<String, Object>>() {}.getType());
-
-            // Get parameter names from the method signature if available (requires -parameters flag during compilation)
+            // Prepare arguments
+            Object[] params = new Object[method.getParameterCount()];
             java.lang.reflect.Parameter[] methodParameters = method.getParameters();
-
-            for (int i = 0; i < paramTypes.length; i++) {
+            for (int i = 0; i < method.getParameterCount(); i++) {
                 String paramName = methodParameters[i].getName();
-                Object value = inputMap.get(paramName);
-
-                if (paramTypes[i] == int.class) {
-                    params[i] = ((Double) value).intValue();
-                } else if (paramTypes[i] == int[].class) {
-                    List<Double> list = (List<Double>) value;
-                    params[i] = list.stream().mapToInt(Double::intValue).toArray();
-                } else if (paramTypes[i] == String.class) {
-                    params[i] = value;
-                } else if (paramTypes[i] == String[].class) {
-                    List<String> list = (List<String>) value;
-                    params[i] = list.toArray(new String[0]);
-                } else {
-                    // Add more type conversions as needed
-                    params[i] = gson.fromJson(gson.toJson(value), paramTypes[i]);
-                }
+                Object value = input.get(paramName);
+                params[i] = gson.fromJson(gson.toJson(value), methodParameters[i].getType());
             }
 
-            Object result = method.invoke(solution, params);
+            // Invoke the method
+            Object result = method.invoke(solutionInstance, params);
             System.out.println(gson.toJson(result));
 
         } catch (Exception e) {
