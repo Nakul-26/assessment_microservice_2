@@ -75,6 +75,7 @@ services:
       - rabbitmq
       - mongo
       - redis
+    privileged: true
   judge-python:
     build:
       context: .

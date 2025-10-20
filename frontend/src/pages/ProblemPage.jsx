@@ -14,8 +14,7 @@ const ProblemPage = () => {
         const fetchProblem = async () => {
             console.log(`Fetching problem with id: ${id}`);
             try {
-                    const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
-                    const res = await axios.get(`${base}/api/problems/${id}`);
+                    const res = await axios.get(`/api/problems/${id}`);
                 setProblem(res.data);
                 // Set initial code based on fetched problem's boilerplate for the selected language
                 if (res.data.functionSignatures && res.data.functionSignatures[selectedLanguage]) {
@@ -51,8 +50,7 @@ const ProblemPage = () => {
     const checkStatus = async (submissionId) => {
         console.log(`Checking status for submission: ${submissionId}`);
         try {
-                const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
-                const res = await axios.get(`${base}/api/submissions/${submissionId}`);
+                const res = await axios.get(`/api/submissions/${submissionId}`);
             const currentSubmission = res.data;
             setSubmission(currentSubmission);
             console.log('Submission status updated:', currentSubmission);
@@ -84,8 +82,7 @@ const ProblemPage = () => {
         try {
             console.log('Submitting code...', payload);
             setSubmission({ status: 'Submitting...', output: '' });
-                const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
-                const res = await axios.post(`${base}/api/submit`, payload);
+                const res = await axios.post(`/api/submit`, payload);
             const newSubmission = res.data;
             setSubmission(newSubmission);
             console.log('Submission successful:', newSubmission);

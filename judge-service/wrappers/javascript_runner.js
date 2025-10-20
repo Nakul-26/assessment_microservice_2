@@ -1,39 +1,38 @@
 import fs from 'fs';
-import path from 'path';
-import { exec } from 'child_process';
+import { VM } from 'vm2';
 
 async function main() {
-    const userCodePath = process.argv[2];
-    const functionName = process.argv[3];
-    const argsJson = process.argv[4];
+    const inputJson = process.argv[2];
 
-    if (!userCodePath || !functionName || !argsJson) {
-        console.error('Usage: node javascript_runner.js <userCodePath> <functionName> <argsJson>');
+    if (!inputJson) {
+        console.error('Usage: node javascript_runner.js <inputJson>');
         process.exit(1);
     }
 
     try {
-        const userCode = fs.readFileSync(userCodePath, 'utf8').replace(/\\n/g, '\n');
+        const { code, functionName, input } = JSON.parse(inputJson);
+
+        const vm = new VM({
+            timeout: 1000,
+            sandbox: {
+                console: {
+                    log: (...args) => {
+                        // Intercept console.log and stringify the output
+                        const output = args.map(arg => JSON.stringify(arg)).join(' ');
+                        process.stdout.write(output);
+                    }
+                }
+            }
+        });
 
         const script = `
-${userCode}
-
-const args = ${argsJson};
-const result = ${functionName}(...Object.values(args));
-console.log(JSON.stringify(result));
+${code}
+const result = ${functionName}(...Object.values(input));
+JSON.stringify(result);
 `;
 
-        const tempScriptPath = path.join(path.dirname(userCodePath), `runner_${Date.now()}.js`);
-        fs.writeFileSync(tempScriptPath, script);
-
-        exec(`node ${tempScriptPath}`, (error, stdout, stderr) => {
-            fs.unlinkSync(tempScriptPath);
-            if (error) {
-                console.error(stderr);
-                process.exit(1);
-            }
-            console.log(stdout);
-        });
+        const result = vm.run(script);
+        console.log(result);
 
     } catch (error) {
         console.error(error.message);
