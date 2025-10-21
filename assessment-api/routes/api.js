@@ -49,23 +49,43 @@ router.get('/problems/:id', async (req, res) => {
 // @desc    Submit code for a problem asynchronously
 router.post('/submit', async (req, res) => {
     const { problemId, code, language } = req.body;
+    console.log(`Received submission for problem ID: ${problemId}`);
+    console.log(`Code length: ${code.length} characters`);
+    console.log(`Language: ${language}`);
+    console.log(`Request bode:`, req.body);
 
     try {
         // 1. Create submission with "Pending" status
-        const submission = new Submission({ 
-            problem: problemId, 
-            code, 
-            language, 
-            status: 'Pending' 
+        const submission = new Submission({
+            problem: problemId,
+            code,
+            language,
+            status: 'Pending'
         });
         await submission.save();
 
-        // 2. Publish submission ID to RabbitMQ
+        // Fetch the problem to get test cases
+        const problem = await Problem.findById(problemId);
+        console.log(`Fetched problem for submission ID ${submission._id}:`, problem);
+        if (!problem) {
+            return res.status(404).json({ msg: 'Problem not found' });
+        }
+
+        // 2. Publish submission details to RabbitMQ
         const connection = await amqp.connect(RABBITMQ_URI);
         const channel = await connection.createChannel();
         await channel.assertQueue(QUEUE_NAME, { durable: true });
-        channel.sendToQueue(QUEUE_NAME, Buffer.from(submission._id.toString()), { persistent: true });
-        
+
+        const messageBody = {
+            submissionId: submission._id.toString(),
+            problemId: problem._id.toString(),
+            language,
+            code,
+            tests: problem.testCases // Include test cases
+        };
+
+        channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(messageBody)), { persistent: true });
+
         console.log(`Sent submission ID ${submission._id} to queue.`);
         await channel.close();
         await connection.close();

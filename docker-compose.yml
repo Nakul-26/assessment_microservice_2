@@ -23,6 +23,11 @@ services:
       - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
 
   # 3. Infrastructure: MongoDB Database Service
   mongo:
@@ -51,43 +56,37 @@ services:
       - REDIS_URI=redis://redis:6379
       - RABBITMQ_URI=amqp://user:password@rabbitmq:5672
     depends_on:
-      - redis
-      - rabbitmq
-      - mongo
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mongo:
+        condition: service_started
 
   # 5. Backend Service: Judge Service
   judge-service:
     build:
       context: ./judge-service
       dockerfile: Dockerfile
+      args:
+        DOCKER_GID: ${DOCKER_GID}
     container_name: codespace_judge_service
     command: npm run dev
     volumes:
       - ./judge-service:/usr/src/app
       - /usr/src/app/node_modules
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./judge-service/temp:/usr/src/app/temp
     environment:
       - MONGO_URI=mongodb://mongo:27017/assessment_db
-      - RABBITMQ_URI=amqp://user:password@rabbitmq:5672
+      - RABBITMQ_URL=amqp://user:password@rabbitmq:5672
       - REDIS_URI=redis://redis:6379
     depends_on:
-      - rabbitmq
-      - mongo
-      - redis
-    privileged: true
-  judge-python:
-    build:
-      context: .
-      dockerfile: judge-service/runtimes/python.Dockerfile
-  judge-javascript:
-    build:
-      context: .
-      dockerfile: judge-service/runtimes/javascript.Dockerfile
-  judge-java:
-    build:
-      context: .
-      dockerfile: judge-service/runtimes/java.Dockerfile
+      rabbitmq:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_started
 
   frontend:
     build:

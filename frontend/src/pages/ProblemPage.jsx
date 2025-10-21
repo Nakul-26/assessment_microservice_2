@@ -14,9 +14,9 @@ const ProblemPage = () => {
         const fetchProblem = async () => {
             console.log(`Fetching problem with id: ${id}`);
             try {
-                    const res = await axios.get(`/api/problems/${id}`);
+                const res = await axios.get(`/api/problems/${id}`);
                 setProblem(res.data);
-                // Set initial code based on fetched problem's boilerplate for the selected language
+                // Set initial code based on fetched problem's function signature for the selected language
                 if (res.data.functionSignatures && res.data.functionSignatures[selectedLanguage]) {
                     setCode(res.data.functionSignatures[selectedLanguage]);
                 } else {
@@ -36,9 +36,9 @@ const ProblemPage = () => {
                 clearInterval(intervalRef.current);
             }
         };
-    }, [id]);
+    }, [id, selectedLanguage]);
 
-    // Update code when selectedLanguage changes, using problem's boilerplates
+    // Update code when selectedLanguage changes, using problem's function signatures
     useEffect(() => {
         if (problem && problem.functionSignatures && problem.functionSignatures[selectedLanguage]) {
             setCode(problem.functionSignatures[selectedLanguage]);
@@ -82,7 +82,8 @@ const ProblemPage = () => {
         try {
             console.log('Submitting code...', payload);
             setSubmission({ status: 'Submitting...', output: '' });
-                const res = await axios.post(`/api/submit`, payload);
+            const res = await axios.post(`/api/submit`, payload);
+            console.log('Code submitted, response:', res);
             const newSubmission = res.data;
             setSubmission(newSubmission);
             console.log('Submission successful:', newSubmission);
