@@ -1,11 +1,11 @@
 {
   "name": "judge-service",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node worker.js",
-    "dev": "nodemon --config nodemon.json worker.js"
+    "start": "node src/index.js",
+    "dev": "nodemon --config nodemon.json src/index.js"
   },
   "keywords": [],
   "author": "",
@@ -14,11 +14,14 @@
   "description": "",
   "dependencies": {
     "amqplib": "^0.10.9",
+    "dockerode": "^3.3.0",
     "dotenv": "^17.2.3",
+    "fs-extra": "^11.1.1",
     "lodash.isequal": "^4.5.0",
     "mongoose": "^8.19.0",
     "redis": "^5.8.3",
-    "vm2": "^3.9.19"
+    "tar-stream": "^3.1.7",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

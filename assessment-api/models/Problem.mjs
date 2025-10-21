@@ -31,7 +31,7 @@ const ProblemSchema = new Schema({
     functionSignatures: {
         type: Map,
         of: String,
-        default: {}
+        required: true
     },
 
 });
