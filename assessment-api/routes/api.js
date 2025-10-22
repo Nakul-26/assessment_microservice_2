@@ -45,6 +45,19 @@ router.get('/problems/:id', async (req, res) => {
     }
 });
 
+// @route   POST /api/problems
+// @desc    Create a new problem
+router.post('/problems', async (req, res) => {
+    try {
+        const newProblem = new Problem(req.body);
+        const problem = await newProblem.save();
+        res.status(201).json({ message: 'Problem created successfully', problem: problem });
+    } catch (err) {
+        console.error('Error creating problem:', err);
+        res.status(500).send('Server Error');
+    }
+});
+
 // @route   POST /api/submit
 // @desc    Submit code for a problem asynchronously
 router.post('/submit', async (req, res) => {
@@ -109,21 +122,26 @@ router.get('/submissions/:id', async (req, res) => {
         const cachedResult = await redisClient.get(`submission:${id}`);
         if (cachedResult) {
             console.log(`Cache hit for submission: ${id}`);
+            console.log('Cached result:', cachedResult);
+            console.log('Returning cached result for submission:', id);
+            console.log('Parsed cached result:', JSON.parse(cachedResult));
             return res.json(JSON.parse(cachedResult));
         }
 
         // 2. If not in cache, get from MongoDB
         console.log(`Cache miss for submission: ${id}. Checking DB.`);
         const submission = await Submission.findById(id);
+        console.log('Submission fetched from DB:', submission);
         if (!submission) {
             return res.status(404).json({ msg: 'Submission not found' });
         }
 
+        console.log('Submission status:', submission.status);
         // Optional: Cache the result if it's final (Success/Fail)
         if (submission.status === 'Success' || submission.status === 'Fail') {
             await redisClient.set(`submission:${id}`, JSON.stringify(submission), { EX: 3600 }); // Cache for 1 hour
         }
-
+        // console.log('Submission fetched from DB:', submission);
         res.json(submission);
 
     } catch (err) {

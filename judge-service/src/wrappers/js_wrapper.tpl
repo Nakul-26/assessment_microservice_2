@@ -27,7 +27,7 @@ async function runTests(solution) {
 }
 
 // Inject user code here
-# USER_CODE_MARKER
+// USER_CODE_MARKER
 
 (async () => {
   if (typeof solution !== "function") {

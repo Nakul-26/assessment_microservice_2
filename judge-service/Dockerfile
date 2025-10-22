@@ -5,8 +5,8 @@ ARG DOCKER_GID=103 # Default to 103, but will be overridden by build-arg
 # Create non-root user for this service
 RUN addgroup -S judge && adduser -S judge -G judge
 # Create docker group with host's docker GID and add judge user to it
-
-
+RUN addgroup -g ${DOCKER_GID} docker
+RUN adduser judge docker
 WORKDIR /usr/src/app
 
 # Copy package.json and package-lock.json first to leverage Docker cache
