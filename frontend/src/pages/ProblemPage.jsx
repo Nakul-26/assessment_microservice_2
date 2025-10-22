@@ -50,8 +50,11 @@ const ProblemPage = () => {
     const checkStatus = async (submissionId) => {
         console.log(`Checking status for submission: ${submissionId}`);
         try {
-                const res = await axios.get(`/api/submissions/${submissionId}`);
+            const res = await axios.get(`/api/submissions/${submissionId}`);
+            console.log('Status response:', res);
             const currentSubmission = res.data;
+            console.log('Current submission status:', currentSubmission.status);
+            console.log('Current submission output:', currentSubmission.output);
             setSubmission(currentSubmission);
             console.log('Submission status updated:', currentSubmission);
 
@@ -70,6 +73,7 @@ const ProblemPage = () => {
     const handleSubmit = async () => {
         if (intervalRef.current) {
             console.warn('Submission already in progress.');
+            console.log('Please wait for the current submission to complete.');
             return;
         }
 
@@ -83,6 +87,7 @@ const ProblemPage = () => {
             console.log('Submitting code...', payload);
             setSubmission({ status: 'Submitting...', output: '' });
             const res = await axios.post(`/api/submit`, payload);
+            
             console.log('Code submitted, response:', res);
             const newSubmission = res.data;
             setSubmission(newSubmission);

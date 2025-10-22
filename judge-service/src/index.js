@@ -5,6 +5,7 @@ import { RABBITMQ } from "./config.js";
 import { runSubmission } from "./executor.js";
 import pythonLang from "./languages/python.js";
 import jsLang from "./languages/javascript.js";
+import javaLang from "./languages/java.js";
 
 // Assuming models are still in judge-service/models for now
 import Problem from '../models/Problem.js';
@@ -18,7 +19,8 @@ redisClient.on('error', (err) => console.log('❌ Redis Client Error', err));
 
 const LANGS = {
   python: pythonLang,
-  javascript: jsLang
+  javascript: jsLang,
+  java: javaLang
 };
 
 async function start() {
@@ -59,6 +61,7 @@ async function start() {
 
       console.log(`Processing submission: ${submissionId}`);
       const submission = await Submission.findById(submissionId).populate('problem');
+      console.log('Fetched submission from DB:', submission);
       if (!submission) {
           console.error(`❌ Submission with ID ${submissionId} not found.`);
           ch.ack(msg);
@@ -80,10 +83,21 @@ async function start() {
       await submission.save();
 
       const lang = LANGS[langId];
+      console.log(`Using language: ${langId}`);
       if (!lang) throw new Error(`Unsupported language: ${langId}`);
 
       // run
-      const out = await runSubmission({ language: lang, userCode: code, tests: problem.testCases, timeoutMs: undefined });
+      console.log(`Running submission ${submissionId}`);
+      console.log(`Test cases: ${JSON.stringify(problem.testCases)}`);
+      console.log(`User code: ${code}`);
+      console.log(`Language config: ${JSON.stringify(lang)}`);
+      console.log(`Timeout: ${undefined}`);
+      const funcNameMatch = problem.functionSignatures.get(langId).match(/def (.*?)\(/);
+      const funcName = funcNameMatch ? funcNameMatch[1] : null;
+
+      const out = await runSubmission({ language: lang, userCode: code, tests: problem.testCases, timeoutMs: undefined, funcName: funcName });
+
+      console.log(`Execution result for submission ${submissionId}:`, out);
 
       // assemble result
       const resultMsg = {
@@ -95,18 +109,44 @@ async function start() {
 
       // Update submission status based on execution result
       if (out.status === "ok" && out.result && out.result.status === "finished") {
+        console.log('All tests executed. Processing results...');
+        console.log('Judge output:', out);
+        console.log('Judge result:', out.rawOutput);
+        console.log('parsed raw output:', JSON.stringify(out.rawOutput));
+        console.log('Judge raw output passed:', out.rawOutput.passed);
+        console.log('Judge raw output total:', out.rawOutput.total);
         const passed = out.result.passed;
         const total = out.result.total;
         submission.status = (passed === total) ? 'Success' : 'Fail';
-        submission.output = JSON.stringify(out.result.details);
+        submission.testResult = out.result; // Store the full structured result
+        submission.output = out.rawOutput; // Store the raw output
+        console.log(`Tests passed: ${passed}/${total}`);
+        console.log('Submission output:', submission.output);
+        console.log('Submission testResult:', submission.testResult);
+        console.log(`Updated submission ${submissionId} status to ${submission.status}`);
+        console.log('Result message to be sent:', resultMsg);
+        console.log('Raw output from judge:', out.rawOutput);
+        console.log('Structured result from judge:', out.result);
+        console.log('123 - submissions:', submission);
       } else if (out.status === "timeout") {
         submission.status = 'Timeout';
         submission.output = out.message;
+        submission.testResult = null; // Clear testResult for timeouts
       } else {
         submission.status = 'Error';
+        console.log('Judge error output:', out);
         submission.output = `Error: ${out.message || JSON.stringify(out)}. Raw Output: ${out.rawOutput}`;
+        submission.testResult = null; // Clear testResult for errors
       }
       await submission.save();
+      console.log("write to redis");
+      console.log('Updated submission in DB:', submission);
+      console.log('Storing updated submission in Redis cache');
+      console.log(`parsed submission:${submissionId}:`, JSON.stringify(submission));
+      console.log('submission output:', submission.output);
+      console.log('submission status:', submission.status);
+      console.log('parsed submission outpur:', JSON.stringify(submission.output));
+      console.log(`Updated submission ${submissionId} status to ${submission.status}`);
       await redisClient.set(`submission:${submissionId}`, JSON.stringify(submission), { EX: 3600 });
 
       // publish to results queue

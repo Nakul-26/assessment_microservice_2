@@ -5,7 +5,7 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { SANDBOX } from "./config.js";
 import tar from "tar-stream"; // New import
-import { Readable } from "stream"; // New import
+import { Readable, PassThrough } from "stream"; // New import
 
 const docker = new Docker();
 
@@ -24,14 +24,15 @@ function pullImage(image) {
 }
 
 function safeParseJSONFromOutput(output) {
-  const jsonMatches = output.match(/\{[\s\S]*?\}/g); // Match JSON objects
-  if (jsonMatches) {
-    // return last valid JSON
-    for (let i = jsonMatches.length - 1; i >= 0; i--) {
-      try {
-        return JSON.parse(jsonMatches[i]);
-      } catch {}
+  try {
+    const firstBrace = output.indexOf('{');
+    const lastBrace = output.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const jsonString = output.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonString);
     }
+  } catch (e) {
+    // ignore
   }
   return null;
 }
@@ -45,7 +46,15 @@ function safeParseJSONFromOutput(output) {
  *  - tests: array of { input: [...], expected: ... }
  *  - timeoutMs: optional override
  */
-export async function runSubmission({ language, userCode, tests = [], timeoutMs }) {
+export async function runSubmission({ language, userCode, tests = [], timeoutMs, funcName }) {
+  console.log('runSubmission called with language:', language);
+  console.log('Number of tests:', tests.length);
+  console.log('Timeout (ms):', timeoutMs);
+  console.log('SANDBOX config:', SANDBOX);
+  console.log('User code length:', userCode.length);
+  console.log('user code:', userCode);
+  console.log('Tests:', tests);
+
   const id = uuidv4();
   // No tmpDir creation on host
 
@@ -55,25 +64,37 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs 
 
     // Load wrapper template
     const wrapperTpl = await fs.readFile(path.join(process.cwd(), "src", "wrappers", language.wrapperTemplate), "utf8");
+    console.log('Loaded wrapper template:', language.wrapperTemplate);
+    console.log('Wrapper template length:', wrapperTpl.length);
+    console.log('Wrapper template content:', wrapperTpl);
+    console.log('process.cwd():', process.cwd());
+    console.log('path to wrapper:', path.join(process.cwd(), "src", "wrappers", language.wrapperTemplate));
+    console.log("--------------------------------------------------");
     // replace TESTS_JSON placeholder safely
-    const testsJson = JSON.stringify(tests);
+    let testsJson = JSON.stringify(tests);
     // Inject export automatically
     // Wrap user's code to export `solution`
     // Wrap user code safely
-    const exportedUserCode = `${userCode.trim()};
-    // Ensure solution is exported
-    const solution = userFunction;
-    module.exports = { solution };
-    `;
+    let codeToInject = userCode;
+    if (language.id === 'javascript') {
+        codeToInject = `${userCode.trim()};\n    // Ensure solution is exported\n    const solution = userFunction;\n    module.exports = { solution };\n    `;
+    } else if (language.id === 'python' && funcName) {
+        codeToInject = `${userCode.trim()}\n\nsolution = ${funcName}`;
+    }
 
-    // Merge with wrapper
+    console.log('Code to inject:', codeToInject);
+
+    const marker = language.id === 'python' ? '# USER_CODE_MARKER' : '// USER_CODE_MARKER';
+    // let testsJson = JSON.stringify(tests);
+    if (language.id === 'java') {
+        testsJson = testsJson.replace(/"/g, '\\"');
+    }
     const finalCode = wrapperTpl
-      .replace("{{TESTS_JSON}}", JSON.stringify(tests))
-      .replace("// USER_CODE_MARKER", exportedUserCode);
+      .replace("{{TESTS_JSON}}", testsJson)
+      .replace(marker, codeToInject);
 
-    // Optional: debug merged code
-    await fs.writeFile(path.join(process.cwd(), "finalCode.js"), finalCode, "utf8");
-    console.log("Final code:\n", finalCode);
+    console.log('Final code length:', finalCode.length);
+    console.log('Final code content:', finalCode);
 
     const pidsLimit = SANDBOX.PIDS_LIMIT;
     const timeout = timeoutMs || SANDBOX.TIMEOUT_MS;
@@ -82,7 +103,7 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs 
     // Check if image exists, pull if not
     // usage
     try {
-      await docker.getImage(language.image).inspect();
+      docker.getImage(language.image).inspect();
     } catch (e) {
       if (e.statusCode === 404) {
         console.log(`Pulling Docker image: ${language.image}`);
@@ -92,7 +113,6 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs 
         throw e;
       }
     }
-
 
     // Check if image exists, pull if not
     // try {
@@ -108,10 +128,17 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs 
     //   }
     // }
 
+    const args = [];
+    if (language.id === 'java') {
+        for (const test of tests) {
+            args.push(test.input.num1, test.input.num2, test.expectedOutput);
+        }
+    }
+
     const createOpts = {
       Image: language.image,
       WorkingDir: '/app',
-      Cmd: language.runCmd(fileName),
+      Cmd: language.runCmd(fileName, args),
       AttachStdin: false,
       AttachStdout: true,
       AttachStderr: true,
@@ -147,21 +174,26 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs 
     // stream output with a cap
     let output = "";
     let outputBytes = 0;
-    const onData = (chunk) => {
-      if (outputBytes >= MAX_OUTPUT_BYTES) return;
-      const s = chunk.toString();
-      const newBytes = Buffer.byteLength(s);
-      if (outputBytes + newBytes > MAX_OUTPUT_BYTES) {
-        // append only remaining slice
-        const allowed = MAX_OUTPUT_BYTES - outputBytes;
-        output += s.slice(0, allowed);
-        outputBytes = MAX_OUTPUT_BYTES;
-      } else {
-        output += s;
-        outputBytes += newBytes;
-      }
-    };
-    stream.on("data", onData);
+    const outputStream = new PassThrough();
+
+    outputStream.on('data', (chunk) => {
+        if (outputBytes >= MAX_OUTPUT_BYTES) return;
+        const newBytes = chunk.length;
+        if (outputBytes + newBytes > MAX_OUTPUT_BYTES) {
+            const allowed = MAX_OUTPUT_BYTES - outputBytes;
+            output += chunk.slice(0, allowed).toString('utf-8');
+            outputBytes = MAX_OUTPUT_BYTES;
+        } else {
+            output += chunk.toString('utf-8');
+            outputBytes += newBytes;
+        }
+    });
+
+    console.log('Starting container...');
+    console.log('Created container, attaching to output stream...');
+
+    console.log('Attaching to container output stream');
+    docker.modem.demuxStream(stream, outputStream, outputStream);
 
     // enforce timeout
     let timedOut = false;
@@ -185,10 +217,10 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs 
     try { stream.removeAllListeners("data"); } catch (e) {}
 
     // grab logs too (in-case something remained)
-    try {
-      const logs = await container.logs({ stdout: true, stderr: true, timestamps: false });
-      onData(logs.toString());
-    } catch (e) {}
+    // try {
+    //   const logs = await container.logs({ stdout: true, stderr: true, timestamps: false });
+    //   onData(logs.toString());
+    // } catch (e) {}
 
     if (waitRes.timedOut) {
       return {
@@ -200,6 +232,8 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs 
 
     // parse last JSON from output
     const parsed = safeParseJSONFromOutput(output);
+    console.log('Raw output from container:', output);
+    console.log('Parsed output from container:', parsed);
 
     if (parsed) {
       // If parsed looks like a single test instead of full summary, check wrapper
