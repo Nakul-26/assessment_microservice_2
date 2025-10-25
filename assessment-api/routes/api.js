@@ -94,7 +94,8 @@ router.post('/submit', async (req, res) => {
             problemId: problem._id.toString(),
             language,
             code,
-            tests: problem.testCases // Include test cases
+            tests: problem.testCases, // Include test cases
+            // functionName: problem.functionName.get(language) // Include function name for the specific language
         };
 
         channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(messageBody)), { persistent: true });

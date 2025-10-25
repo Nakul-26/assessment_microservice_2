@@ -11,6 +11,12 @@ const docker = new Docker();
 
 const MAX_OUTPUT_BYTES = SANDBOX.MAX_STDOUT_BYTES;
 
+function getType(value) {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    return typeof value;
+}
+
 function pullImage(image) {
   return new Promise((resolve, reject) => {
     docker.pull(image, (err, stream) => {
@@ -25,17 +31,27 @@ function pullImage(image) {
 
 function safeParseJSONFromOutput(output) {
   try {
-    const firstBrace = output.indexOf('{');
-    const lastBrace = output.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      const jsonString = output.substring(firstBrace, lastBrace + 1);
-      return JSON.parse(jsonString);
+    // Match all JSON-looking blocks in the output
+    const matches = output.match(/\{[\s\S]*?\}/g);
+    console.log("Detected JSON-like blocks:", matches);
+
+    if (!matches || matches.length === 0) return null;
+
+    // Try to parse from the last to the first, return first valid JSON
+    for (let i = matches.length - 1; i >= 0; i--) {
+      try {
+        const parsed = JSON.parse(matches[i]);
+        return parsed;
+      } catch (e) {
+        continue;
+      }
     }
   } catch (e) {
     // ignore
   }
   return null;
 }
+
 
 
 /**
@@ -54,6 +70,44 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs,
   console.log('User code length:', userCode.length);
   console.log('user code:', userCode);
   console.log('Tests:', tests);
+
+  // Type validation based on meta data
+  for (const test of tests) {
+      if (test.meta && test.meta.types) {
+          const expectedTypes = test.meta.types;
+          let actualTypes = [];
+
+          if (language.id === 'javascript') {
+              // For JS, input is an array of arguments or a single argument
+              const inputArgs = Array.isArray(test.input) ? test.input : [test.input];
+              actualTypes = inputArgs.map(arg => getType(arg));
+          } else if (language.id === 'python') {
+              // For Python, input is an object of keyword arguments
+              // We need to get types of values in the order they are expected
+              // This assumes the order of keys in test.input matches the order of expectedTypes
+              // A more robust solution might require parameter names in meta.types
+              actualTypes = Object.values(test.input).map(arg => getType(arg));
+          }
+
+          if (expectedTypes.length !== actualTypes.length) {
+              return {
+                  status: "error",
+                  message: `Type mismatch in test case: Expected ${expectedTypes.length} arguments, got ${actualTypes.length}.`,
+                  rawOutput: ""
+              };
+          }
+
+          for (let i = 0; i < expectedTypes.length; i++) {
+              if (expectedTypes[i] !== actualTypes[i]) {
+                  return {
+                      status: "error",
+                      message: `Type mismatch in test case: Argument ${i + 1} expected type ${expectedTypes[i]}, got ${actualTypes[i]}.`,
+                      rawOutput: ""
+                  };
+              }
+          }
+      }
+  }
 
   const id = uuidv4();
   // No tmpDir creation on host
@@ -77,9 +131,13 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs,
     // Wrap user code safely
     let codeToInject = userCode;
     if (language.id === 'javascript') {
-        codeToInject = `${userCode.trim()};\n    // Ensure solution is exported\n    const solution = userFunction;\n    module.exports = { solution };\n    `;
+        codeToInject = `${userCode.trim()};\n    // Ensure solution is exported\n    const ${funcName} = userFunction;\n    module.exports = { ${funcName} };\n    `;
     } else if (language.id === 'python' && funcName) {
         codeToInject = `${userCode.trim()}\n\nsolution = ${funcName}`;
+    } else if (language.id === 'java' && funcName) {
+        // For Java, the function name is used within the wrapper, not directly injected here
+        // We will replace a placeholder in the Java wrapper template later
+        codeToInject = userCode.trim();
     }
 
     console.log('Code to inject:', codeToInject);
@@ -89,9 +147,14 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs,
     if (language.id === 'java') {
         testsJson = testsJson.replace(/"/g, '\\"');
     }
-    const finalCode = wrapperTpl
+    let finalCode = wrapperTpl
       .replace("{{TESTS_JSON}}", testsJson)
       .replace(marker, codeToInject);
+
+    if (language.id === 'java') {
+        finalCode = finalCode.replace(/\{\{FUNCTION_NAME\}\}/g, funcName);
+        finalCode = finalCode.replace(/\{\{CLASS_NAME\}\}/g, funcName); // Assuming class name is same as function name for now
+    }
 
     console.log('Final code length:', finalCode.length);
     console.log('Final code content:', finalCode);

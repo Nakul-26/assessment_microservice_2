@@ -25,10 +25,19 @@ const ProblemSchema = new Schema({
             expectedOutput: {
                 type: Schema.Types.Mixed,
                 required: true
+            },
+            meta: {
+                types: [String],
+                returns: String
             }
         }
     ],
     functionSignatures: {
+        type: Map,
+        of: String,
+        required: true
+    },
+    functionName: {
         type: Map,
         of: String,
         required: true
