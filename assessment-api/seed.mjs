@@ -1,6 +1,6 @@
+import 'dotenv/config';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-
 dotenv.config();
 
 const dbURI = process.env.MONGO_URI;
@@ -58,10 +58,16 @@ const sampleProblems = [
             }
         ],
         functionSignatures: {
-            javascript: `function userFunction(input) {\n  const { nums, target } = input;\n  // Write your code here\n}`,
+            javascript: `function twoSum(nums, target) {\n  // Write your code here\n}`,
             python: `def two_sum(nums, target):\n  # Write your code here`,
             java: `class Solution {\n    public int[] twoSum(int[] nums, int target) {\n        // Write your code here\n    }\n}`,
             cpp: `vector<int> twoSum(vector<int>& nums, int target) {\n    // Write your code here\n}`
+        },
+        functionName: {
+            javascript: "twoSum",
+            python: "two_sum",
+            java: "twoSum",
+            cpp: "twoSum"
         }
     },
     {
@@ -79,10 +85,16 @@ const sampleProblems = [
             }
         ],
         functionSignatures: {
-            javascript: `function userFunction(input) {\n  const { num1, num2 } = input;\n  // Write your code here\n}`,
+            javascript: `function addTwoNumbers(num1, num2) {\n  // Write your code here\n}`,
             python: `def add_two_numbers(num1, num2):\n  # Write your code here`,
             java: `class Solution {\n    public int addTwoNumbers(int num1, int num2) {\n        // Write your code here\n    }\n}`,
             cpp: `int addTwoNumbers(int num1, int num2) {\n    // Write your code here\n}`
+        },
+        functionName: {
+            javascript: "addTwoNumbers",
+            python: "add_two_numbers",
+            java: "addTwoNumbers",
+            cpp: "addTwoNumbers"
         }
     },
     {
@@ -100,6 +112,12 @@ const sampleProblems = [
             python: `def greet(name):\n  # Write your code here`,
             java: `class Solution {\n    public String greet(String name) {\n        // Write your code here\n    }\n}`,
             cpp: `string greet(string name) {\n    // Write your code here\n}`
+        },
+        functionName: {
+            javascript: "greet",
+            python: "greet",
+            java: "greet",
+            cpp: "greet"
         }
     }
 ];
