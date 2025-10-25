@@ -92,10 +92,23 @@ async function start() {
       console.log(`User code: ${code}`);
       console.log(`Language config: ${JSON.stringify(lang)}`);
       console.log(`Timeout: ${undefined}`);
-      const funcNameMatch = problem.functionSignatures.get(langId).match(/def (.*?)\(/);
-      const funcName = funcNameMatch ? funcNameMatch[1] : null;
+      // Prefer functionName from message (API sends this)
+      const funcName = body.functionName 
+        || (problem.functionName ? problem.functionName.get(langId) : null)
+        || null;
 
-      const out = await runSubmission({ language: lang, userCode: code, tests: problem.testCases, timeoutMs: undefined, funcName: funcName });
+      if (!funcName) {
+        console.warn(`⚠️ No functionName found for language ${langId}.`);
+      }
+
+      const out = await runSubmission({
+        language: lang,
+        userCode: code,
+        tests: problem.testCases,
+        timeoutMs: undefined,
+        funcName
+      });
+
 
       console.log(`Execution result for submission ${submissionId}:`, out);
 

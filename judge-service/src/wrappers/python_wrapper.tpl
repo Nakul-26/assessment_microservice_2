@@ -27,7 +27,7 @@ def run_tests():
     results = []
     for i, t in enumerate(tests):
         try:
-            out = solution(**t.get("input", {}))
+            out = {{FUNCTION_NAME}}(**t.get("input", {}))
             ok = out == t.get("expectedOutput")
             results.append({"test": i+1, "ok": ok, "output": out})
         except Exception as e:

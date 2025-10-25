@@ -113,6 +113,17 @@ const ProblemPage = () => {
         <div>
             <h2>{problem.title}</h2>
             <p>{problem.description}</p>
+            {problem.testCases && problem.testCases.length > 0 && problem.testCases[0].meta && (
+                <div>
+                    <h4>Type Hints:</h4>
+                    {problem.testCases[0].meta.types && (
+                        <p>Input Types: {problem.testCases[0].meta.types.join(', ')}</p>
+                    )}
+                    {problem.testCases[0].meta.returns && (
+                        <p>Return Type: {problem.testCases[0].meta.returns}</p>
+                    )}
+                </div>
+            )}
             <textarea 
                 value={code} 
                 onChange={(e) => setCode(e.target.value)} 

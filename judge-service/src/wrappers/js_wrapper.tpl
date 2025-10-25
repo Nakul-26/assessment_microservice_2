@@ -1,12 +1,13 @@
+const path = require('path');
 const tests = {{TESTS_JSON}};
 
-async function runTests(solution) {
+async function runTests(userFunction) {
   const results = [];
   for (let i = 0; i < tests.length; ++i) {
     const t = tests[i];
     try {
       const input = Array.isArray(t.input) ? t.input : [t.input];
-      const out = await solution(...input);
+      const out = await userFunction(...input);
       const ok = JSON.stringify(out) === JSON.stringify(t.expectedOutput);
       results.push({ test: i + 1, ok, output: out });
     } catch (err) {
@@ -22,17 +23,20 @@ async function runTests(solution) {
   };
 
   console.log(JSON.stringify(summary));
-
-  process.stdout.write(""); // flush
+  process.stdout.write("");
 }
 
-// Inject user code here
 // USER_CODE_MARKER
 
 (async () => {
-  if (typeof solution !== "function") {
-    console.log(JSON.stringify({ status: "error", message: "No solution function exported" }));
+  const submissionPath = path.join(__dirname, 'submission.js');
+  const { {{FUNCTION_NAME}} } = require(submissionPath);
+
+  if (typeof {{FUNCTION_NAME}} !== "function") {
+    console.log(JSON.stringify({ status: "error", message: "No {{FUNCTION_NAME}} function exported" }));
     process.exit(1);
   }
-  await runTests(solution);
+
+  const testedFunction = {{FUNCTION_NAME}}; // ✅ avoid name clash
+  await runTests(testedFunction);
 })();
