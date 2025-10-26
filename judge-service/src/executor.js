@@ -130,10 +130,26 @@ export async function runSubmission({ language, userCode, tests = [], timeoutMs,
     // Wrap user's code to export `solution`
     // Wrap user code safely
     let codeToInject = userCode;
-    if (language.id === 'javascript') {
-        codeToInject = `${userCode.trim()};\n    // Ensure solution is exported\n    const ${funcName} = userFunction;\n    module.exports = { ${funcName} };\n    `;
+  if (language.id === 'javascript') {
+    // Try to detect function name from the user's code when funcName isn't provided
+    function detectNameFromCode(code) {
+      if (!code) return null;
+      let m = code.match(/function\s+([A-Za-z0-9_]+)/);
+      if (m && m[1]) return m[1];
+      m = code.match(/const\s+([A-Za-z0-9_]+)\s*=\s*\(|let\s+([A-Za-z0-9_]+)\s*=\s*\(|var\s+([A-Za-z0-9_]+)\s*=\s*\(/);
+      if (m) {
+        for (let i = 1; i < m.length; ++i) if (m[i]) return m[i];
+      }
+      // arrow function assigned to name: const foo = (a,b) => { ... }
+      m = code.match(/([A-Za-z0-9_]+)\s*=\s*\([\s\S]*?=>/);
+      if (m && m[1]) return m[1];
+      return null;
+    }
+    const detected = detectNameFromCode(userCode);
+    const exportName = funcName || detected || 'solution';
+    codeToInject = `${userCode.trim()};\n    // Ensure solution is exported\n    module.exports = { ${exportName} };\n    `;
     } else if (language.id === 'python' && funcName) {
-        codeToInject = `${userCode.trim()}\n\nsolution = ${funcName}`;
+    codeToInject = `${userCode.trim()}\n\nsolution = ${funcName}`;
     } else if (language.id === 'java' && funcName) {
         // For Java, the function name is used within the wrapper, not directly injected here
         // We will replace a placeholder in the Java wrapper template later

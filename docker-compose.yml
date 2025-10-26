@@ -49,6 +49,7 @@ services:
       - "3000:3000"
     volumes:
       - ./assessment-api:/usr/src/app
+      - ./judge-service-go:/usr/src/app/judge-service-go:ro
       - /usr/src/app/node_modules
     environment:
       - MONGO_URI=mongodb://mongo:27017/assessment_db
@@ -64,22 +65,42 @@ services:
         condition: service_started
 
   # 5. Backend Service: Judge Service
-  judge-service:
+  # judge-service:
+  #   build:
+  #     context: ./judge-service
+  #     dockerfile: Dockerfile
+  #     args:
+  #       DOCKER_GID: 103
+  #   container_name: codespace_judge_service
+  #   command: npm run dev
+  #   volumes:
+  #     - ./judge-service:/usr/src/app
+  #     - /usr/src/app/node_modules
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   environment:
+  #     - MONGO_URI=mongodb://mongo:27017/assessment_db
+  #     - RABBITMQ_URL=amqp://user:password@rabbitmq:5672
+  #     - REDIS_URI=redis://redis:6379
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #     mongo:
+  #       condition: service_started
+  #     redis:
+  #       condition: service_started
+
+  judge-service-go:
     build:
-      context: ./judge-service
+      context: ./judge-service-go
       dockerfile: Dockerfile
-      args:
-        DOCKER_GID: ${DOCKER_GID}
-    container_name: codespace_judge_service
-    command: npm run dev
+    container_name: codespace_judge_service_go
     volumes:
-      - ./judge-service:/usr/src/app
-      - /usr/src/app/node_modules
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ./judge-service-go:/app
+      - /var/run/docker.sock:/var/run/docker.sock # Needed for Docker-in-Docker functionality
     environment:
       - MONGO_URI=mongodb://mongo:27017/assessment_db
       - RABBITMQ_URL=amqp://user:password@rabbitmq:5672
-      - REDIS_URI=redis://redis:6379
+      - REDIS_URI=redis:6379
     depends_on:
       rabbitmq:
         condition: service_healthy

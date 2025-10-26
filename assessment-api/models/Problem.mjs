@@ -2,6 +2,11 @@
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
+const InputParameterSchema = new Schema({
+    name: { type: String, required: true },
+    type: { type: String, required: true }
+}, { _id: false });
+
 const ProblemSchema = new Schema({
     title: {
         type: String,
@@ -18,6 +23,14 @@ const ProblemSchema = new Schema({
     },
     testCases: [
         {
+            id: {
+                type: Number,
+                required: true
+            },
+            type: {
+                type: String,
+                required: true
+            },
             input: {
                 type: Schema.Types.Mixed,
                 required: true
@@ -29,6 +42,10 @@ const ProblemSchema = new Schema({
             meta: {
                 types: [String],
                 returns: String
+            },
+            isHidden: {
+                type: Boolean,
+                default: false
             }
         }
     ],
@@ -41,6 +58,14 @@ const ProblemSchema = new Schema({
         type: Map,
         of: String,
         required: true
+    },
+    functionSignature: {
+        language: { type: String },
+        template: { type: String }
+    },
+    expectedIoType: {
+        inputParameters: [InputParameterSchema],
+        outputType: { type: String }
     },
 
 });

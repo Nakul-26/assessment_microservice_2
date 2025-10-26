@@ -1,0 +1,81 @@
+[
+  {
+    "title": "Sum of Two Numbers",
+    "description": "Write a function that takes two integers and returns their sum.",
+    "difficulty": "Easy",
+    "testCases": [
+      {
+        "id": 1,
+        "type": "example",
+        "input": { "arg0": 1, "arg1": 2 },
+        "expectedOutput": 3,
+        "isHidden": false
+      },
+      {
+        "id": 2,
+        "type": "example",
+        "input": { "arg0": 5, "arg1": -3 },
+        "expectedOutput": 2,
+        "isHidden": false
+      }
+    ],
+    "functionSignatures": {
+      "python": "def add(arg0, arg1):",
+      "javascript": "function add(arg0, arg1)"
+    },
+    "functionName": {
+      "python": "add",
+      "javascript": "add"
+    },
+    "functionSignature": {
+      "language": "python",
+      "template": "def add(arg0, arg1):"
+    },
+    "expectedIoType": {
+      "inputParameters": [
+        { "name": "arg0", "type": "integer" },
+        { "name": "arg1", "type": "integer" }
+      ],
+      "outputType": "integer"
+    }
+  },
+  {
+    "title": "Reverse a String",
+    "description": "Write a function that takes a string and returns its reverse.",
+    "difficulty": "Easy",
+    "testCases": [
+      {
+        "id": 1,
+        "type": "example",
+        "input": { "s": "hello" },
+        "expectedOutput": "olleh",
+        "isHidden": false
+      },
+      {
+        "id": 2,
+        "type": "example",
+        "input": { "s": "world" },
+        "expectedOutput": "dlrow",
+        "isHidden": false
+      }
+    ],
+    "functionSignatures": {
+      "python": "def reverseString(s):",
+      "javascript": "function reverseString(s)"
+    },
+    "functionName": {
+      "python": "reverseString",
+      "javascript": "reverseString"
+    },
+    "functionSignature": {
+      "language": "javascript",
+      "template": "function reverseString(s)"
+    },
+    "expectedIoType": {
+      "inputParameters": [
+        { "name": "s", "type": "string" }
+      ],
+      "outputType": "string"
+    }
+  }
+]

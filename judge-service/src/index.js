@@ -92,13 +92,33 @@ async function start() {
       console.log(`User code: ${code}`);
       console.log(`Language config: ${JSON.stringify(lang)}`);
       console.log(`Timeout: ${undefined}`);
-      // Prefer functionName from message (API sends this)
-      const funcName = body.functionName 
-        || (problem.functionName ? problem.functionName.get(langId) : null)
-        || null;
+      // Prefer functionName from message (API sends this); fall back to problem.functionName or functionSignatures
+      function extractNameFromSignature(sig) {
+        if (!sig || typeof sig !== 'string') return null;
+        // JS: function name (...) {  OR function name(...) {
+        let m = sig.match(/function\s+([A-Za-z0-9_]+)/);
+        if (m && m[1]) return m[1];
+        // Python: def name(
+        m = sig.match(/def\s+([A-Za-z0-9_]+)/);
+        if (m && m[1]) return m[1];
+        // Java: public .* name( ... )
+        m = sig.match(/\b([A-Za-z0-9_]+)\s*\(/);
+        if (m && m[1]) return m[1];
+        return null;
+      }
+
+      let funcName = body.functionName || null;
+      if (!funcName && problem.functionName) {
+        funcName = problem.functionName.get(langId) || null;
+      }
+      if (!funcName && problem.functionSignatures) {
+        const sig = problem.functionSignatures.get(langId) || problem.functionSignatures[langId];
+        funcName = extractNameFromSignature(sig) || null;
+      }
 
       if (!funcName) {
-        console.warn(`⚠️ No functionName found for language ${langId}.`);
+        console.warn(`⚠️ No functionName found for language ${langId}. Falling back to 'solution' which may fail if student's code uses a different name.`);
+        funcName = 'solution';
       }
 
       const out = await runSubmission({

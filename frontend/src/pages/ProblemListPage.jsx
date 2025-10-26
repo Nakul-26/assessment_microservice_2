@@ -10,9 +10,9 @@ const ProblemListPage = () => {
         const fetchProblems = async () => {
             console.log('Fetching problems...');
             try {
-                const base = 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
+                const base = import.meta.env.VITE_BACKEND_URL || 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
                 console.log("base url:",base);
-                const res = await axios.get(`${base}/api/problems`);
+                const res = await axios.get(`/api/problems`);
                 setProblems(res.data);
                 console.log('Problems fetched successfully:', res.data);
             } catch (err) {

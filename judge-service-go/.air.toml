@@ -1,0 +1,25 @@
+# .air.toml
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/go-judge-service ."
+  bin = "./tmp/go-judge-service"
+  full_bin = "APP_ENV=development ./tmp/go-judge-service"
+  include_ext = ["go", "tpl", "json"] # Watch Go files, templates, and JSON
+  exclude_dir = ["tmp", "vendor", "node_modules"]
+  follow_symlink = true
+  delay = 1000 # ms
+
+[run]
+  # You can add environment variables specific to development here
+  # env = ["DEBUG=true"]
+
+[log]
+  time = true
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"

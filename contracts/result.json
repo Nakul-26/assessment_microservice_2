@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/result.json",
+  "title": "ResultMessage",
+  "type": "object",
+  "required": ["submissionId", "language", "timestamp"],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "v1" },
+    "submissionId": { "type": "string" },
+    "language": { "type": "string" },
+    "result": {},
+    "timestamp": { "type": "integer" }
+  },
+  "additionalProperties": true
+}
