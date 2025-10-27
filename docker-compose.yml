@@ -9,7 +9,9 @@ services:
     ports: 
       - "6379:6379"
     volumes:
-      - redis_data:/data 
+      - redis_data:/data
+    networks:
+      - assessment-net
 
   # 2. Infrastructure: RabbitMQ Message Broker Service
   rabbitmq:
@@ -28,6 +30,8 @@ services:
       interval: 30s
       timeout: 30s
       retries: 3
+    networks:
+      - assessment-net
 
   # 3. Infrastructure: MongoDB Database Service
   mongo:
@@ -37,6 +41,8 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    networks:
+      - assessment-net
 
   # 4. Backend Service: Assessment API
   assessment-api:
@@ -63,6 +69,8 @@ services:
         condition: service_started
       mongo:
         condition: service_started
+    networks:
+      - assessment-net
 
   # 5. Backend Service: Judge Service
   # judge-service:
@@ -88,6 +96,8 @@ services:
   #       condition: service_started
   #     redis:
   #       condition: service_started
+  #   networks:
+  #     - assessment-net
 
   judge-service-go:
     build:
@@ -100,7 +110,7 @@ services:
     environment:
       - MONGO_URI=mongodb://mongo:27017/assessment_db
       - RABBITMQ_URL=amqp://user:password@rabbitmq:5672
-      - REDIS_URI=redis:6379
+      - REDIS_URI=redis://redis:6379
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -108,6 +118,8 @@ services:
         condition: service_started
       redis:
         condition: service_started
+    networks:
+      - assessment-net
 
   frontend:
     build:
@@ -125,8 +137,13 @@ services:
 
     depends_on:
       - assessment-api
+    networks:
+      - assessment-net
 
 volumes:
   redis_data:
   rabbitmq_data:
   mongo_data:
+
+networks:
+  assessment-net:

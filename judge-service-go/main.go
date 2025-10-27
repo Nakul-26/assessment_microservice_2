@@ -204,28 +204,9 @@ func main() {
 				continue
 			}
 			var problem models.Problem
-			// First fetch raw document to inspect types (helps debug mismatched schemas)
-			var raw bson.M
-			err = problemsCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&raw)
+			err = problemsCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&problem)
 			if err != nil {
-				log.Printf("Error fetching raw problem %s: %v", submissionMsg.ProblemID, err)
-				d.Nack(false, false)
-				continue
-			}
-			// Log type info for testCases[0].input if available
-			if tcArr, ok := raw["testCases"].([]interface{}); ok && len(tcArr) > 0 {
-				if first, ok := tcArr[0].(map[string]interface{}); ok {
-					if in, ok := first["input"]; ok {
-						log.Printf("Raw problem testCases[0].input type: %T", in)
-					}
-				}
-			}
-
-			// Now decode into the typed struct
-			// Re-marshal raw into bytes and unmarshal into models.Problem to avoid double-decoding surprises
-			rawBytes, _ := json.Marshal(raw)
-			if err := json.Unmarshal(rawBytes, &problem); err != nil {
-				log.Printf("Error decoding problem %s into model: %v", submissionMsg.ProblemID, err)
+				log.Printf("Error fetching problem %s: %v", submissionMsg.ProblemID, err)
 				d.Nack(false, false)
 				continue
 			}
@@ -251,6 +232,12 @@ func main() {
 				if n, ok := problem.FunctionName[lang.ID]; ok {
 					funcName = n
 				}
+			}
+
+			// CRITICAL CHECK: If the name is still empty, use a sensible default
+			if funcName == "" {
+				funcName = "Solution"
+				log.Printf("Warning: Function name not found, defaulting to 'Solution' for submission %s", submissionMsg.SubmissionID)
 			}
 
 			// Ensure placeholders are present or replaced (no-op if not found)

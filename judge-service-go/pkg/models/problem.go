@@ -6,10 +6,10 @@ import (
 
 type TestCase struct {
 	ID             int         `json:"id" bson:"id"`
-	Type           string      `json:"type" bson:"type"`
-	Input          interface{} `json:"input" bson:"input"`                   // parsed input (object/array/scalar)
-	ExpectedOutput interface{} `json:"expectedOutput" bson:"expectedOutput"` // parsed expected output (object/array/scalar)
-	IsHidden       bool        `json:"isHidden" bson:"isHidden"`
+	Type           string `json:"type" bson:"type"`
+	Input          string `json:"input" bson:"input"`
+	ExpectedOutput string `json:"expectedOutput" bson:"expectedOutput"`
+	IsHidden       bool   `json:"isHidden" bson:"isHidden"`
 }
 
 type Problem struct {

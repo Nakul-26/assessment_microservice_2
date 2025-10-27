@@ -29,31 +29,13 @@ func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) 
 	// Build tests array
 	tests := make([]map[string]interface{}, 0, len(p.TestCases))
 	for _, tc := range p.TestCases {
-		// Input may already be parsed (interface{}) or a raw string; handle both
-		var parsedInput interface{}
-		switch v := tc.Input.(type) {
-		case string:
-			parsedInput, _ = parseInputRaw(v, p.ExpectedIoType)
-		case map[string]interface{}:
-			parsedInput = v
-		default:
-			// Try to marshal/unmarshal into interface{} so we can detect underlying types later
-			b, _ := json.Marshal(v)
-			_ = json.Unmarshal(b, &parsedInput)
-			if parsedInput == nil {
-				parsedInput = make(map[string]interface{})
-			}
-		}
+		// Input is now always a string, parse it directly.
+		parsedInput, _ := parseInputRaw(tc.Input, p.ExpectedIoType)
 
-		// ExpectedOutput may be raw string or already parsed
+		// ExpectedOutput is now always a string, parse it directly.
 		var expected interface{}
-		switch ev := tc.ExpectedOutput.(type) {
-		case string:
-			if err := json.Unmarshal([]byte(ev), &expected); err != nil {
-				expected = coerceScalar(ev)
-			}
-		default:
-			expected = ev
+		if err := json.Unmarshal([]byte(tc.ExpectedOutput), &expected); err != nil {
+			expected = coerceScalar(tc.ExpectedOutput)
 		}
 
 		// Transform parsedInput (map) into an ordered slice based on ExpectedIoType.InputParameters
@@ -61,40 +43,19 @@ func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) 
 		var orderedInput []interface{}
 		if len(p.ExpectedIoType.InputParameters) > 0 {
 			orderedInput = make([]interface{}, len(p.ExpectedIoType.InputParameters))
-			// Ensure parsedInput is a map before attempting keyed access
-			if m, ok := parsedInput.(map[string]interface{}); ok {
-				for i, param := range p.ExpectedIoType.InputParameters {
-					if val, ok2 := m[param.Name]; ok2 {
-						orderedInput[i] = val
-					} else {
-						// Handle case where a parameter is expected but not found in parsedInput
-						// For now, we'll just use nil, but a more robust solution might error or use a default.
-						orderedInput[i] = nil
-					}
-				}
-			} else {
-				// If parsedInput is not a map, try to treat it as a slice to fill positional params,
-				// otherwise leave missing params as nil.
-				for i := range orderedInput {
+			for i, param := range p.ExpectedIoType.InputParameters {
+				if val, ok := parsedInput[param.Name]; ok {
+					orderedInput[i] = val
+				} else {
+					// Handle case where a parameter is expected but not found in parsedInput
+					// For now, we'll just use nil, but a more robust solution might error or use a default.
 					orderedInput[i] = nil
-				}
-				if arr, ok := parsedInput.([]interface{}); ok {
-					for i := 0; i < len(orderedInput) && i < len(arr); i++ {
-						orderedInput[i] = arr[i]
-					}
 				}
 			}
 		} else {
 			// Fallback: if no ExpectedIoType, try to get values from map (order not guaranteed)
-			// Or if parsedInput is not a map, use it directly.
-			if m, ok := parsedInput.(map[string]interface{}); ok {
-				for _, v := range m {
-					orderedInput = append(orderedInput, v)
-				}
-			} else {
-				// If parsedInput is not a map, and no ExpectedIoType, just use it as is.
-				// This handles cases where input is a single scalar or array directly.
-				orderedInput = []interface{}{parsedInput}
+			for _, v := range parsedInput {
+				orderedInput = append(orderedInput, v)
 			}
 		}
 
