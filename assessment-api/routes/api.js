@@ -4,6 +4,7 @@ import { createClient } from 'redis';
 
 import Problem from '../models/Problem.mjs';
 import Submission from '../models/Submission.mjs';
+import { validate } from '../middleware/validator.mjs';
 
 const router = express.Router();
 
@@ -47,7 +48,7 @@ router.get('/problems/:id', async (req, res) => {
 
 // @route   POST /api/problems
 // @desc    Create a new problem
-router.post('/problems', async (req, res) => {
+router.post('/problems', validate('problem'), async (req, res) => {
     try {
         // Accept both legacy shape (testCases[].input / expectedOutput) and new shape (inputRaw / expectedOutputRaw)
         const payload = { ...req.body };
@@ -233,7 +234,7 @@ router.post('/problems/preview', async (req, res) => {
 
 // @route   POST /api/submit
 // @desc    Submit code for a problem asynchronously
-router.post('/submit', async (req, res) => {
+router.post('/submit', validate('submission'), async (req, res) => {
     const { problemId, code, language } = req.body;
     console.log(`Received submission for problem ID: ${problemId}`);
     console.log(`Code length: ${code.length} characters`);

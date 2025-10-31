@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,22 +40,261 @@ func failOnError(err error, msg string) {
 	}
 }
 
-// TestResult represents the result of a single test case
-type TestResult struct {
-	Test      int         `json:"test"`
-	Ok        bool        `json:"ok"`
-	Output    interface{} `json:"output,omitempty"`
-	Error     string      `json:"error,omitempty"`
-	Stack     string      `json:"stack,omitempty"`
-	Traceback string      `json:"traceback,omitempty"`
-}
+func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, ch *amqp.Channel, resultQueueName string, executor *executor.Executor) {
+	log.Printf("Received a message: %s", d.Body)
 
-// SubmissionResult represents the overall result of a submission
-type SubmissionResult struct {
-	Status  string       `json:"status"`
-	Passed  int          `json:"passed"`
-	Total   int          `json:"total"`
-	Details []TestResult `json:"details"`
+	// First unmarshal into a generic map and perform lightweight validation
+	var rawMsg map[string]interface{}
+	if err := json.Unmarshal(d.Body, &rawMsg); err != nil {
+		log.Printf("Error unmarshalling raw submission message: %v", err)
+		d.Nack(false, false)
+		return
+	}
+	// validate required fields
+	if rawMsg["submissionId"] == nil || rawMsg["problemId"] == nil || rawMsg["language"] == nil || rawMsg["code"] == nil {
+		log.Printf("Invalid submission message, missing required fields: %v", rawMsg)
+		d.Nack(false, false)
+		return
+	}
+
+	var submissionMsg struct {
+		SubmissionID string `json:"submissionId"`
+		ProblemID    string `json:"problemId"`
+		Language     string `json:"language"`
+		Code         string `json:"code"`
+		FunctionName string `json:"functionName"`
+	}
+	if err := json.Unmarshal(d.Body, &submissionMsg); err != nil {
+		log.Printf("Error unmarshalling submission message into struct: %v", err)
+		d.Nack(false, false)
+		return
+	}
+
+	log.Printf("Processing submission %s for problem %s in %s", submissionMsg.SubmissionID, submissionMsg.ProblemID, submissionMsg.Language)
+
+	// Fetch Problem from MongoDB
+	objID, err := primitive.ObjectIDFromHex(submissionMsg.ProblemID)
+	if err != nil {
+		log.Printf("Invalid ProblemID: %v", err)
+		d.Nack(false, false)
+		return
+	}
+	var problem models.Problem
+	err = problemsCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&problem)
+	if err != nil {
+		log.Printf("Error fetching problem %s: %v", submissionMsg.ProblemID, err)
+		d.Nack(false, false)
+		return
+	}
+
+	lang, ok := languages.Languages[submissionMsg.Language]
+	if !ok {
+		log.Printf("Unsupported language: %s", submissionMsg.Language)
+		d.Nack(false, false)
+		return
+	}
+
+	// Create a temporary directory for the execution
+	tempDir, err := os.MkdirTemp("", "submission-")
+	if err != nil {
+		log.Printf("Failed to create temp dir: %v", err)
+		d.Nack(false, false)
+		return
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Write user's code to a file
+	solutionFileName := "solution" + lang.FileExt
+	if err := os.WriteFile(filepath.Join(tempDir, solutionFileName), []byte(submissionMsg.Code), 0644); err != nil {
+		log.Printf("Failed to write solution file: %v", err)
+		d.Nack(false, false)
+		return
+	}
+
+	    // Write test case input to input.txt
+	    var inputs []string
+	    for _, tc := range problem.TestCases {
+	        testCaseData := fmt.Sprintf(`{"input": %s, "expectedOutput": %s}`, tc.Input, tc.ExpectedOutput)
+	        inputs = append(inputs, testCaseData)
+	    }
+	    inputData := strings.Join(inputs, "\n")
+	    if err := os.WriteFile(filepath.Join(tempDir, "input.txt"), []byte(inputData), 0644); err != nil {
+	        log.Printf("Failed to write input file: %v", err)
+	        d.Nack(false, false)
+	        return
+	    }
+	// Generate wrapper code
+	wrapperCode, err := wrapper.GenerateWrapper(problem, lang)
+	if err != nil {
+		log.Printf("Failed to generate wrapper: %v", err)
+		d.Nack(false, false)
+		return
+	}
+
+	log.Printf("Wrapper code: %s", wrapperCode)
+
+	// Write wrapper code to a file
+	wrapperFileName := "wrapper" + lang.FileExt
+	if err := os.WriteFile(filepath.Join(tempDir, wrapperFileName), []byte(wrapperCode), 0644); err != nil {
+		log.Printf("Failed to write wrapper file: %v", err)
+		d.Nack(false, false)
+		return
+	}
+
+	// list files in tempDir
+	files, err := filepath.Glob(filepath.Join(tempDir, "*"))
+	if err != nil {
+		log.Printf("Failed to list files in temp dir: %v", err)
+	}
+	log.Printf("Files in temp dir: %v", files)
+
+	// Run submission in Docker
+	stdout, stderr, execErr := executor.RunSubmission(
+		context.Background(),
+		lang.Image,
+		[]string{solutionFileName, "input.txt", wrapperFileName},
+		tempDir,
+		lang.RunCmd,
+		defaultSandboxTimeout,
+	)
+
+	log.Printf("Execution finished for submission %s. Stdout: %s, Stderr: %s, Error: %v", submissionMsg.SubmissionID, stdout, stderr, execErr)
+
+	// Process results
+	var result models.SubmissionResult
+	submissionStatus := "Error"
+	submissionOutput := stderr
+	submissionTestResult := interface{}(nil)
+
+	// Prefer parsing stdout if present (the wrapper may emit structured JSON even on non-zero exit)
+	if stdout != "" {
+		if err := json.Unmarshal([]byte(stdout), &result); err == nil {
+			submissionTestResult = result
+			// Normalize status values from the wrapper to our canonical statuses
+			s := strings.ToLower(result.Status)
+			switch s {
+			case "finished":
+				if result.Passed == result.Total {
+					submissionStatus = "Success"
+				} else {
+					submissionStatus = "Fail"
+				}
+			case "error":
+				submissionStatus = "Error"
+			case "fail":
+				submissionStatus = "Fail"
+			case "success":
+				submissionStatus = "Success"
+			default:
+				// fallback to the raw status string (but capitalize first letter for consistency)
+				if result.Status != "" {
+					submissionStatus = strings.Title(result.Status)
+				} else {
+					submissionStatus = "Error"
+				}
+			}
+			submissionOutput = stdout
+		} else {
+			log.Printf("Error unmarshalling stdout to result: %v, Stdout: %s", err, stdout)
+			// If execErr exists, include it in the output for debugging
+			if execErr != nil {
+				submissionOutput = fmt.Sprintf("Execution Error: %v\nInvalid judge output: %v\nStdout: %s\nStderr: %s", execErr, err, stdout, stderr)
+			} else {
+				submissionOutput = fmt.Sprintf("Invalid judge output: %v\nStdout: %s", err, stdout)
+			}
+			submissionStatus = "Error"
+		}
+
+	} else if execErr != nil {
+		submissionStatus = "Error"
+		submissionOutput = fmt.Sprintf("Execution Error: %v\nStderr: %s", execErr, stderr)
+
+	} else if stderr != "" {
+		submissionStatus = "Error"
+		submissionOutput = stderr
+	}
+
+	// Update submission status in MongoDB
+	submissionObjID, err := primitive.ObjectIDFromHex(submissionMsg.SubmissionID)
+	if err != nil {
+		log.Printf("Invalid SubmissionID: %v", err)
+		d.Nack(false, false)
+		return
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"status":     submissionStatus,
+			"output":     submissionOutput,
+			"testResult": submissionTestResult,
+			"updatedAt":  time.Now(),
+		},
+	}
+	_, err = submissionsCollection.UpdateByID(context.Background(), submissionObjID, update)
+	if err != nil {
+		log.Printf("Error updating submission %s in MongoDB: %v", submissionMsg.SubmissionID, err)
+	}
+
+	// Store updated submission in Redis
+	statusVal := submissionStatus
+	updatedSubmission := models.Submission{
+		ID:         submissionObjID,
+		ProblemID:  objID,
+		Language:   submissionMsg.Language,
+		Code:       submissionMsg.Code,
+		Status:     statusVal,
+		Output:     submissionOutput,
+		TestResult: submissionTestResult,
+		UpdatedAt:  time.Now(),
+	}
+	// Fetch the original submission to get CreatedAt and UserID if needed
+	var originalSubmission models.Submission
+	err = submissionsCollection.FindOne(context.Background(), bson.M{"_id": submissionObjID}).Decode(&originalSubmission)
+	if err == nil {
+		updatedSubmission.CreatedAt = originalSubmission.CreatedAt
+		updatedSubmission.UserID = originalSubmission.UserID
+	}
+
+	jsonSubmission, err := json.Marshal(updatedSubmission)
+	if err != nil {
+		log.Printf("Error marshalling updated submission to JSON for Redis: %v", err)
+	} else {
+		redisClient.Set(context.Background(), fmt.Sprintf("submission:%s", submissionMsg.SubmissionID), jsonSubmission, 3600*time.Second)
+	}
+
+	// Publish results to RabbitMQ
+	resultMsg := struct {
+		SubmissionID string      `json:"submissionId"`
+		Language     string      `json:"language"`
+		Result       interface{} `json:"result"`
+		Timestamp    int64       `json:"timestamp"`
+	}{
+		SubmissionID: submissionMsg.SubmissionID,
+		Language:     submissionMsg.Language,
+		Result:       submissionTestResult,
+		Timestamp:    time.Now().UnixMilli(),
+	}
+	jsonResultMsg, err := json.Marshal(resultMsg)
+	if err != nil {
+		log.Printf("Error marshalling result message to JSON: %v", err)
+	} else {
+		err = ch.Publish(
+			"",              // exchange
+			resultQueueName, // routing key
+			false,           // mandatory
+			false,           // immediate
+			amqp.Publishing{
+				ContentType:  "application/json",
+				Body:         jsonResultMsg,
+				DeliveryMode: amqp.Persistent,
+			},
+		)
+		if err != nil {
+			log.Printf("Error publishing result message to RabbitMQ: %v", err)
+		}
+	}
+
+	d.Ack(false)
 }
 
 func main() {
@@ -165,237 +405,7 @@ func main() {
 
 	go func() {
 		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
-
-			// First unmarshal into a generic map and perform lightweight validation
-			var rawMsg map[string]interface{}
-			if err := json.Unmarshal(d.Body, &rawMsg); err != nil {
-				log.Printf("Error unmarshalling raw submission message: %v", err)
-				d.Nack(false, false)
-				continue
-			}
-			// validate required fields
-			if rawMsg["submissionId"] == nil || rawMsg["problemId"] == nil || rawMsg["language"] == nil || rawMsg["code"] == nil {
-				log.Printf("Invalid submission message, missing required fields: %v", rawMsg)
-				d.Nack(false, false)
-				continue
-			}
-
-			var submissionMsg struct {
-				SubmissionID string `json:"submissionId"`
-				ProblemID    string `json:"problemId"`
-				Language     string `json:"language"`
-				Code         string `json:"code"`
-				FunctionName string `json:"functionName"`
-			}
-			if err := json.Unmarshal(d.Body, &submissionMsg); err != nil {
-				log.Printf("Error unmarshalling submission message into struct: %v", err)
-				d.Nack(false, false)
-				continue
-			}
-
-			log.Printf("Processing submission %s for problem %s in %s", submissionMsg.SubmissionID, submissionMsg.ProblemID, submissionMsg.Language)
-
-			// Fetch Problem from MongoDB
-			objID, err := primitive.ObjectIDFromHex(submissionMsg.ProblemID)
-			if err != nil {
-				log.Printf("Invalid ProblemID: %v", err)
-				d.Nack(false, false)
-				continue
-			}
-			var problem models.Problem
-			err = problemsCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&problem)
-			if err != nil {
-				log.Printf("Error fetching problem %s: %v", submissionMsg.ProblemID, err)
-				d.Nack(false, false)
-				continue
-			}
-
-			lang, ok := languages.Languages[submissionMsg.Language]
-			if !ok {
-				log.Printf("Unsupported language: %s", submissionMsg.Language)
-				d.Nack(false, false)
-				continue
-			}
-
-			// Generate wrapper using wrapper.GenerateWrapper which parses TestCases and fills TESTS_JSON
-			finalTemplate, err := wrapper.GenerateWrapper(problem, lang)
-			if err != nil {
-				log.Printf("Failed to generate wrapper for language %s: %v", lang.ID, err)
-				d.Nack(false, false)
-				continue
-			}
-
-			// Determine function/class name to inject (submission overrides problem default)
-			funcName := submissionMsg.FunctionName
-			if funcName == "" && problem.FunctionName != nil {
-				if n, ok := problem.FunctionName[lang.ID]; ok {
-					funcName = n
-				}
-			}
-
-			// CRITICAL CHECK: If the name is still empty, use a sensible default
-			if funcName == "" {
-				funcName = "Solution"
-				log.Printf("Warning: Function name not found, defaulting to 'Solution' for submission %s", submissionMsg.SubmissionID)
-			}
-
-			// Ensure placeholders are present or replaced (no-op if not found)
-			if funcName != "" {
-				finalTemplate = strings.ReplaceAll(finalTemplate, "{{FUNCTION_NAME}}", funcName)
-				finalTemplate = strings.ReplaceAll(finalTemplate, "{{CLASS_NAME}}", funcName)
-			}
-
-			// Insert user code at marker(s)
-			finalCode := strings.Replace(finalTemplate, "// USER_CODE_MARKER", submissionMsg.Code, 1)
-			finalCode = strings.Replace(finalCode, "# USER_CODE_MARKER", submissionMsg.Code, 1)
-
-			// Run submission in Docker
-			stdout, stderr, execErr := executor.RunSubmission(
-				context.Background(),
-				lang.Image,
-				finalCode,
-				"submission"+lang.FileExt,
-				lang.RunCmd,
-				defaultSandboxTimeout,
-			)
-
-			log.Printf("Execution finished for submission %s. Stdout: %s, Stderr: %s, Error: %v", submissionMsg.SubmissionID, stdout, stderr, execErr)
-
-			// Process results
-			var result SubmissionResult
-			submissionStatus := "Error"
-			submissionOutput := stderr
-			submissionTestResult := interface{}(nil)
-
-			// Prefer parsing stdout if present (the wrapper may emit structured JSON even on non-zero exit)
-			if stdout != "" {
-				if err := json.Unmarshal([]byte(stdout), &result); err == nil {
-					submissionTestResult = result
-					// Normalize status values from the wrapper to our canonical statuses
-					s := strings.ToLower(result.Status)
-					switch s {
-					case "finished":
-						if result.Passed == result.Total {
-							submissionStatus = "Success"
-						} else {
-							submissionStatus = "Fail"
-						}
-					case "error":
-						submissionStatus = "Error"
-					case "fail":
-						submissionStatus = "Fail"
-					case "success":
-						submissionStatus = "Success"
-					default:
-						// fallback to the raw status string (but capitalize first letter for consistency)
-						if result.Status != "" {
-							submissionStatus = strings.Title(result.Status)
-						} else {
-							submissionStatus = "Error"
-						}
-					}
-					submissionOutput = stdout
-				} else {
-					log.Printf("Error unmarshalling stdout to result: %v, Stdout: %s", err, stdout)
-					// If execErr exists, include it in the output for debugging
-					if execErr != nil {
-						submissionOutput = fmt.Sprintf("Execution Error: %v\nInvalid judge output: %v\nStdout: %s\nStderr: %s", execErr, err, stdout, stderr)
-					} else {
-						submissionOutput = fmt.Sprintf("Invalid judge output: %v\nStdout: %s", err, stdout)
-					}
-					submissionStatus = "Error"
-				}
-
-			} else if execErr != nil {
-				submissionStatus = "Error"
-				submissionOutput = fmt.Sprintf("Execution Error: %v\nStderr: %s", execErr, stderr)
-
-			} else if stderr != "" {
-				submissionStatus = "Error"
-				submissionOutput = stderr
-			}
-
-			// Update submission status in MongoDB
-			submissionObjID, err := primitive.ObjectIDFromHex(submissionMsg.SubmissionID)
-			if err != nil {
-				log.Printf("Invalid SubmissionID: %v", err)
-				d.Nack(false, false)
-				continue
-			}
-
-			update := bson.M{
-				"$set": bson.M{
-					"status":     submissionStatus,
-					"output":     submissionOutput,
-					"testResult": submissionTestResult,
-					"updatedAt":  time.Now(),
-				},
-			}
-			_, err = submissionsCollection.UpdateByID(context.Background(), submissionObjID, update)
-			if err != nil {
-				log.Printf("Error updating submission %s in MongoDB: %v", submissionMsg.SubmissionID, err)
-			}
-
-			// Store updated submission in Redis
-			updatedSubmission := models.Submission{
-				ID:         submissionObjID,
-				ProblemID:  objID,
-				Language:   submissionMsg.Language,
-				Code:       submissionMsg.Code,
-				Status:     submissionStatus,
-				Output:     submissionOutput,
-				TestResult: submissionTestResult,
-				UpdatedAt:  time.Now(),
-			}
-			// Fetch the original submission to get CreatedAt and UserID if needed
-			var originalSubmission models.Submission
-			err = submissionsCollection.FindOne(context.Background(), bson.M{"_id": submissionObjID}).Decode(&originalSubmission)
-			if err == nil {
-				updatedSubmission.CreatedAt = originalSubmission.CreatedAt
-				updatedSubmission.UserID = originalSubmission.UserID
-			}
-
-			jsonSubmission, err := json.Marshal(updatedSubmission)
-			if err != nil {
-				log.Printf("Error marshalling updated submission to JSON for Redis: %v", err)
-			} else {
-				redisClient.Set(context.Background(), fmt.Sprintf("submission:%s", submissionMsg.SubmissionID), jsonSubmission, 3600*time.Second)
-			}
-
-			// Publish results to RabbitMQ
-			resultMsg := struct {
-				SubmissionID string      `json:"submissionId"`
-				Language     string      `json:"language"`
-				Result       interface{} `json:"result"`
-				Timestamp    int64       `json:"timestamp"`
-			}{
-				SubmissionID: submissionMsg.SubmissionID,
-				Language:     submissionMsg.Language,
-				Result:       submissionTestResult,
-				Timestamp:    time.Now().UnixMilli(),
-			}
-			jsonResultMsg, err := json.Marshal(resultMsg)
-			if err != nil {
-				log.Printf("Error marshalling result message to JSON: %v", err)
-			} else {
-				err = ch.Publish(
-					"",              // exchange
-					resultQueueName, // routing key
-					false,           // mandatory
-					false,           // immediate
-					amqp.Publishing{
-						ContentType:  "application/json",
-						Body:         jsonResultMsg,
-						DeliveryMode: amqp.Persistent,
-					},
-				)
-				if err != nil {
-					log.Printf("Error publishing result message to RabbitMQ: %v", err)
-				}
-			}
-
-			d.Ack(false)
+			processSubmission(d, problemsCollection, submissionsCollection, redisClient, ch, resultQueueName, executor)
 		}
 	}()
 

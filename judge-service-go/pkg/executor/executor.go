@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -31,7 +33,7 @@ func NewExecutor() (*Executor, error) {
 }
 
 // RunSubmission executes user code in a Docker container
-func (e *Executor) RunSubmission(ctx context.Context, languageImage string, userCode, fileName string, runCmd []string, timeout time.Duration) (string, string, error) {
+func (e *Executor) RunSubmission(ctx context.Context, languageImage string, files []string, tempDir string, runCmd []string, timeout time.Duration) (string, string, error) {
 	// Ensure the image exists, pull if not
 	if err := e.pullImage(ctx, languageImage); err != nil {
 		return "", "", fmt.Errorf("failed to pull image %s: %w", languageImage, err)
@@ -63,9 +65,15 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, user
 
 	containerID := container.ID
 
-	// Copy user code into container
-	if err := e.copyToContainer(ctx, containerID, "/app", fileName, userCode); err != nil {
-		return "", "", fmt.Errorf("failed to copy code to container: %w", err)
+	// Copy files into container
+	for _, file := range files {
+		content, err := os.ReadFile(filepath.Join(tempDir, file))
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read file %s: %w", file, err)
+		}
+		if err := e.copyToContainer(ctx, containerID, "/app", file, string(content)); err != nil {
+			return "", "", fmt.Errorf("failed to copy file %s to container: %w", file, err)
+		}
 	}
 
 	// Start container

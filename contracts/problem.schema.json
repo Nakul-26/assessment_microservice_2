@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Problem",
+  "description": "A programming problem",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["Easy", "Medium", "Hard"]
+    },
+    "testCases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string"
+          },
+          "expectedOutput": {
+            "type": "string"
+          },
+          "isHidden": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "type", "input", "expectedOutput"]
+      }
+    },
+    "functionSignatures": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "functionName": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "functionSignature": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        }
+      }
+    },
+    "expectedIoType": {
+      "type": "object",
+      "properties": {
+        "inputParameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "type"]
+          }
+        },
+        "outputType": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required": ["title", "description", "difficulty", "testCases", "functionSignatures", "functionName"]
+}

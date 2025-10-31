@@ -16,7 +16,7 @@ var Languages = map[string]Language{
 		Name:           "JavaScript",
 		FileExt:        ".js",
 		Image:          "node:20-alpine",
-		RunCmd:         []string{"node", "/app/submission.js"},
+		RunCmd:         []string{"node", "/app/wrapper.js"},
 		WrapperTemplate: "js_wrapper.tpl",
 	},
 	"python": {
@@ -24,7 +24,7 @@ var Languages = map[string]Language{
 		Name:           "Python",
 		FileExt:        ".py",
 		Image:          "python:3.10-alpine",
-		RunCmd:         []string{"python", "/app/submission.py"},
+		RunCmd:         []string{"python", "/app/wrapper.py"},
 		WrapperTemplate: "python_wrapper.tpl",
 	},
 	"java": {
@@ -33,7 +33,7 @@ var Languages = map[string]Language{
 		FileExt:        ".java",
 		Image:          "openjdk:17-jdk-alpine",
 		CompileCmd:     []string{"javac", "/app/submission.java"},
-		RunCmd:         []string{"java", "-cp", "/app", "Main"}, // Assuming Main class for Java
+		RunCmd:         []string{"java", "-cp", "/app", "Main"},
 		WrapperTemplate: "java_wrapper.tpl",
 	},
 }

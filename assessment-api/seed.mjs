@@ -24,11 +24,11 @@ const ProblemSchema = new Schema({
     testCases: [
         {
             input: {
-                type: Schema.Types.Mixed,
+                type: String,
                 required: true
             },
             expectedOutput: {
-                type: Schema.Types.Mixed,
+                type: String,
                 required: true
             }
         }
@@ -49,12 +49,12 @@ const sampleProblems = [
         difficulty: 'Easy',
         testCases: [
             {
-                input: { nums: [2, 7, 11, 15], target: 9 },
-                expectedOutput: [0, 1]
+                input: JSON.stringify({ nums: [2, 7, 11, 15], target: 9 }),
+                expectedOutput: JSON.stringify([0, 1])
             },
             {
-                input: { nums: [3, 2, 4], target: 6 },
-                expectedOutput: [1, 2]
+                input: JSON.stringify({ nums: [3, 2, 4], target: 6 }),
+                expectedOutput: JSON.stringify([1, 2])
             }
         ],
         functionSignatures: {
@@ -76,12 +76,12 @@ const sampleProblems = [
         difficulty: 'Easy',
         testCases: [
             {
-                input: { num1: 1, num2: 2 },
-                expectedOutput: 3
+                input: JSON.stringify({ num1: 1, num2: 2 }),
+                expectedOutput: JSON.stringify(3)
             },
             {
-                input: { num1: 10, num2: 20 },
-                expectedOutput: 30
+                input: JSON.stringify({ num1: 10, num2: 20 }),
+                expectedOutput: JSON.stringify(30)
             }
         ],
         functionSignatures: {
@@ -103,8 +103,8 @@ const sampleProblems = [
         difficulty: 'Easy',
         testCases: [
             {
-                input: { name: "World" },
-                expectedOutput: "Hello, World!"
+                input: JSON.stringify({ name: "World" }),
+                expectedOutput: JSON.stringify("Hello, World!")
             }
         ],
         functionSignatures: {
