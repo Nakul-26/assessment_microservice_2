@@ -8,6 +8,11 @@ const InputParameterSchema = new Schema({
 }, { _id: false });
 
 const ProblemSchema = new Schema({
+    id: {
+        type: Number,
+        required: true,
+        unique: true
+    },
     title: {
         type: String,
         required: true

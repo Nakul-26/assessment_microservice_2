@@ -1,13 +1,18 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ path: 'assessment-api/.env' });
 
 const dbURI = process.env.MONGO_URI;
 
 const { Schema } = mongoose;
 
 const ProblemSchema = new Schema({
+    id: {
+        type: Number,
+        required: true,
+        unique: true
+    },
     title: {
         type: String,
         required: true
@@ -23,13 +28,29 @@ const ProblemSchema = new Schema({
     },
     testCases: [
         {
-            input: {
+            id: {
+                type: Number,
+                required: true
+            },
+            type: {
                 type: String,
                 required: true
             },
-            expectedOutput: {
-                type: String,
+            input: {
+                type: Schema.Types.Mixed,
                 required: true
+            },
+            expectedOutput: {
+                type: Schema.Types.Mixed,
+                required: true
+            },
+            meta: {
+                types: [String],
+                returns: String
+            },
+            isHidden: {
+                type: Boolean,
+                default: false
             }
         }
     ],
@@ -44,16 +65,21 @@ const Problem = mongoose.models.Problem || mongoose.model('Problem', ProblemSche
 
 const sampleProblems = [
     {
+        id: 1,
         title: 'Two Sum',
         description: 'Given an array of integers `nums` and an integer `target`, return indices of the two numbers such that they add up to `target`.',
         difficulty: 'Easy',
         testCases: [
             {
-                input: JSON.stringify({ nums: [2, 7, 11, 15], target: 9 }),
+                id: 1,
+                type: 'sample',
+                input: JSON.stringify([[2, 7, 11, 15], 9]),
                 expectedOutput: JSON.stringify([0, 1])
             },
             {
-                input: JSON.stringify({ nums: [3, 2, 4], target: 6 }),
+                id: 2,
+                type: 'sample',
+                input: JSON.stringify([[3, 2, 4], 6]),
                 expectedOutput: JSON.stringify([1, 2])
             }
         ],
@@ -71,16 +97,21 @@ const sampleProblems = [
         }
     },
     {
+        id: 2,
         title: 'Add Two Numbers',
         description: 'Given two numbers, return their sum.',
         difficulty: 'Easy',
         testCases: [
             {
-                input: JSON.stringify({ num1: 1, num2: 2 }),
+                id: 1,
+                type: 'sample',
+                input: JSON.stringify([1, 2]),
                 expectedOutput: JSON.stringify(3)
             },
             {
-                input: JSON.stringify({ num1: 10, num2: 20 }),
+                id: 2,
+                type: 'sample',
+                input: JSON.stringify([10, 20]),
                 expectedOutput: JSON.stringify(30)
             }
         ],
@@ -98,11 +129,14 @@ const sampleProblems = [
         }
     },
     {
+        id: 3,
         title: 'Greeter',
         description: 'Write a function that takes a name and returns a greeting.',
         difficulty: 'Easy',
         testCases: [
             {
+                id: 1,
+                type: 'sample',
                 input: JSON.stringify({ name: "World" }),
                 expectedOutput: JSON.stringify("Hello, World!")
             }

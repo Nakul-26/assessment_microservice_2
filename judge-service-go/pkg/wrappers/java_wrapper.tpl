@@ -16,34 +16,25 @@ public class Main {
         List<TestResult> results = new ArrayList<>();
         Gson gson = new Gson();
 
-        try {
-            File inputFile = new File("input.txt");
-            Scanner scanner = new Scanner(inputFile);
-            int testNum = 1;
-            while (scanner.hasNextLine()) {
-                String line = scanner.nextLine();
-                if (line.trim().isEmpty()) continue;
-
-                try {
-                    JsonElement testCaseElement = JsonParser.parseString(line);
-                    JsonArray inputArgs = testCaseElement.getAsJsonObject().getAsJsonArray("input");
-                    JsonElement expectedOutputElement = testCaseElement.getAsJsonObject().get("expectedOutput");
-
-                    // Assuming the user's code is in a class named Solution and has a static method {{FUNCTION_NAME}}
-                    // We will call the user's method directly from here
-                    int[] input = gson.fromJson(inputArgs, int[].class);
-                    Object output = Solution.{{FUNCTION_NAME}}(input[0], input[1]);
-                    boolean ok = gson.toJson(output).equals(gson.toJson(expectedOutputElement));
-                    results.add(new TestResult(testNum++, ok, output, null));
-                } catch (Exception e) {
-                    results.add(new TestResult(testNum++, false, null, e.toString()));
-                }
-            }
-            scanner.close();
-        } catch (FileNotFoundException e) {
-            results.add(new TestResult(1, false, null, "input.txt not found"));
-        }
-
+        		String testsJsonString = "{{TESTS_JSON}}";
+        		JsonArray testCasesArray = JsonParser.parseString(testsJsonString).getAsJsonArray();
+        
+        		for (int i = 0; i < testCasesArray.size(); i++) {
+        			JsonElement testCaseElement = testCasesArray.get(i);
+        			JsonArray inputArgs = testCaseElement.getAsJsonObject().getAsJsonArray("input");
+        			JsonElement expectedOutputElement = testCaseElement.getAsJsonObject().get("expectedOutput");
+        
+        			try {
+        				// Assuming the user's code is in a class named Solution and has a static method {{FUNCTION_NAME}}
+        				// We will call the user's method directly from here
+        				int[] input = gson.fromJson(inputArgs, int[].class);
+        				Object output = Solution.{{FUNCTION_NAME}}(input[0], input[1]);
+        				boolean ok = gson.toJson(output).equals(gson.toJson(expectedOutputElement));
+        				results.add(new TestResult(i + 1, ok, output, null));
+        			} catch (Exception e) {
+        				results.add(new TestResult(i + 1, false, null, e.toString()));
+        			}
+        		}
         Summary summary = new Summary("finished", results);
         System.out.println(gson.toJson(summary));
     }

@@ -263,13 +263,21 @@ router.post('/submit', validate('submission'), async (req, res) => {
         const channel = await connection.createChannel();
         await channel.assertQueue(QUEUE_NAME, { durable: true });
 
+        const tests = problem.testCases.map(tc => ({
+            id: tc.id,
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            isHidden: tc.isHidden,
+            type: tc.type,
+        }));
+
         const messageBody = {
             schemaVersion: 'v1',
             submissionId: submission._id.toString(),
             problemId: problem._id.toString(),
             language,
             code,
-            tests: problem.testCases, // Include test cases
+            tests: tests, // Include test cases
             // functionName: problem.functionName.get(language) // Include function name for the specific language
         };
 

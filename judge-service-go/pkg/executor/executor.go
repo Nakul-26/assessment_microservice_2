@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -32,23 +33,78 @@ func NewExecutor() (*Executor, error) {
 	return &Executor{cli: cli}, nil
 }
 
+// runExecWithTimeout handles the full lifecycle of creating, running, and waiting for an exec instance.
+func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, cmd []string, timeout time.Duration) (string, string, int, error) {
+	var stdoutBuf, stderrBuf bytes.Buffer
+
+	execOpts := docker.CreateExecOptions{
+		Container:    containerID,
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+		Context:      ctx,
+	}
+	exec, err := e.cli.CreateExec(execOpts)
+	if err != nil {
+		return "", "", -1, fmt.Errorf("failed to create exec: %w", err)
+	}
+
+	// Channel to signal completion
+	done := make(chan error, 1)
+	go func() {
+		startExecOptions := docker.StartExecOptions{
+			OutputStream: &stdoutBuf,
+			ErrorStream:  &stderrBuf,
+			Context:      ctx,
+		}
+		err := e.cli.StartExec(exec.ID, startExecOptions)
+		// Wait for the exec to finish. StartExec is non-blocking, but the underlying stream operations will block.
+		// Inspecting after it's done gives us the exit code.
+		if err != nil {
+			done <- fmt.Errorf("failed to start exec: %w", err)
+			return
+		}
+		done <- nil
+	}()
+
+	// Wait for completion or timeout
+	select {
+	case err := <-done:
+		if err != nil {
+			return stdoutBuf.String(), stderrBuf.String(), -1, err
+		}
+	case <-time.After(timeout):
+		// The execution timed out. The container will be stopped by the deferred function in RunSubmission.
+		log.Printf("Execution timed out after %v for command: %v", timeout, cmd)
+		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("execution timed out after %v", timeout)
+	case <-ctx.Done():
+		return stdoutBuf.String(), stderrBuf.String(), -1, ctx.Err()
+	}
+
+	// Inspect the exec to get the exit code
+	inspect, err := e.cli.InspectExec(exec.ID)
+	if err != nil {
+		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to inspect exec: %w", err)
+	}
+
+	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
+}
+
 // RunSubmission executes user code in a Docker container
-func (e *Executor) RunSubmission(ctx context.Context, languageImage string, files []string, tempDir string, runCmd []string, timeout time.Duration) (string, string, error) {
+func (e *Executor) RunSubmission(ctx context.Context, languageImage string, files []string, tempDir string, compileCmd []string, runCmd []string, timeout time.Duration) (string, string, error) {
 	// Ensure the image exists, pull if not
 	if err := e.pullImage(ctx, languageImage); err != nil {
 		return "", "", fmt.Errorf("failed to pull image %s: %w", languageImage, err)
 	}
 
 	pidsLimit := int64(1024)
-	// Create container
+	// Create container with a long-running command to keep it alive
 	containerOptions := docker.CreateContainerOptions{
 		Config: &docker.Config{
-			Image:        languageImage,
-			Cmd:          runCmd,
-			WorkingDir:   "/app",
-			Tty:          false,
-			AttachStdout: true,
-			AttachStderr: true,
+			Image:      languageImage,
+			Cmd:        []string{"tail", "-f", "/dev/null"}, // Keep container alive
+			WorkingDir: "/app",
+			Tty:        false,
 		},
 		HostConfig: &docker.HostConfig{
 			AutoRemove:  true,
@@ -64,6 +120,24 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 	}
 
 	containerID := container.ID
+	// Use a context with cancel to ensure cleanup happens
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Defer stopping the container. The timeout '1' is a grace period.
+	defer func() {
+		log.Printf("Stopping container %s", containerID)
+		stopErr := e.cli.StopContainer(containerID, 1)
+		if stopErr != nil {
+			// Log if the container couldn't be stopped, but don't mask the original error.
+			log.Printf("Failed to stop container %s: %v", containerID, stopErr)
+		}
+	}()
+
+	// Start the container
+	if err := e.cli.StartContainer(containerID, nil); err != nil {
+		return "", "", fmt.Errorf("failed to start container: %w", err)
+	}
 
 	// Copy files into container
 	for _, file := range files {
@@ -76,82 +150,55 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 		}
 	}
 
-	// Start container
-	if err := e.cli.StartContainer(containerID, nil); err != nil {
-		return "", "", fmt.Errorf("failed to start container: %w", err)
+	// Run compile command if it exists
+	if len(compileCmd) > 0 {
+		compileStdout, compileStderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, compileCmd, timeout)
+		if err != nil {
+			return compileStdout, compileStderr, fmt.Errorf("compilation command failed: %w", err)
+		}
+		if exitCode != 0 {
+			return compileStdout, compileStderr, fmt.Errorf("compilation failed with exit code %d", exitCode)
+		}
 	}
 
-	// Set up a timeout for the container execution
-	resultChan := make(chan error, 1)
-	var stdoutBuf, stderrBuf bytes.Buffer
-
-	go func() {
-		// Attach to container logs
-		logOptions := docker.LogsOptions{
-			Context:      ctx,
-			Container:    containerID,
-			Stdout:       true,
-			Stderr:       true,
-			Follow:       true,
-			Timestamps:   false,
-			OutputStream: &stdoutBuf,
-			ErrorStream:  &stderrBuf,
-		}
-		err := e.cli.Logs(logOptions)
-		if err != nil {
-			resultChan <- fmt.Errorf("failed to get container logs: %w", err)
-			return
-		}
-
-		// Wait for container to finish
-		statusCode, err := e.cli.WaitContainerWithContext(containerID, ctx)
-		if err != nil {
-			resultChan <- fmt.Errorf("error waiting for container: %w", err)
-			return
-		}
-		if statusCode != 0 {
-			resultChan <- fmt.Errorf("container exited with non-zero status: %d", statusCode)
-			return
-		}
-		resultChan <- nil
-	}()
-
-	select {
-	case err := <-resultChan:
-		if err != nil {
-			return stdoutBuf.String(), stderrBuf.String(), err
-		}
-		return stdoutBuf.String(), stderrBuf.String(), nil
-	case <-time.After(timeout):
-		// Timeout occurred, kill the container
-		log.Printf("Container %s timed out, killing...", containerID)
-		if err := e.cli.KillContainer(docker.KillContainerOptions{ID: containerID, Context: ctx}); err != nil {
-			log.Printf("Failed to kill container %s: %v", containerID, err)
-		}
-		return stdoutBuf.String(), stderrBuf.String(), fmt.Errorf("execution timed out after %s", timeout)
+	// Run the actual command
+	runStdout, runStderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, runCmd, timeout)
+	if err != nil {
+		// If there's a timeout or context error, we still want to return any output captured
+		return runStdout, runStderr, fmt.Errorf("execution command failed: %w", err)
 	}
+	if exitCode != 0 {
+		// For non-zero exits, we still return the output, but also the error
+		return runStdout, runStderr, fmt.Errorf("execution failed with exit code %d", exitCode)
+	}
+
+	return runStdout, runStderr, nil
 }
 
 // pullImage pulls a Docker image if it's not available locally
 func (e *Executor) pullImage(ctx context.Context, image string) error {
 	// Check if image exists locally
 	_, err := e.cli.InspectImage(image)
-	if err != nil && err != docker.ErrNoSuchImage {
+	if err == nil {
+		return nil // Image exists
+	}
+	if err != docker.ErrNoSuchImage {
 		return fmt.Errorf("failed to inspect image %s: %w", image, err)
+		// bigdecimal
 	}
 
-	if err == docker.ErrNoSuchImage {
-		log.Printf("Pulling image: %s", image)
-		pullOptions := docker.PullImageOptions{
-			Repository: image,
-			Context:    ctx,
-		}
-		// The go-dockerclient PullImage method writes progress to os.Stdout by default
-		err = e.cli.PullImage(pullOptions, docker.AuthConfiguration{})
-		if err != nil {
-			return fmt.Errorf("failed to pull image %s: %w", image, err)
-		}
+	log.Printf("Pulling image: %s", image)
+	pullOptions := docker.PullImageOptions{
+		Repository:   image,
+		Context:      ctx,
+		OutputStream: io.Discard, // Suppress verbose pull output
 	}
+	auth := docker.AuthConfiguration{} // Assuming public images
+	err = e.cli.PullImage(pullOptions, auth)
+	if err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", image, err)
+	}
+
 	return nil
 }
 
@@ -180,18 +227,4 @@ func (e *Executor) copyToContainer(ctx context.Context, containerID, destPath, f
 		Path:        destPath,
 		InputStream: &buf,
 	})
-}
-
-// logWriter is a simple io.Writer to capture logs (no longer needed with bytes.Buffer)
-type logWriter struct {
-	buf []byte
-}
-
-func (lw *logWriter) Write(p []byte) (n int, err error) {
-	lw.buf = append(lw.buf, p...)
-	return len(p), nil
-}
-
-func (lw *logWriter) Bytes() []byte {
-	return lw.buf
 }

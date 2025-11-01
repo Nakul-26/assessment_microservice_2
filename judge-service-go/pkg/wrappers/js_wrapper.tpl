@@ -1,4 +1,4 @@
-// USER_CODE_MARKER
+const { {{FUNCTION_NAME}} } = require('./submission.js');
 
 async function run() {
     if (typeof {{FUNCTION_NAME}} !== 'function') {

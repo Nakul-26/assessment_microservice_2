@@ -55,6 +55,7 @@ services:
       - "3000:3000"
     volumes:
       - ./assessment-api:/usr/src/app
+      - ./contracts:/usr/src/contracts:ro
       - ./judge-service-go:/usr/src/app/judge-service-go:ro
       - /usr/src/app/node_modules
     environment:

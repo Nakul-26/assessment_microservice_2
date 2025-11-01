@@ -36,9 +36,8 @@ def run_tests():
         print(json.dumps({"status": "error", "message": "{{FUNCTION_NAME}} is not a function"}))
         return
 
-    with open('input.txt', 'r') as f:
-        test_cases = f.readlines()
-
+    	test_cases_json = '''{{TESTS_JSON}}'''
+    	test_cases = json.loads(test_cases_json)
     results = []
     for i, line in enumerate(test_cases):
         if not line.strip():

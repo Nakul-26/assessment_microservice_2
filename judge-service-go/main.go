@@ -103,26 +103,14 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Write user's code to a file
-	solutionFileName := "solution" + lang.FileExt
-	if err := os.WriteFile(filepath.Join(tempDir, solutionFileName), []byte(submissionMsg.Code), 0644); err != nil {
-		log.Printf("Failed to write solution file: %v", err)
+	// Marshal test cases to JSON
+	testsJSON, err := json.Marshal(problem.TestCases)
+	if err != nil {
+		log.Printf("Failed to marshal test cases to JSON: %v", err)
 		d.Nack(false, false)
 		return
 	}
 
-	    // Write test case input to input.txt
-	    var inputs []string
-	    for _, tc := range problem.TestCases {
-	        testCaseData := fmt.Sprintf(`{"input": %s, "expectedOutput": %s}`, tc.Input, tc.ExpectedOutput)
-	        inputs = append(inputs, testCaseData)
-	    }
-	    inputData := strings.Join(inputs, "\n")
-	    if err := os.WriteFile(filepath.Join(tempDir, "input.txt"), []byte(inputData), 0644); err != nil {
-	        log.Printf("Failed to write input file: %v", err)
-	        d.Nack(false, false)
-	        return
-	    }
 	// Generate wrapper code
 	wrapperCode, err := wrapper.GenerateWrapper(problem, lang)
 	if err != nil {
@@ -131,29 +119,46 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		return
 	}
 
-	log.Printf("Wrapper code: %s", wrapperCode)
+	// Determine function/class name placeholders
+	fnName := "solution" // default
+	if problem.FunctionName != nil {
+		// pick entry for language if present
+		if n, ok := problem.FunctionName[lang.ID]; ok && n != "" {
+			fnName = n
+		}
+	}
 
-	// Write wrapper code to a file
-	wrapperFileName := "wrapper" + lang.FileExt
-	if err := os.WriteFile(filepath.Join(tempDir, wrapperFileName), []byte(wrapperCode), 0644); err != nil {
-		log.Printf("Failed to write wrapper file: %v", err)
+	// Replace placeholders in the wrapper code
+	wrapperCode = strings.ReplaceAll(wrapperCode, "{{FUNCTION_NAME}}", fnName)
+	// For Java templates
+	className := "Main"
+	if problem.FunctionSignature.Language == "java" {
+		className = strings.TrimSuffix(fnName, "")
+	}
+	wrapperCode = strings.ReplaceAll(wrapperCode, "{{CLASS_NAME}}", className)
+
+	// Inject the Test Data JSON
+	combinedCode := strings.Replace(wrapperCode, "{{TESTS_JSON}}", string(testsJSON), 1)
+
+	// Inject the User Code
+	finalCode := strings.Replace(combinedCode, "// USER_CODE_MARKER", submissionMsg.Code + "\nmodule.exports = { " + fnName + " };", 1)
+	finalCode = strings.Replace(finalCode, "# USER_CODE_MARKER", submissionMsg.Code, 1)
+
+	// Write the combined code to a single file
+	submissionFileName := "submission" + lang.FileExt
+	if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+		log.Printf("Failed to write combined submission file: %v", err)
 		d.Nack(false, false)
 		return
 	}
-
-	// list files in tempDir
-	files, err := filepath.Glob(filepath.Join(tempDir, "*"))
-	if err != nil {
-		log.Printf("Failed to list files in temp dir: %v", err)
-	}
-	log.Printf("Files in temp dir: %v", files)
 
 	// Run submission in Docker
 	stdout, stderr, execErr := executor.RunSubmission(
 		context.Background(),
 		lang.Image,
-		[]string{solutionFileName, "input.txt", wrapperFileName},
+		[]string{submissionFileName},
 		tempDir,
+		lang.CompileCmd,
 		lang.RunCmd,
 		defaultSandboxTimeout,
 	)
