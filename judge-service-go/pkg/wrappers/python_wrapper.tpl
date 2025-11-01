@@ -36,14 +36,11 @@ def run_tests():
         print(json.dumps({"status": "error", "message": "{{FUNCTION_NAME}} is not a function"}))
         return
 
-    	test_cases_json = '''{{TESTS_JSON}}'''
-    	test_cases = json.loads(test_cases_json)
+        test_cases_json = '''{{TESTS_JSON}}'''
+        test_cases = json.loads(test_cases_json)
     results = []
-    for i, line in enumerate(test_cases):
-        if not line.strip():
-            continue
+    for i, test_case in enumerate(test_cases):
         
-        test_case = json.loads(line)
         input_data = test_case['input']
         expected_output = test_case['expectedOutput']
 

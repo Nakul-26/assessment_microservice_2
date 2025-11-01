@@ -8,7 +8,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 
-public class Main {
+public class {{CLASS_NAME}} {
 
     // USER_CODE_MARKER
 
@@ -25,10 +25,8 @@ public class Main {
         			JsonElement expectedOutputElement = testCaseElement.getAsJsonObject().get("expectedOutput");
         
         			try {
-        				// Assuming the user's code is in a class named Solution and has a static method {{FUNCTION_NAME}}
-        				// We will call the user's method directly from here
-        				int[] input = gson.fromJson(inputArgs, int[].class);
-        				Object output = Solution.{{FUNCTION_NAME}}(input[0], input[1]);
+        				t// Placeholder for the dynamically generated function call
+        				Object output = {{FUNCTION_CALL_LINE}};
         				boolean ok = gson.toJson(output).equals(gson.toJson(expectedOutputElement));
         				results.add(new TestResult(i + 1, ok, output, null));
         			} catch (Exception e) {

@@ -1,11 +1,10 @@
 package wrapper
 
 import (
-
 	"fmt"
 	"os"
 	"path/filepath"
-
+	"strings"
 
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
@@ -19,10 +18,45 @@ func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) 
 	}
 	tpl := string(b)
 
-
-
-
+	// Add logic for dynamic function call generation for Java
+	if lang.ID == "java" {
+		functionCallLine, err := generateJavaFunctionCall(p)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate Java function call: %w", err)
+		}
+		tpl = strings.Replace(tpl, "{{FUNCTION_CALL_LINE}}", functionCallLine, 1)
+	}
 
 	return tpl, nil
 }
 
+func generateJavaFunctionCall(p models.Problem) (string, error) {
+	if p.ExpectedIoType == nil || len(p.ExpectedIoType.InputParameters) == 0 {
+		// Handle cases with no input parameters or problems without defined IO types
+		return "{{CLASS_NAME}}.{{FUNCTION_NAME}}()", nil
+	}
+
+	var args []string
+	for i, param := range p.ExpectedIoType.InputParameters {
+		switch param.Type {
+		case "int":
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), Integer.class)", i))
+		case "String":
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), String.class)", i))
+		case "int[]":
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), int[].class)", i))
+		case "String[]":
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), String[].class)", i))
+		case "boolean":
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), Boolean.class)", i))
+		case "double":
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), Double.class)", i))
+		// Add more types as needed
+		default:
+			return "", fmt.Errorf("unsupported Java input type: %s", param.Type)
+		}
+	}
+
+	// The class name and function name will be replaced in main.go
+	return fmt.Sprintf("{{CLASS_NAME}}.{{FUNCTION_NAME}}(%s)", strings.Join(args, ", ")), nil
+}

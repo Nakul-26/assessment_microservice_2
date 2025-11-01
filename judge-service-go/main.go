@@ -138,25 +138,66 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 	wrapperCode = strings.ReplaceAll(wrapperCode, "{{CLASS_NAME}}", className)
 
 	// Inject the Test Data JSON
-	combinedCode := strings.Replace(wrapperCode, "{{TESTS_JSON}}", string(testsJSON), 1)
+	wrapperCode = strings.Replace(wrapperCode, "{{TESTS_JSON}}", string(testsJSON), 1)
 
-	// Inject the User Code
-	finalCode := strings.Replace(combinedCode, "// USER_CODE_MARKER", submissionMsg.Code + "\nmodule.exports = { " + fnName + " };", 1)
-	finalCode = strings.Replace(finalCode, "# USER_CODE_MARKER", submissionMsg.Code, 1)
+	var filesToCopy []string
+	if lang.ID == "javascript" {
+		// Handle JavaScript separately: create two files
+		submissionFileName := "submission.js"
+		wrapperFileName := "wrapper.js"
 
-	// Write the combined code to a single file
-	submissionFileName := "submission" + lang.FileExt
-	if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
-		log.Printf("Failed to write combined submission file: %v", err)
-		d.Nack(false, false)
-		return
+		// User code with module.exports
+		submissionCode := submissionMsg.Code + "\nmodule.exports = { " + fnName + " };"
+		if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(submissionCode), 0644); err != nil {
+			log.Printf("Failed to write submission file: %v", err)
+			d.Nack(false, false)
+			return
+		}
+
+		// Wrapper code
+		if err := os.WriteFile(filepath.Join(tempDir, wrapperFileName), []byte(wrapperCode), 0644); err != nil {
+			log.Printf("Failed to write wrapper file: %v", err)
+			d.Nack(false, false)
+			return
+		}
+		filesToCopy = []string{submissionFileName, wrapperFileName}
+	} else if lang.ID == "python" {
+		// Handle Python separately: create two files
+		solutionFileName := "solution.py"
+		submissionFileName := "submission.py"
+
+		// User code
+		if err := os.WriteFile(filepath.Join(tempDir, solutionFileName), []byte(submissionMsg.Code), 0644); err != nil {
+			log.Printf("Failed to write solution file: %v", err)
+			d.Nack(false, false)
+			return
+		}
+
+		// Wrapper code
+		if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(wrapperCode), 0644); err != nil {
+			log.Printf("Failed to write wrapper file: %v", err)
+			d.Nack(false, false)
+			return
+		}
+		filesToCopy = []string{solutionFileName, submissionFileName}
+	} else {
+		// For other languages, use the combined approach
+		finalCode := strings.Replace(wrapperCode, "// USER_CODE_MARKER", submissionMsg.Code, 1)
+		finalCode = strings.Replace(finalCode, "# USER_CODE_MARKER", submissionMsg.Code, 1)
+		submissionFileName := "submission" + lang.FileExt
+		if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+			log.Printf("Failed to write combined submission file: %v", err)
+			d.Nack(false, false)
+			return
+		}
+		filesToCopy = []string{submissionFileName}
 	}
 
 	// Run submission in Docker
 	stdout, stderr, execErr := executor.RunSubmission(
 		context.Background(),
 		lang.Image,
-		[]string{submissionFileName},
+		filesToCopy,
 		tempDir,
 		lang.CompileCmd,
 		lang.RunCmd,

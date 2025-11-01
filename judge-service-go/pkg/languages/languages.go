@@ -16,7 +16,7 @@ var Languages = map[string]Language{
 		Name:           "JavaScript",
 		FileExt:        ".js",
 		Image:          "node:20-alpine",
-		RunCmd:         []string{"node", "/app/submission.js"},
+		RunCmd:         []string{"node", "/app/wrapper.js"},
 		WrapperTemplate: "js_wrapper.tpl",
 	},
 	"python": {
