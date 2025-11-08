@@ -1,8 +1,10 @@
 import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import fs from 'fs';
 import path from 'path';
 
 const ajv = new Ajv();
+addFormats(ajv);
 
 function loadSchema(schemaName) {
   const schemaPath = path.resolve(`../contracts/${schemaName}.schema.json`);

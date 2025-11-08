@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 
 const ProblemPage = () => {
-    const { id } = useParams();
+    const { _id } = useParams();
     const [problem, setProblem] = useState(null);
     const [code, setCode] = useState('');
     const [selectedLanguage, setSelectedLanguage] = useState('javascript');
@@ -12,58 +12,54 @@ const ProblemPage = () => {
 
     useEffect(() => {
         const fetchProblem = async () => {
-            console.log(`Fetching problem with id: ${id}`);
             try {
-                const res = await axios.get(`/api/problems/${id}`);
-                setProblem(res.data);
-                // Set initial code based on fetched problem's function signature for the selected language
-                if (res.data.functionSignatures && res.data.functionSignatures[selectedLanguage]) {
-                    setCode(res.data.functionSignatures[selectedLanguage]);
+                const res = await axios.get(`/api/problems/${_id}`);
+                const fetchedProblem = res.data;
+                setProblem(fetchedProblem);
+                if (fetchedProblem.functionDefinitions && fetchedProblem.functionDefinitions[selectedLanguage]) {
+                    setCode(fetchedProblem.functionDefinitions[selectedLanguage].template);
                 } else {
-                    setCode('// Write your code here'); // Fallback boilerplate
+                    setCode('// Language not configured for this problem.');
                 }
-                console.log('Problem fetched successfully:', res.data);
             } catch (err) {
-                console.error(`❌ Error fetching problem ${id}:`, err);
+                console.error(`❌ Error fetching problem ${_id}:`, err);
             }
         };
         fetchProblem();
 
-        // Cleanup interval on component unmount
         return () => {
             if (intervalRef.current) {
-                console.log('Clearing submission status polling interval');
                 clearInterval(intervalRef.current);
             }
         };
-    }, [id, selectedLanguage]);
+    }, [_id, selectedLanguage]);
 
-    // Update code when selectedLanguage changes, using problem's function signatures
     useEffect(() => {
-        if (problem && problem.functionSignatures && problem.functionSignatures[selectedLanguage]) {
-            setCode(problem.functionSignatures[selectedLanguage]);
+        if (problem && problem.functionDefinitions && problem.functionDefinitions[selectedLanguage]) {
+            setCode(problem.functionDefinitions[selectedLanguage].template);
         } else if (problem) {
-            setCode('// Write your code here'); // Fallback boilerplate if no specific boilerplate for language
+            const availableLangs = Object.keys(problem.functionDefinitions);
+            if (availableLangs.length > 0) {
+                setSelectedLanguage(availableLangs[0]);
+                setCode(problem.functionDefinitions[availableLangs[0]].template);
+            } else {
+                setCode('// No function definitions available for this problem.');
+            }
         }
     }, [selectedLanguage, problem]);
 
     const checkStatus = async (submissionId) => {
-        console.log(`Checking status for submission: ${submissionId}`);
         try {
             const res = await axios.get(`/api/submissions/${submissionId}`);
-            console.log('Status response:', res);
             const currentSubmission = res.data;
-            console.log('Current submission status:', currentSubmission.status);
-            console.log('Current submission output:', currentSubmission.output);
             setSubmission(currentSubmission);
-            console.log('Submission status updated:', currentSubmission);
 
             if (currentSubmission.status === 'Success' || currentSubmission.status === 'Fail') {
-                console.log('Polling stopped for submission:', submissionId);
                 clearInterval(intervalRef.current);
                 intervalRef.current = null;
             }
-        } catch (err) {
+        }
+        catch (err) {
             console.error('❌ Error checking status:', err);
             clearInterval(intervalRef.current);
             intervalRef.current = null;
@@ -72,35 +68,27 @@ const ProblemPage = () => {
 
     const handleSubmit = async () => {
         if (intervalRef.current) {
-            console.warn('Submission already in progress.');
-            console.log('Please wait for the current submission to complete.');
             return;
         }
 
         const payload = {
-            problemId: id,
+            problemId: _id,
             code,
             language: selectedLanguage
         };
 
         try {
-            console.log('Submitting code...', payload);
             setSubmission({ status: 'Submitting...', output: '' });
             const res = await axios.post(`/api/submit`, payload);
-            
-            console.log('Code submitted, response:', res);
             const newSubmission = res.data;
             setSubmission(newSubmission);
-            console.log('Submission successful:', newSubmission);
 
-            // Start polling
-            console.log('Starting polling for submission:', newSubmission._id);
             intervalRef.current = setInterval(() => {
                 checkStatus(newSubmission._id);
             }, 2000);
 
         } catch (err) {
-            console.error('❌ Error submitting code:', err);
+            console.error('❌ Error during submission:', err);
             setSubmission({ status: 'Error', output: 'An error occurred during submission.' });
         }
     };
@@ -109,21 +97,25 @@ const ProblemPage = () => {
         return <div>Loading...</div>;
     }
 
+    const availableLanguages = problem.functionDefinitions ? Object.keys(problem.functionDefinitions) : [];
+
     return (
         <div>
-            <h2>{problem.title}</h2>
+            <h2>{problem.title} <Link to={`/problems/${problem._id}/edit`}><button>Edit</button></Link></h2>
             <p>{problem.description}</p>
-            {problem.testCases && problem.testCases.length > 0 && problem.testCases[0].meta && (
+            
+            {problem.expectedIoType && (
                 <div>
-                    <h4>Type Hints:</h4>
-                    {problem.testCases[0].meta.types && (
-                        <p>Input Types: {problem.testCases[0].meta.types.join(', ')}</p>
+                    <h4>I/O Specification:</h4>
+                    {problem.expectedIoType.inputParameters?.length > 0 && (
+                        <p>Input Parameters: {problem.expectedIoType.inputParameters.map(p => `${p.name}: ${p.type}`).join(', ')}</p>
                     )}
-                    {problem.testCases[0].meta.returns && (
-                        <p>Return Type: {problem.testCases[0].meta.returns}</p>
+                    {problem.expectedIoType.outputType && (
+                        <p>Return Type: {problem.expectedIoType.outputType}</p>
                     )}
                 </div>
             )}
+
             <textarea 
                 value={code} 
                 onChange={(e) => setCode(e.target.value)} 
@@ -139,10 +131,9 @@ const ProblemPage = () => {
                 onChange={(e) => setSelectedLanguage(e.target.value)}
                 disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
             >
-                <option value="javascript">JavaScript</option>
-                <option value="python">Python</option>
-                <option value="java">Java</option>
-                <option value="cpp">C++</option>
+                {availableLanguages.map(lang => (
+                    <option key={lang} value={lang}>{lang}</option>
+                ))}
             </select>
             <br />
             <button 

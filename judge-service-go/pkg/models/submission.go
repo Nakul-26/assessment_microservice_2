@@ -7,7 +7,7 @@ import (
 )
 
 type Submission struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID         primitive.ObjectID `json:"_id" bson:"_id,omitempty"`
 	ProblemID  primitive.ObjectID `json:"problemId" bson:"problemId"`
 	UserID     primitive.ObjectID `json:"userId" bson:"userId"`
 	Language   string             `json:"language" bson:"language"`

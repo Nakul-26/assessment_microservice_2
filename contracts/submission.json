@@ -15,9 +15,8 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "input", "expectedOutput"],
+        "required": ["input", "expectedOutput"],
         "properties": {
-          "id": { "type": ["number", "integer"] },
           "type": { "type": "string" },
           "input": {},
           "expectedOutput": {},

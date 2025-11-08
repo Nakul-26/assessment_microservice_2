@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import ProblemListPage from './pages/ProblemListPage';
 import ProblemPage from './pages/ProblemPage';
 import AddProblemPage from './pages/AddProblemPage';
+import EditProblemPage from './pages/EditProblemPage';
 import './App.css';
 
 function App() {
@@ -19,8 +20,9 @@ function App() {
                 </nav>
                 <Routes>
                     <Route path="/" element={<ProblemListPage />} />
-                    <Route path="/problems/:id" element={<ProblemPage />} />
+                    <Route path="/problems/:_id" element={<ProblemPage />} />
                     <Route path="/add-problem" element={<AddProblemPage />} />
+                    <Route path="/problems/:_id/edit" element={<EditProblemPage />} />
                 </Routes>
             </div>
         </Router>

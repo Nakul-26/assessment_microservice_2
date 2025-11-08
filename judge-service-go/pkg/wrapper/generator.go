@@ -31,7 +31,7 @@ func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) 
 }
 
 func generateJavaFunctionCall(p models.Problem) (string, error) {
-	if p.ExpectedIoType == nil || len(p.ExpectedIoType.InputParameters) == 0 {
+	if len(p.ExpectedIoType.InputParameters) == 0 {
 		// Handle cases with no input parameters or problems without defined IO types
 		return "{{CLASS_NAME}}.{{FUNCTION_NAME}}()", nil
 	}

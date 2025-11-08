@@ -139,17 +139,22 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 		return "", "", fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Copy files into container
-	for _, file := range files {
-		content, err := os.ReadFile(filepath.Join(tempDir, file))
-		if err != nil {
-			return "", "", fmt.Errorf("failed to read file %s: %w", file, err)
-		}
-		if err := e.copyToContainer(ctx, containerID, "/app", file, string(content)); err != nil {
-			return "", "", fmt.Errorf("failed to copy file %s to container: %w", file, err)
-		}
-	}
-
+	        // Copy files into container
+	        for _, file := range files {
+	            content, err := os.ReadFile(filepath.Join(tempDir, file))
+	            if err != nil {
+	                return "", "", fmt.Errorf("failed to read file %s: %w", file, err)
+	            }
+	            containerFileName := file
+	            if file == "submission.py" {
+	                containerFileName = "solution.py"
+	            } else if file == "submission.java" {
+	                containerFileName = "Main.java"
+	            }
+	            if err := e.copyToContainer(ctx, containerID, "/app", containerFileName, string(content)); err != nil {
+	                return "", "", fmt.Errorf("failed to copy file %s to container: %w", file, err)
+	            }
+	        }
 	// Run compile command if it exists
 	if len(compileCmd) > 0 {
 		compileStdout, compileStderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, compileCmd, timeout)

@@ -19,46 +19,27 @@
       "items": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "number"
-          },
-          "type": {
-            "type": "string"
-          },
           "input": {
-            "type": "string"
+            "type": "array",
+            "items": {}
           },
-          "expectedOutput": {
-            "type": "string"
-          },
+          "expectedOutput": {},
           "isHidden": {
             "type": "boolean"
           }
         },
-        "required": ["id", "type", "input", "expectedOutput"]
+        "required": ["input", "expectedOutput"]
       }
     },
-    "functionSignatures": {
+    "functionDefinitions": {
       "type": "object",
       "additionalProperties": {
-        "type": "string"
-      }
-    },
-    "functionName": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string"
-      }
-    },
-    "functionSignature": {
-      "type": "object",
-      "properties": {
-        "language": {
-          "type": "string"
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "template": { "type": "string" }
         },
-        "template": {
-          "type": "string"
-        }
+        "required": ["name", "template"]
       }
     },
     "expectedIoType": {
@@ -69,12 +50,8 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string"
-              }
+              "name": { "type": "string" },
+              "type": { "type": "string" }
             },
             "required": ["name", "type"]
           }
@@ -83,7 +60,20 @@
           "type": "string"
         }
       }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "isPremium": {
+      "type": "boolean"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
     }
   },
-  "required": ["title", "description", "difficulty", "testCases", "functionSignatures", "functionName"]
+  "required": ["title", "description", "difficulty", "testCases", "functionDefinitions"]
 }

@@ -3,76 +3,40 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
 const InputParameterSchema = new Schema({
-    name: { type: String, required: true },
-    type: { type: String, required: true }
-}, { _id: false });
+  name: { type: String, required: true },
+  type: { type: String, required: true }
+});
 
 const ProblemSchema = new Schema({
-    id: {
-        type: Number,
-        required: true,
-        unique: true
-    },
-    title: {
-        type: String,
-        required: true
-    },
-    description: {
-        type: String,
-        required: true
-    },
-    difficulty: {
-        type: String,
-        enum: ['Easy', 'Medium', 'Hard'],
-        required: true
-    },
-    testCases: [
-        {
-            id: {
-                type: Number,
-                required: true
-            },
-            type: {
-                type: String,
-                required: true
-            },
-            input: {
-                type: Schema.Types.Mixed,
-                required: true
-            },
-            expectedOutput: {
-                type: Schema.Types.Mixed,
-                required: true
-            },
-            meta: {
-                types: [String],
-                returns: String
-            },
-            isHidden: {
-                type: Boolean,
-                default: false
-            }
-        }
-    ],
-    functionSignatures: {
-        type: Map,
-        of: String,
-        required: true
-    },
-    functionName: {
-        type: Map,
-        of: String,
-        required: true
-    },
-    functionSignature: {
-        language: { type: String },
-        template: { type: String }
-    },
-    expectedIoType: {
-        inputParameters: [InputParameterSchema],
-        outputType: { type: String }
-    },
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  difficulty: { type: String, enum: ['Easy', 'Medium', 'Hard'], required: true },
 
+  testCases: [{
+    input: { type: [Schema.Types.Mixed], required: true },
+    expectedOutput: { type: Schema.Types.Mixed, required: true },
+    isHidden: { type: Boolean, default: false }
+  }],
+
+  // Multi-language support
+  functionDefinitions: {
+    type: Map,
+    of: new Schema({
+      name: { type: String, required: true },
+      template: { type: String, required: true }
+    }),
+    required: true
+  },
+
+  // For automatic code generation and validation
+  expectedIoType: {
+    inputParameters: [InputParameterSchema],
+    outputType: { type: String }
+  },
+
+  tags: [String],
+  isPremium: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now }
 });
 
 export default mongoose.model('Problem', ProblemSchema);

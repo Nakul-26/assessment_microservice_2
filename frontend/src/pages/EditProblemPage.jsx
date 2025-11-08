@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const AddProblemPage = () => {
+const EditProblemPage = () => {
+    const { _id } = useParams();
+    const navigate = useNavigate();
+
     const [formData, setFormData] = useState({
         title: '',
         description: '',
@@ -20,8 +24,35 @@ const AddProblemPage = () => {
             outputType: ''
         }
     });
+
     const [message, setMessage] = useState('');
     const [clientErrors, setClientErrors] = useState([]);
+
+    useEffect(() => {
+        const fetchProblem = async () => {
+            try {
+                const res = await axios.get(`/api/problems/${_id}`);
+                const problem = res.data;
+
+                // Transform fetched data to match form state
+                const transformedData = {
+                    ...problem,
+                    tags: problem.tags ? problem.tags.join(', ') : '',
+                    testCases: problem.testCases.map(tc => ({
+                        input: JSON.stringify(tc.input, null, 2),
+                        expectedOutput: typeof tc.expectedOutput === 'object' ? JSON.stringify(tc.expectedOutput, null, 2) : String(tc.expectedOutput),
+                    })),
+                    functionDefinitions: problem.functionDefinitions || { javascript: { name: '', template: '' }, python: { name: '', template: '' } },
+                };
+
+                setFormData(transformedData);
+            } catch (err) {
+                console.error('Error fetching problem:', err);
+                setMessage('Error fetching problem for edit.');
+            }
+        };
+        fetchProblem();
+    }, [_id]);
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -55,32 +86,23 @@ const AddProblemPage = () => {
         setFormData({ ...formData, expectedIoType: { ...formData.expectedIoType, inputParameters: newParams } });
     };
 
-    const addTestCase = () => {
-        setFormData({ ...formData, testCases: [...formData.testCases, { input: '[]', expectedOutput: '' }] });
-    };
-
     const addIoParam = () => {
         setFormData({ ...formData, expectedIoType: { ...formData.expectedIoType, inputParameters: [...formData.expectedIoType.inputParameters, { name: '', type: '' }] } });
+    };
+
+    const addTestCase = () => {
+        setFormData({ ...formData, testCases: [...formData.testCases, { input: '[]', expectedOutput: '' }] });
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setMessage('');
         setClientErrors([]);
-        
+
         const errs = [];
         if (!formData.title.trim()) errs.push('Title is required');
-        if (!formData.description.trim()) errs.push('Description is required');
-        formData.testCases.forEach((tc, i) => {
-            try {
-                JSON.parse(tc.input);
-            } catch {
-                errs.push(`Test case ${i+1}: input must be valid JSON`);
-            }
-        });
-        const hasFn = Object.values(formData.functionDefinitions).some(v => v.name.trim() !== '' && v.template.trim() !== '');
-        if (!hasFn) errs.push('At least one function definition (name and template) must be provided');
-        
+        // Add more validation as needed...
+
         if (errs.length) {
             setClientErrors(errs);
             return;
@@ -90,33 +112,31 @@ const AddProblemPage = () => {
             ...formData,
             tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
             testCases: formData.testCases.map(tc => ({
-                ...tc,
                 input: JSON.parse(tc.input),
-                expectedOutput: tc.expectedOutput, // Assuming expected output is simple, or needs parsing
+                expectedOutput: tc.expectedOutput, // Adjust parsing if necessary
             })),
         };
 
         try {
-            const res = await axios.post('/api/problems', problemData);
-            setMessage(res.data.message || 'Problem created');
-            console.log('Problem created:', res.data.problem || res.data);
+            await axios.put(`/api/problems/${_id}`, problemData);
+            setMessage('Problem updated successfully.');
+            navigate(`/problems/${_id}`);
         } catch (err) {
-            setMessage('Error creating problem: ' + (err.response?.data ? JSON.stringify(err.response.data) : String(err)));
-            console.error('Error creating problem:', err);
+            setMessage('Error updating problem: ' + (err.response?.data?.message || String(err)));
         }
     };
 
     return (
         <div>
-            <h2>Add New Problem</h2>
+            <h2>Edit Problem</h2>
             {clientErrors.length > 0 && (
-                <div style={{background: '#ffecec', padding: '8px', borderRadius: 4, marginBottom: 12}}>
-                    <strong>Fix the following before submitting:</strong>
+                <div>
+                    <strong>Fix the following:</strong>
                     <ul>{clientErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>
                 </div>
             )}
             {message && <p>{message}</p>}
-            
+
             <form onSubmit={handleSubmit}>
                 <div>
                     <label>Title:</label>
@@ -146,10 +166,10 @@ const AddProblemPage = () => {
                 </div>
 
                 <h3>Test Cases</h3>
-                {formData.testCases.map((testCase, index) => (
-                    <div key={index}>
-                        <textarea name="input" placeholder="Input (as JSON array)" value={testCase.input} onChange={(e) => handleTestCaseChange(index, e)} required />
-                        <textarea name="expectedOutput" placeholder="Expected Output (JSON or scalar)" value={testCase.expectedOutput} onChange={(e) => handleTestCaseChange(index, e)} required />
+                {formData.testCases.map((tc, i) => (
+                    <div key={i}>
+                        <textarea name="input" value={tc.input} onChange={(e) => handleTestCaseChange(i, e)} required />
+                        <textarea name="expectedOutput" value={tc.expectedOutput} onChange={(e) => handleTestCaseChange(i, e)} required />
                     </div>
                 ))}
                 <button type="button" onClick={addTestCase}>Add Test Case</button>
@@ -158,8 +178,8 @@ const AddProblemPage = () => {
                 {Object.keys(formData.functionDefinitions).map(lang => (
                     <div key={lang}>
                         <h4>{lang.charAt(0).toUpperCase() + lang.slice(1)}</h4>
-                        <input type="text" placeholder="Function Name" value={formData.functionDefinitions[lang].name} onChange={e => handleFunctionDefinitionChange(lang, 'name', e.target.value)} />
-                        <textarea placeholder="Function Template" value={formData.functionDefinitions[lang].template} onChange={e => handleFunctionDefinitionChange(lang, 'template', e.target.value)} />
+                        <input type="text" placeholder="Function Name" value={formData.functionDefinitions[lang]?.name || ''} onChange={e => handleFunctionDefinitionChange(lang, 'name', e.target.value)} />
+                        <textarea placeholder="Function Template" value={formData.functionDefinitions[lang]?.template || ''} onChange={e => handleFunctionDefinitionChange(lang, 'template', e.target.value)} />
                     </div>
                 ))}
 
@@ -174,11 +194,11 @@ const AddProblemPage = () => {
                 <div>
                     <input type="text" placeholder="Output Type" value={formData.expectedIoType.outputType} onChange={e => setFormData({...formData, expectedIoType: {...formData.expectedIoType, outputType: e.target.value}})} />
                 </div>
-
-                <button type="submit">Create Problem</button>
+                
+                <button type="submit">Update Problem</button>
             </form>
         </div>
     );
 };
 
-export default AddProblemPage;
+export default EditProblemPage;

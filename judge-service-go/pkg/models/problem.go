@@ -4,41 +4,42 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// TestCase defines the structure for a single test case.
 type TestCase struct {
-	ID             int         `json:"id" bson:"id"`
-	Type           string `json:"type" bson:"type"`
-	Input          string `json:"input" bson:"input"`
-	ExpectedOutput string `json:"expectedOutput" bson:"expectedOutput"`
-	IsHidden       bool   `json:"isHidden" bson:"isHidden"`
+	Input          []interface{} `json:"input" bson:"input"`
+	ExpectedOutput interface{}   `json:"expectedOutput" bson:"expectedOutput"`
+	IsHidden       bool          `json:"isHidden" bson:"isHidden"`
 }
 
-type Problem struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	Title       string             `json:"title" bson:"title"`
-	Description string             `json:"description" bson:"description"`
-	Difficulty  string             `json:"difficulty" bson:"difficulty"`
-	TestCases   []TestCase         `json:"testCases" bson:"testCases"`
-	// Primary function signature to help frontend/template generation
-	FunctionSignature FunctionSignature `json:"functionSignature" bson:"functionSignature"`
-	// Optional per-language signatures (legacy/compat)
-	FunctionSignatures map[string]string `json:"functionSignatures" bson:"functionSignatures"`
-	FunctionName       map[string]string `json:"functionName" bson:"functionName"`
-
-	// Describe expected I/O types so the wrapper generator can parse inputs and post-process outputs
-	ExpectedIoType ExpectedIoType `json:"expectedIoType" bson:"expectedIoType"`
-}
-
-type FunctionSignature struct {
-	Language string `json:"language" bson:"language"`
+// FunctionDefinition holds the name and template for a function in a specific language.
+type FunctionDefinition struct {
+	Name     string `json:"name" bson:"name"`
 	Template string `json:"template" bson:"template"`
 }
 
+// Problem defines the structure for a programming problem.
+type Problem struct {
+	ID                primitive.ObjectID            `json:"_id" bson:"_id,omitempty"`
+	Title             string                        `json:"title" bson:"title"`
+	Description       string                        `json:"description" bson:"description"`
+	Difficulty        string                        `json:"difficulty" bson:"difficulty"`
+	TestCases         []TestCase                    `json:"testCases" bson:"testCases"`
+	FunctionDefinitions map[string]FunctionDefinition `json:"functionDefinitions" bson:"functionDefinitions"`
+	ExpectedIoType    ExpectedIoType                `json:"expectedIoType" bson:"expectedIoType"`
+	Tags              []string                      `json:"tags" bson:"tags"`
+	IsPremium         bool                          `json:"isPremium" bson:"isPremium"`
+	CreatedAt         primitive.DateTime            `json:"createdAt" bson:"createdAt"`
+}
+
+// InputParameter describes a single parameter for a function.
 type InputParameter struct {
 	Name string `json:"name" bson:"name"`
 	Type string `json:"type" bson:"type"`
 }
 
+// ExpectedIoType describes the input and output types for a problem.
 type ExpectedIoType struct {
 	InputParameters []InputParameter `json:"inputParameters" bson:"inputParameters"`
 	OutputType      string           `json:"outputType" bson:"outputType"`
 }
+

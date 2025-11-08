@@ -32,7 +32,7 @@ var Languages = map[string]Language{
 		Name:           "Java",
 		FileExt:        ".java",
 		Image:          "openjdk:17-jdk-alpine",
-		CompileCmd:     []string{"javac", "/app/submission.java"},
+		CompileCmd:     []string{"javac", "/app/Main.java"},
 		RunCmd:         []string{"java", "-cp", "/app", "Main"},
 		WrapperTemplate: "java_wrapper.tpl",
 	},

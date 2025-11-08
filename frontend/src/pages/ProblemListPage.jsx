@@ -1,35 +1,34 @@
 
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { Link } from 'react-router-dom';
+import axios from 'axios';
 
-const ProblemListPage = () => {
-    const [problems, setProblems] = useState([]);
+function ProblemListPage() {
+  const [problems, setProblems] = useState([]);
 
-    useEffect(() => { 
-        const fetchProblems = async () => {
-            console.log('Fetching problems...');
-            try {
-                const base = import.meta.env.VITE_BACKEND_URL || 'https://bookish-space-barnacle-7vv5qx76q5pjcpjv4-3000.app.github.dev';
-                console.log("base url:",base);
-                const res = await axios.get(`/api/problems`);
-                setProblems(res.data);
-                console.log('Problems fetched successfully:', res.data);
-            } catch (err) {
-                console.error('❌ Error fetching problems:', err);
-            }
-        };
-        fetchProblems();
-    }, []);
+  useEffect(() => {
+    axios.get('/api/problems')
+      .then(response => setProblems(response.data))
+      .catch(error => console.error('Error fetching problems:', error));
+  }, []);
 
-    return (
-        <div>
+  const handleDelete = (_id) => {
+    axios.delete(`/api/problems/${_id}`)
+      .then(() => {
+        setProblems(problems.filter(problem => problem._id !== _id));
+      })
+      .catch(error => console.error('Error deleting problem:', error));
+  };
+
+  return (        <div>
             <h2>Problems</h2>
             <ul>
                 {problems.map(problem => (
-                    <li key={problem._id}>
-                        <Link to={`/problems/${problem._id}`}>{problem.title}</Link> - {problem.difficulty}
-                    </li>
+            <li key={problem._id}>
+              <Link to={`/problems/${problem._id}`}>{problem.title}</Link>
+              <Link to={`/problems/${problem._id}/edit`}><button>Edit</button></Link>
+              <button onClick={() => handleDelete(problem._id)}>Delete</button>
+            </li>
                 ))}
             </ul>
         </div>

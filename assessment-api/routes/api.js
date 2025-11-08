@@ -32,11 +32,11 @@ router.get('/problems', async (req, res) => {
     }
 });
 
-// @route   GET /api/problems/:id
+// @route   GET /api/problems/:_id
 // @desc    Get a problem by ID
-router.get('/problems/:id', async (req, res) => {
+router.get('/problems/:_id', async (req, res) => {
     try {
-        const problem = await Problem.findById(req.params.id);
+        const problem = await Problem.findById(req.params._id);
         if (!problem) {
             return res.status(404).json({ msg: 'Problem not found' });
         }
@@ -50,55 +50,95 @@ router.get('/problems/:id', async (req, res) => {
 // @desc    Create a new problem
 router.post('/problems', validate('problem'), async (req, res) => {
     try {
-        // Accept both legacy shape (testCases[].input / expectedOutput) and new shape (inputRaw / expectedOutputRaw)
         const payload = { ...req.body };
-        if (Array.isArray(payload.testCases)) {
-            payload.testCases = payload.testCases.map((tc, idx) => {
-                const out = { ...tc };
-                // map new fields to legacy DB schema
-                if (tc.inputRaw !== undefined && tc.input === undefined) out.input = tryParseMaybeJSON(tc.inputRaw);
-                if (tc.expectedOutputRaw !== undefined && tc.expectedOutput === undefined) out.expectedOutput = tryParseMaybeJSON(tc.expectedOutputRaw);
-                // ensure id/type/isHidden defaults
-                if (out.id === undefined) out.id = tc.id || idx + 1;
-                if (out.type === undefined) out.type = tc.type || 'sample';
-                if (out.isHidden === undefined) out.isHidden = !!tc.isHidden;
-                return out;
-            });
-        }
 
-        // Server-side validation: ensure each test case has input and expectedOutput after mapping
+        // Server-side validation
         const validationErrors = [];
         if (Array.isArray(payload.testCases)) {
             payload.testCases.forEach((tc, i) => {
-                if (tc.input === undefined || tc.input === null || tc.input === '') {
+                if (tc.input === undefined || tc.input === null) {
                     validationErrors.push(`testCases[${i}].input is required`);
                 }
-                if (tc.expectedOutput === undefined || tc.expectedOutput === null || tc.expectedOutput === '') {
+                if (tc.expectedOutput === undefined || tc.expectedOutput === null) {
                     validationErrors.push(`testCases[${i}].expectedOutput is required`);
                 }
             });
         }
 
-        // Ensure there's at least one function name provided for some language
-        const fnMap = payload.functionName || {};
-        const hasFn = Object.keys(fnMap).some(k => fnMap[k] && fnMap[k].toString().trim() !== '');
+        // Ensure there's at least one function definition provided for some language
+        const fnDefs = payload.functionDefinitions || {};
+        const hasFn = Object.keys(fnDefs).some(k => fnDefs[k] && fnDefs[k].name && fnDefs[k].template);
         if (!hasFn) {
-            validationErrors.push('At least one functionName (per-language) must be provided');
+            validationErrors.push('At least one function definition (name and template) must be provided for a language.');
         }
 
         if (validationErrors.length > 0) {
             return res.status(400).json({ msg: 'Validation failed', errors: validationErrors });
         }
 
-        // Ensure maps exist for functionSignatures and functionName (Mongoose expects Map)
-        if (!payload.functionSignatures) payload.functionSignatures = {};
-        if (!payload.functionName) payload.functionName = {};
-
         const newProblem = new Problem(payload);
         const problem = await newProblem.save();
         res.status(201).json({ message: 'Problem created successfully', problem: problem });
     } catch (err) {
         console.error('Error creating problem:', err);
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   DELETE /api/problems/:_id
+// @desc    Delete a problem by ID
+router.delete('/problems/:_id', async (req, res) => {
+    try {
+        const problem = await Problem.findByIdAndDelete(req.params._id);
+        if (!problem) {
+            return res.status(404).json({ msg: 'Problem not found' });
+        }
+        res.json({ msg: 'Problem removed' });
+    } catch (err) {
+        console.error('Error deleting problem:', err);
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   PUT /api/problems/:_id
+// @desc    Update a problem by ID
+router.put('/problems/:_id', validate('problem'), async (req, res) => {
+    try {
+        const { _id } = req.params;
+        const payload = { ...req.body };
+
+        // Server-side validation
+        const validationErrors = [];
+        if (Array.isArray(payload.testCases)) {
+            payload.testCases.forEach((tc, i) => {
+                if (tc.input === undefined || tc.input === null) {
+                    validationErrors.push(`testCases[${i}].input is required`);
+                }
+                if (tc.expectedOutput === undefined || tc.expectedOutput === null) {
+                    validationErrors.push(`testCases[${i}].expectedOutput is required`);
+                }
+            });
+        }
+
+        // Ensure there's at least one function definition provided for some language
+        const fnDefs = payload.functionDefinitions || {};
+        const hasFn = Object.keys(fnDefs).some(k => fnDefs[k] && fnDefs[k].name && fnDefs[k].template);
+        if (!hasFn) {
+            validationErrors.push('At least one function definition (name and template) must be provided for a language.');
+        }
+
+        if (validationErrors.length > 0) {
+            return res.status(400).json({ msg: 'Validation failed', errors: validationErrors });
+        }
+
+        const updatedProblem = await Problem.findByIdAndUpdate(_id, payload, { new: true, runValidators: true });
+
+        if (!updatedProblem) {
+            return res.status(404).json({ msg: 'Problem not found' });
+        }
+        res.json({ message: 'Problem updated successfully', problem: updatedProblem });
+    } catch (err) {
+        console.error('Error updating problem:', err);
         res.status(500).send('Server Error');
     }
 });
@@ -151,79 +191,16 @@ router.post('/problems/preview', async (req, res) => {
             }
         }
 
-        // Build parsed tests using the same rules as the Go wrapper: named lines, positional, JSON, scalar coercion
-        function coerceScalar(s) {
-            s = String(s).trim();
-            if (s === '') return '';
-            if (/^(true|false)$/i.test(s)) return s.toLowerCase() === 'true';
-            if (!isNaN(Number(s)) && s.indexOf(' ') === -1) {
-                // integer or float
-                const n = Number(s);
-                return Number.isInteger(n) ? parseInt(s, 10) : n;
-            }
-            // quoted string
-            if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-                return s.slice(1, -1);
-            }
-            return s;
-        }
-
-        function tryParseJSON(s) {
-            try {
-                return JSON.parse(s);
-            } catch (e) {
-                return null;
-            }
-        }
-
-        function parseInputRaw(raw, expectedIoType) {
-            const out = {};
-            if (!raw) return out;
-            const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-            let namedFound = false;
-            for (const line of lines) {
-                if (line.includes('=')) {
-                    namedFound = true;
-                    const [left, right] = line.split(/=(.+)/).map(s => s.trim());
-                    const parsed = tryParseJSON(right);
-                    out[left] = parsed === null ? coerceScalar(right) : parsed;
-                }
-            }
-            if (namedFound) return out;
-
-            // positional
-            if (expectedIoType && Array.isArray(expectedIoType.inputParameters) && expectedIoType.inputParameters.length > 0) {
-                for (let i = 0; i < expectedIoType.inputParameters.length && i < lines.length; i++) {
-                    const s = lines[i];
-                    const parsed = tryParseJSON(s);
-                    out[expectedIoType.inputParameters[i].name] = parsed === null ? coerceScalar(s) : parsed;
-                }
-                return out;
-            }
-
-            // try full JSON
-            const whole = tryParseJSON(raw);
-            if (whole !== null) {
-                out['input'] = whole;
-                return out;
-            }
-
-            // fallback
-            out['input'] = raw;
-            return out;
-        }
-
         const tests = (problem.testCases || []).map((tc, idx) => {
-            const parsed = parseInputRaw(tc.inputRaw || tc.input || '', problem.expectedIoType || {});
-            const expected = tryParseJSON(tc.expectedOutputRaw || tc.expectedOutput) ?? coerceScalar(tc.expectedOutputRaw || tc.expectedOutput);
-            return { id: (tc.id || idx + 1), input: parsed, expectedOutput: expected, isHidden: !!tc.isHidden };
+            return { input: tc.input, expectedOutput: tc.expectedOutput, isHidden: !!tc.isHidden };
         });
 
         // Replace placeholders in template with serialized tests and a placeholder function name
         const testsJSON = JSON.stringify(tests);
+        const functionName = (problem.functionDefinitions && problem.functionDefinitions[language] && problem.functionDefinitions[language].name) || 'solution';
         tpl = tpl.replace(/{{TESTS_JSON}}/g, testsJSON);
-        tpl = tpl.replace(/{{FUNCTION_NAME}}/g, (problem.functionName && problem.functionName[language]) || 'solution');
-        tpl = tpl.replace(/{{CLASS_NAME}}/g, (problem.functionName && problem.functionName[language]) || 'Main');
+        tpl = tpl.replace(/{{FUNCTION_NAME}}/g, functionName);
+        tpl = tpl.replace(/{{CLASS_NAME}}/g, functionName);
 
         return res.json({ wrapper: tpl, tests: tests });
     } catch (err) {
@@ -264,32 +241,31 @@ router.post('/submit', validate('submission'), async (req, res) => {
         await channel.assertQueue(QUEUE_NAME, { durable: true });
 
         const tests = problem.testCases.map(tc => ({
-            id: tc.id,
             input: tc.input,
             expectedOutput: tc.expectedOutput,
-            isHidden: tc.isHidden,
-            type: tc.type,
+            isHidden: tc.isHidden
         }));
 
+        const functionName = problem.functionDefinitions.get(language)?.name || 'solution';
+
         const messageBody = {
-            schemaVersion: 'v1',
+            schemaVersion: 'v2', // New version
             submissionId: submission._id.toString(),
             problemId: problem._id.toString(),
             language,
             code,
-            tests: tests, // Include test cases
-            // functionName: problem.functionName.get(language) // Include function name for the specific language
+            tests: tests,
+            functionName: functionName
         };
 
         // Lightweight runtime validation to ensure message conforms to expected contract
         function validateSubmissionMessage(msg) {
             if (!msg || typeof msg !== 'object') return false;
-            if (!msg.submissionId || !msg.problemId || !msg.language || !msg.code) return false;
+            if (!msg.submissionId || !msg.problemId || !msg.language || !msg.code || !msg.functionName) return false;
             if (msg.tests && !Array.isArray(msg.tests)) return false;
             if (Array.isArray(msg.tests)) {
                 for (const t of msg.tests) {
                     if (typeof t !== 'object') return false;
-                    if (!(t.id !== undefined)) return false;
                     if (!('input' in t) || !('expectedOutput' in t)) return false;
                 }
             }
@@ -318,25 +294,25 @@ router.post('/submit', validate('submission'), async (req, res) => {
     }
 });
 
-// @route   GET /api/submissions/:id
+// @route   GET /api/submissions/:_id
 // @desc    Get submission status and result
-router.get('/submissions/:id', async (req, res) => {
-    const { id } = req.params;
+router.get('/submissions/:_id', async (req, res) => {
+    const { _id } = req.params;
 
     try {
         // 1. Check Redis cache first
-        const cachedResult = await redisClient.get(`submission:${id}`);
+        const cachedResult = await redisClient.get(`submission:${_id}`);
         if (cachedResult) {
-            console.log(`Cache hit for submission: ${id}`);
+            console.log(`Cache hit for submission: ${_id}`);
             console.log('Cached result:', cachedResult);
-            console.log('Returning cached result for submission:', id);
+            console.log('Returning cached result for submission:', _id);
             console.log('Parsed cached result:', JSON.parse(cachedResult));
             return res.json(JSON.parse(cachedResult));
         }
 
         // 2. If not in cache, get from MongoDB
-        console.log(`Cache miss for submission: ${id}. Checking DB.`);
-        const submission = await Submission.findById(id);
+        console.log(`Cache miss for submission: ${_id}. Checking DB.`);
+        const submission = await Submission.findById(_id);
         console.log('Submission fetched from DB:', submission);
         if (!submission) {
             return res.status(404).json({ msg: 'Submission not found' });
@@ -345,7 +321,7 @@ router.get('/submissions/:id', async (req, res) => {
         console.log('Submission status:', submission.status);
         // Optional: Cache the result if it's final (Success/Fail)
         if (submission.status === 'Success' || submission.status === 'Fail') {
-            await redisClient.set(`submission:${id}`, JSON.stringify(submission), { EX: 3600 }); // Cache for 1 hour
+            await redisClient.set(`submission:${_id}`, JSON.stringify(submission), { EX: 3600 }); // Cache for 1 hour
         }
         // console.log('Submission fetched from DB:', submission);
         res.json(submission);
