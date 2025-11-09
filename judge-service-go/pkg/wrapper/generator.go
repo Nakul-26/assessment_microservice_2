@@ -18,7 +18,19 @@ func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) 
 	}
 	tpl := string(b)
 
-	// Add logic for dynamic function call generation for Java
+	// Replace generic placeholders
+	functionName := p.ExpectedIoType.FunctionName
+	if functionName == "" {
+		// Fallback to functionDefinitions if ExpectedIoType.FunctionName is not set
+		if def, ok := p.FunctionDefinitions[lang.ID]; ok {
+			functionName = def.Name
+		}
+	}
+	tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", functionName)
+	tpl = strings.ReplaceAll(tpl, "{{EXPECTED_OUTPUT_TYPE}}", p.ExpectedIoType.ReturnType)
+	tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(p.TestsJSON)) // assume TestsJSON is []byte or string
+
+	// Java-specific logic
 	if lang.ID == "java" {
 		functionCallLine, err := generateJavaFunctionCall(p)
 		if err != nil {

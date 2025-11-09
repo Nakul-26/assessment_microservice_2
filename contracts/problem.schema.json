@@ -31,6 +31,9 @@
         "required": ["input", "expectedOutput"]
       }
     },
+    "testsJSON": {
+      "type": "string"
+    },
     "functionDefinitions": {
       "type": "object",
       "additionalProperties": {
@@ -45,6 +48,9 @@
     "expectedIoType": {
       "type": "object",
       "properties": {
+        "functionName": {
+          "type": "string"
+        },
         "inputParameters": {
           "type": "array",
           "items": {
@@ -56,7 +62,7 @@
             "required": ["name", "type"]
           }
         },
-        "outputType": {
+        "returnType": {
           "type": "string"
         }
       }

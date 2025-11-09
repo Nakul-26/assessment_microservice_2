@@ -24,6 +24,7 @@ type Problem struct {
 	Description       string                        `json:"description" bson:"description"`
 	Difficulty        string                        `json:"difficulty" bson:"difficulty"`
 	TestCases         []TestCase                    `json:"testCases" bson:"testCases"`
+	TestsJSON         []byte                        `json:"testsJSON" bson:"testsJSON"`
 	FunctionDefinitions map[string]FunctionDefinition `json:"functionDefinitions" bson:"functionDefinitions"`
 	ExpectedIoType    ExpectedIoType                `json:"expectedIoType" bson:"expectedIoType"`
 	Tags              []string                      `json:"tags" bson:"tags"`
@@ -39,7 +40,8 @@ type InputParameter struct {
 
 // ExpectedIoType describes the input and output types for a problem.
 type ExpectedIoType struct {
+	FunctionName    string           `json:"functionName" bson:"functionName"`
 	InputParameters []InputParameter `json:"inputParameters" bson:"inputParameters"`
-	OutputType      string           `json:"outputType" bson:"outputType"`
+	ReturnType      string           `json:"returnType" bson:"returnType"`
 }
 

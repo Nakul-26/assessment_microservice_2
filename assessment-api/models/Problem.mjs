@@ -18,6 +18,8 @@ const ProblemSchema = new Schema({
     isHidden: { type: Boolean, default: false }
   }],
 
+  testsJSON: { type: String },
+
   // Multi-language support
   functionDefinitions: {
     type: Map,
@@ -30,8 +32,9 @@ const ProblemSchema = new Schema({
 
   // For automatic code generation and validation
   expectedIoType: {
+    functionName: { type: String },
     inputParameters: [InputParameterSchema],
-    outputType: { type: String }
+    returnType: { type: String }
   },
 
   tags: [String],

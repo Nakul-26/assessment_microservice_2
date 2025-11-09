@@ -109,6 +109,9 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		return
 	}
 
+	// Populate problem.TestsJSON
+	problem.TestsJSON = testsJSON
+
 	// Generate wrapper code
 	wrapperCode, err := wrapper.GenerateWrapper(problem, lang)
 	if err != nil {
@@ -117,11 +120,12 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		return
 	}
 
-	// Replace placeholders in the wrapper code
-	wrapperCode = strings.ReplaceAll(wrapperCode, "{{FUNCTION_NAME}}", submissionMsg.FunctionName)
-	wrapperCode = strings.ReplaceAll(wrapperCode, "{{CLASS_NAME}}", submissionMsg.FunctionName) // Simple mapping for now
-	wrapperCode = strings.Replace(wrapperCode, "{{TESTS_JSON}}", string(testsJSON), 1)
-	wrapperCode = strings.ReplaceAll(wrapperCode, "{{EXPECTED_OUTPUT_TYPE}}", problem.ExpectedIoType.OutputType)
+	// For Java, generateJavaFunctionCall returns a string with {{CLASS_NAME}} and {{FUNCTION_NAME}}
+	// These need to be replaced here.
+	if lang.ID == "java" {
+		wrapperCode = strings.ReplaceAll(wrapperCode, "{{CLASS_NAME}}", submissionMsg.FunctionName)
+		wrapperCode = strings.ReplaceAll(wrapperCode, "{{FUNCTION_NAME}}", submissionMsg.FunctionName)
+	}
 
 	var filesToCopy []string
 	if lang.ID == "javascript" {

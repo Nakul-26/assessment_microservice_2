@@ -16,8 +16,9 @@ const AddProblemPage = () => {
             cpp: { name: '', template: '' }
         },
         expectedIoType: {
+            functionName: '',
             inputParameters: [{ name: '', type: '' }],
-            outputType: ''
+            returnType: ''
         }
     });
     const [message, setMessage] = useState('');
@@ -89,11 +90,19 @@ const AddProblemPage = () => {
         const problemData = {
             ...formData,
             tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-            testCases: formData.testCases.map(tc => ({
-                ...tc,
-                input: JSON.parse(tc.input),
-                expectedOutput: tc.expectedOutput, // Assuming expected output is simple, or needs parsing
-            })),
+            testCases: formData.testCases.map(tc => {
+                let expected;
+                try {
+                    expected = JSON.parse(tc.expectedOutput);
+                } catch (e) {
+                    expected = tc.expectedOutput;
+                }
+                return {
+                    ...tc,
+                    input: JSON.parse(tc.input),
+                    expectedOutput: expected,
+                };
+            }),
         };
 
         try {
@@ -164,6 +173,9 @@ const AddProblemPage = () => {
                 ))}
 
                 <h3>Expected I/O Types</h3>
+                <div>
+                    <input type="text" placeholder="Function Name" value={formData.expectedIoType.functionName} onChange={e => setFormData({...formData, expectedIoType: {...formData.expectedIoType, functionName: e.target.value}})} />
+                </div>
                 {formData.expectedIoType.inputParameters.map((param, index) => (
                     <div key={index}>
                         <input type="text" name="name" placeholder="Param Name" value={param.name} onChange={e => handleIoParamChange(index, e)} />
@@ -172,7 +184,7 @@ const AddProblemPage = () => {
                 ))}
                 <button type="button" onClick={addIoParam}>Add Input Parameter</button>
                 <div>
-                    <input type="text" placeholder="Output Type" value={formData.expectedIoType.outputType} onChange={e => setFormData({...formData, expectedIoType: {...formData.expectedIoType, outputType: e.target.value}})} />
+                    <input type="text" placeholder="Return Type" value={formData.expectedIoType.returnType} onChange={e => setFormData({...formData, expectedIoType: {...formData.expectedIoType, returnType: e.target.value}})} />
                 </div>
 
                 <button type="submit">Create Problem</button>
