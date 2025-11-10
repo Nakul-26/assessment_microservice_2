@@ -102,18 +102,21 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 	containerOptions := docker.CreateContainerOptions{
 		Config: &docker.Config{
 			Image:      languageImage,
+			User:       "nobody", // Run as non-root user
 			Cmd:        []string{"tail", "-f", "/dev/null"}, // Keep container alive
 			WorkingDir: "/app",
 			Tty:        false,
 		},
 		HostConfig: &docker.HostConfig{
-			AutoRemove:  true,
-			NetworkMode: "none",
-			Memory:      256 * 1024 * 1024, // 256 MB
-			CPUQuota:    50000,             // 50% of one CPU core
-			PidsLimit:   &pidsLimit,
+			AutoRemove:     true,
+			NetworkMode:    "none",
+			ReadonlyRootfs: false, // Make filesystem readonly
+			Memory:         256 * 1024 * 1024, // 256 MB
+			CPUQuota:       50000,             // 50% of one CPU core
+			PidsLimit:      &pidsLimit,
 		},
 	}
+	log.Printf("ReadonlyRootfs: %v", containerOptions.HostConfig.ReadonlyRootfs)
 	container, err := e.cli.CreateContainer(containerOptions)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create container: %w", err)
@@ -145,13 +148,7 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 	            if err != nil {
 	                return "", "", fmt.Errorf("failed to read file %s: %w", file, err)
 	            }
-	            containerFileName := file
-	            if file == "submission.py" {
-	                containerFileName = "solution.py"
-	            } else if file == "submission.java" {
-	                containerFileName = "Main.java"
-	            }
-	            if err := e.copyToContainer(ctx, containerID, "/app", containerFileName, string(content)); err != nil {
+	            if err := e.copyToContainer(ctx, containerID, "/app", file, string(content)); err != nil {
 	                return "", "", fmt.Errorf("failed to copy file %s to container: %w", file, err)
 	            }
 	        }

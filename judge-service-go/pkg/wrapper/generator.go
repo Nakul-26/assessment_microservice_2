@@ -45,30 +45,45 @@ func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) 
 func generateJavaFunctionCall(p models.Problem) (string, error) {
 	if len(p.ExpectedIoType.InputParameters) == 0 {
 		// Handle cases with no input parameters or problems without defined IO types
-		return "{{CLASS_NAME}}.{{FUNCTION_NAME}}()", nil
+		return "new {{CLASS_NAME}}().{{FUNCTION_NAME}}()", nil
 	}
 
 	var args []string
 	for i, param := range p.ExpectedIoType.InputParameters {
-		switch param.Type {
-		case "int":
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), Integer.class)", i))
-		case "String":
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), String.class)", i))
-		case "int[]":
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), int[].class)", i))
-		case "String[]":
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), String[].class)", i))
-		case "boolean":
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), Boolean.class)", i))
-		case "double":
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), Double.class)", i))
-		// Add more types as needed
-		default:
-			return "", fmt.Errorf("unsupported Java input type: %s", param.Type)
+		javaType := toJavaType(param.Type)
+		if strings.HasPrefix(javaType, "ListNode") {
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), %s.class)", i, "ListNode"))
+		} else if strings.HasPrefix(javaType, "TreeNode") {
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), %s.class)", i, "TreeNode"))
+		} else {
+			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), %s.class)", i, javaType))
 		}
 	}
 
 	// The class name and function name will be replaced in main.go
-	return fmt.Sprintf("{{CLASS_NAME}}.{{FUNCTION_NAME}}(%s)", strings.Join(args, ", ")), nil
+	return fmt.Sprintf("new {{CLASS_NAME}}().{{FUNCTION_NAME}}(%s)", strings.Join(args, ", ")), nil
+}
+
+func toJavaType(jsonType string) string {
+	switch jsonType {
+	case "int":
+		return "Integer"
+	case "String":
+		return "String"
+	case "int[]":
+		return "int[]"
+	case "String[]":
+		return "String[]"
+	case "boolean":
+		return "Boolean"
+	case "double":
+		return "Double"
+	case "ListNode":
+		return "ListNode"
+	case "TreeNode":
+		return "TreeNode"
+	default:
+		// Capitalize first letter for class types
+		return strings.ToUpper(string(jsonType[0])) + jsonType[1:]
+	}
 }

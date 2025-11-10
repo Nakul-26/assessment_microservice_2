@@ -23,6 +23,7 @@ import (
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/wrapper"
+	"regexp"
 )
 
 const (
@@ -34,6 +35,15 @@ const (
 	defaultSandboxTimeout  = 5 * time.Second
 )
 
+func toSnakeCase(str string) string {
+	var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
+	var matchAllCap   = regexp.MustCompile("([a-z0-9])([A-Z])")
+
+	snake := matchFirstCap.ReplaceAllString(str, "${1}_${2}")
+	snake  = matchAllCap.ReplaceAllString(snake, "${1}_${2}")
+	return strings.ToLower(snake)
+}
+
 func failOnError(err error, msg string) {
 	if err != nil {
 		log.Panicf("%s: %s", msg, err)
@@ -43,23 +53,15 @@ func failOnError(err error, msg string) {
 func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, ch *amqp.Channel, resultQueueName string, executor *executor.Executor) {
 	log.Printf("Received a message: %s", d.Body)
 
-	var submissionMsg struct {
-		SchemaVersion string `json:"schemaVersion"`
-		SubmissionID  string `json:"submissionId"`
-		ProblemID     string `json:"problemId"`
-		Language      string `json:"language"`
-		Code          string `json:"code"`
-		FunctionName  string `json:"functionName"`
-		Tests         []struct {
-			Input          []interface{} `json:"input"`
-			ExpectedOutput interface{}   `json:"expectedOutput"`
-		} `json:"tests"`
-	}
-
+	var submissionMsg models.SubmissionMessageMessage
 	if err := json.Unmarshal(d.Body, &submissionMsg); err != nil {
 		log.Printf("Error unmarshalling submission message: %v", err)
 		d.Nack(false, false)
 		return
+	}
+
+	if submissionMsg.Language == "python" {
+		submissionMsg.FunctionName = toSnakeCase(submissionMsg.FunctionName)
 	}
 
 	if submissionMsg.SubmissionID == "" || submissionMsg.ProblemID == "" || submissionMsg.Language == "" || submissionMsg.Code == "" || submissionMsg.FunctionName == "" {
@@ -67,9 +69,6 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		d.Nack(false, false)
 		return
 	}
-
-	log.Printf("Processing submission %s for problem %s in %s", submissionMsg.SubmissionID, submissionMsg.ProblemID, submissionMsg.Language)
-
 	// Fetch Problem from MongoDB
 	objID, err := primitive.ObjectIDFromHex(submissionMsg.ProblemID)
 	if err != nil {
@@ -120,14 +119,22 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		return
 	}
 
-	// For Java, generateJavaFunctionCall returns a string with {{CLASS_NAME}} and {{FUNCTION_NAME}}
-	// These need to be replaced here.
+	// Replace compare mode
+	compareMode := submissionMsg.CompareMode
+	if compareMode == "" {
+		compareMode = "STRUCTURAL" // Default compare mode
+	}
+	wrapperCode = strings.ReplaceAll(wrapperCode, "{{COMPARE_MODE}}", compareMode)
+
+	// For Java, generateJavaFunctionCall returns a string with {{CLASS_NAME}}
+	// This needs to be replaced here.
 	if lang.ID == "java" {
 		wrapperCode = strings.ReplaceAll(wrapperCode, "{{CLASS_NAME}}", submissionMsg.FunctionName)
-		wrapperCode = strings.ReplaceAll(wrapperCode, "{{FUNCTION_NAME}}", submissionMsg.FunctionName)
 	}
 
 	var filesToCopy []string
+	var compileCmd, runCmd []string
+
 	if lang.ID == "javascript" {
 		submissionFileName := "submission.js"
 		wrapperFileName := "wrapper.js"
@@ -143,16 +150,49 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 			return
 		}
 		filesToCopy = []string{submissionFileName, wrapperFileName}
+		runCmd = lang.RunCmd
 	} else {
 		finalCode := strings.Replace(wrapperCode, "// USER_CODE_MARKER", submissionMsg.Code, 1)
 		finalCode = strings.Replace(finalCode, "# USER_CODE_MARKER", submissionMsg.Code, 1)
-		submissionFileName := "submission" + lang.FileExt
+		
+		var submissionFileName string
+		if lang.ID == "java" {
+			submissionFileName = submissionMsg.FunctionName + ".java"
+		} else if lang.ID == "python" {
+			submissionFileName = "wrapper.py"
+			solutionFileName := "solution.py"
+			if err := os.WriteFile(filepath.Join(tempDir, solutionFileName), []byte(submissionMsg.Code), 0644); err != nil {
+				log.Printf("Failed to write solution file: %v", err)
+				d.Nack(false, false)
+				return
+			}
+		} else {
+			submissionFileName = "submission" + lang.FileExt
+		}
+
 		if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
 			log.Printf("Failed to write combined submission file: %v", err)
 			d.Nack(false, false)
 			return
 		}
-		filesToCopy = []string{submissionFileName}
+
+		if lang.ID == "python" {
+			filesToCopy = []string{submissionFileName, "solution.py"}
+		} else {
+			filesToCopy = []string{submissionFileName}
+		}
+
+		compileCmd = lang.CompileCmd
+		runCmd = lang.RunCmd
+		// Replace {{CLASS_NAME}} in commands
+		if lang.ID == "java" {
+			for i, cmd := range compileCmd {
+				compileCmd[i] = strings.ReplaceAll(cmd, "{{CLASS_NAME}}", submissionMsg.FunctionName)
+			}
+			for i, cmd := range runCmd {
+				runCmd[i] = strings.ReplaceAll(cmd, "{{CLASS_NAME}}", submissionMsg.FunctionName)
+			}
+		}
 	}
 
 	// Run submission in Docker
@@ -161,8 +201,8 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		lang.Image,
 		filesToCopy,
 		tempDir,
-		lang.CompileCmd,
-		lang.RunCmd,
+		compileCmd,
+		runCmd,
 		defaultSandboxTimeout,
 	)
 
