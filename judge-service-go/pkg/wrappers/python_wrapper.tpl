@@ -121,36 +121,17 @@ def _structural_deep_equal(a, b, epsilon):
         
     return False
 
-def safe_serialize(obj):
-    # A basic serializer that handles simple circular refs and common types
-    visited = set()
-    def _serialize(o):
-        if id(o) in visited:
-            return '[Circular]'
-        if isinstance(o, (list, tuple, dict)):
-            visited.add(id(o))
-
-        if isinstance(o, dict):
-            return {_serialize(k): _serialize(v) for k, v in o.items()}
-        if isinstance(o, (list, tuple)):
-            return [_serialize(elem) for elem in o]
-        # Add other types as needed
-        return o
-    
-    try:
-        return json.dumps(_serialize(obj), indent=2)
-    except TypeError:
-        # Fallback for unserializable types
-        return json.dumps(str(obj), indent=2)
-
-
 def diff_summary(actual, expected):
+    # The `normalize` function should produce JSON-serializable output.
+    def dumps(obj):
+        return json.dumps(obj, indent=2)
+
     if isinstance(actual, list) and isinstance(expected, list):
         if len(actual) != len(expected):
             return f"Array length mismatch: expected {len(expected)}, got {len(actual)}"
         for i, (a, e) in enumerate(zip(actual, expected)):
             if not deep_equal(a, e):
-                return f"Mismatch at index {i}: expected {safe_serialize(e)}, got {safe_serialize(a)}"
+                return f"Mismatch at index {i}: expected {dumps(e)}, got {dumps(a)}"
     if isinstance(actual, dict) and isinstance(expected, dict):
         keys_a = set(actual.keys())
         keys_b = set(expected.keys())
@@ -163,11 +144,12 @@ def diff_summary(actual, expected):
             return '; '.join(msg)
         for key in keys_b:
             if not deep_equal(actual[key], expected[key]):
-                return f"Mismatch at key '{key}': expected {safe_serialize(expected[key])}, got {safe_serialize(actual[key])}"
-    return f"Values differ: expected {safe_serialize(expected)}, got {safe_serialize(actual)}"
+                return f"Mismatch at key '{key}': expected {dumps(expected[key])}, got {dumps(actual[key])}"
+    return f"Values differ: expected {dumps(expected)}, got {dumps(actual)}"
 
 def truncate_output(obj, max_len=2000):
-    s = safe_serialize(obj)
+    # After `normalize`, obj should be JSON serializable.
+    s = json.dumps(obj)
     if len(s) > max_len:
         return s[:max_len] + '...(truncated)'
     return obj # Return original object if not truncated to preserve type for final json dump

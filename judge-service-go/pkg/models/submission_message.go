@@ -1,11 +1,5 @@
 package models
 
-type TestCase struct {
-	Input          []interface{} `json:"input"`
-	ExpectedOutput []interface{} `json:"expectedOutput"`
-	IsHidden       bool          `json:"isHidden"`
-}
-
 type SubmissionMessage struct {
 	SchemaVersion string     `json:"schemaVersion"`
 	SubmissionID  string     `json:"submissionId"`

@@ -20,7 +20,7 @@ async function testSubmission() {
         }
 
         const submissionData = {
-            problem: problem._id,
+            problemId: problem._id,
             language: 'python',
             code: `def two_sum(nums, target):
     for i in range(len(nums)):
@@ -43,7 +43,7 @@ async function testSubmission() {
         await connection.close();
 
         // Wait for a few seconds to allow the judge to process the submission
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 15000));
 
         const result = await Submission.findById(submission._id);
         console.log('✅ Submission result:', result);

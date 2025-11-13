@@ -14,11 +14,14 @@ function loadSchema(schemaName) {
 
 export function validate(schemaName) {
   const schema = loadSchema(schemaName);
-  const validate = ajv.compile(schema);
+  const compiledSchema = ajv.compile(schema);
 
   return (req, res, next) => {
-    if (!validate(req.body)) {
-      return res.status(400).json({ errors: validate.errors });
+    if (req.body.expectedIoType && req.body.expectedIoType.inputParameters) {
+      req.body.expectedIoType.inputParameters = req.body.expectedIoType.inputParameters.filter(p => p.name.trim() !== '');
+    }
+    if (!compiledSchema(req.body)) {
+      return res.status(400).json({ errors: compiledSchema.errors });
     }
     next();
   };

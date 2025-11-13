@@ -1,11 +1,11 @@
 
 import amqp from 'amqplib';
 import mongoose from 'mongoose';
-import Submission from './assessment-api/models/Submission.mjs';
-import Problem from './assessment-api/models/Problem.mjs';
+import Submission from './models/Submission.mjs';
+import Problem from './models/Problem.mjs';
 
-const MONGO_URI = 'mongodb://localhost:27017/assessment_db';
-const RABBITMQ_URI = 'amqp://user:password@localhost:5672';
+const MONGO_URI = 'mongodb://mongo:27017/assessment_db';
+const RABBITMQ_URI = 'amqp://user:password@rabbitmq:5672';
 const QUEUE_NAME = 'submission_queue';
 
 async function testSubmission() {
@@ -20,7 +20,7 @@ async function testSubmission() {
         }
 
         const submissionData = {
-            problem: problem._id,
+            problemId: problem._id,
             language: 'python',
             code: `def two_sum(nums, target):
     for i in range(len(nums)):
@@ -43,7 +43,7 @@ async function testSubmission() {
         await connection.close();
 
         // Wait for a few seconds to allow the judge to process the submission
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 15000));
 
         const result = await Submission.findById(submission._id);
         console.log('✅ Submission result:', result);

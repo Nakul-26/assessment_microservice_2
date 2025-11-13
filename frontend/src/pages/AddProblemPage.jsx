@@ -103,6 +103,10 @@ const AddProblemPage = () => {
                     expectedOutput: expected,
                 };
             }),
+            expectedIoType: {
+                ...formData.expectedIoType,
+                inputParameters: formData.expectedIoType.inputParameters.filter(p => p.name.trim() !== ''),
+            }
         };
 
         try {

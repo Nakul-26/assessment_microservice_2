@@ -78,6 +78,41 @@ const sampleProblems = [
             ],
             outputType: 'number'
         }
+    },
+    {
+        title: 'Valid Palindrome',
+        description: 'Given a string `s`, return `true` if it is a palindrome, or `false` otherwise.',
+        difficulty: 'Easy',
+        tags: ['String', 'Two Pointers'],
+        isPremium: false,
+        testCases: [
+            {
+                input: ['A man, a plan, a canal: Panama'],
+                expectedOutput: true,
+                isHidden: false
+            },
+            {
+                input: ['race a car'],
+                expectedOutput: false,
+                isHidden: false
+            }
+        ],
+        functionDefinitions: {
+            javascript: {
+                name: 'isPalindrome',
+                template: 'function isPalindrome(s) {\n  // your code here\n}'
+            },
+            python: {
+                name: 'is_palindrome',
+                template: 'def is_palindrome(s):\n    pass'
+            }
+        },
+        expectedIoType: {
+            inputParameters: [
+                { name: 's', type: 'string' }
+            ],
+            outputType: 'boolean'
+        }
     }
 ];
 
