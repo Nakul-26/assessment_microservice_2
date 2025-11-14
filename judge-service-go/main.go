@@ -53,7 +53,7 @@ func failOnError(err error, msg string) {
 func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, ch *amqp.Channel, resultQueueName string, executor *executor.Executor) {
 	log.Printf("Received a message: %s", d.Body)
 
-	var submissionMsg models.SubmissionMessageMessage
+	var submissionMsg models.SubmissionMessage
 	if err := json.Unmarshal(d.Body, &submissionMsg); err != nil {
 		log.Printf("Error unmarshalling submission message: %v", err)
 		d.Nack(false, false)
@@ -166,6 +166,10 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 				d.Nack(false, false)
 				return
 			}
+		} else if lang.ID == "c" {
+			submissionFileName = "main.c"
+		} else if lang.ID == "csharp" {
+			submissionFileName = "main.cs"
 		} else {
 			submissionFileName = "submission" + lang.FileExt
 		}

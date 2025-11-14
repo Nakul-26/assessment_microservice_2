@@ -17,7 +17,8 @@ const EditProblemPage = () => {
             javascript: { name: '', template: '' },
             python: { name: '', template: '' },
             java: { name: '', template: '' },
-            cpp: { name: '', template: '' }
+            c: { name: '', template: '' },
+            csharp: { name: '', template: '' }
         },
         expectedIoType: {
             functionName: '',
@@ -43,7 +44,7 @@ const EditProblemPage = () => {
                         input: JSON.stringify(tc.input, null, 2),
                         expectedOutput: typeof tc.expectedOutput === 'object' ? JSON.stringify(tc.expectedOutput, null, 2) : String(tc.expectedOutput),
                     })),
-                    functionDefinitions: problem.functionDefinitions || { javascript: { name: '', template: '' }, python: { name: '', template: '' } },
+                    functionDefinitions: problem.functionDefinitions || { javascript: { name: '', template: '' }, python: { name: '', template: '' }, java: { name: '', template: '' }, c: { name: '', template: '' }, csharp: { name: '', template: '' } },
                 };
 
                 setFormData(transformedData);

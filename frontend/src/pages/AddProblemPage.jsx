@@ -13,7 +13,8 @@ const AddProblemPage = () => {
             javascript: { name: '', template: '' },
             python: { name: '', template: '' },
             java: { name: '', template: '' },
-            cpp: { name: '', template: '' }
+            c: { name: '', template: '' },
+            csharp: { name: '', template: '' }
         },
         expectedIoType: {
             functionName: '',

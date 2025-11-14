@@ -170,7 +170,9 @@ router.post('/problems/preview', async (req, res) => {
         const langTplFile = {
             javascript: 'js_wrapper.tpl',
             python: 'python_wrapper.tpl',
-            java: 'java_wrapper.tpl'
+            java: 'java_wrapper.tpl',
+            c: 'c_wrapper.tpl',
+            csharp: 'csharp_wrapper.tpl'
         }[language] || 'js_wrapper.tpl';
 
         const fs = await import('fs');
