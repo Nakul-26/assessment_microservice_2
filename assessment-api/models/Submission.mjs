@@ -26,6 +26,9 @@ const SubmissionSchema = new Schema({
     },
     testResult: {
         type: Object // To store the structured result from the judge service
+    },
+    tests: {
+        type: Array
     }
 }, { timestamps: true });
 

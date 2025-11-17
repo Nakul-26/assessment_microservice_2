@@ -20,7 +20,7 @@ async function testSubmission() {
         }
 
         const submissionData = {
-            problem: problem._id,
+            problemId: problem._id,
             language: 'javascript',
             code: `function addTwoNumbers(num1, num2) {\n  return num1 + num2;\n}`
         };

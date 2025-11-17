@@ -102,7 +102,7 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 	containerOptions := docker.CreateContainerOptions{
 		Config: &docker.Config{
 			Image:      languageImage,
-			User:       "nobody", // Run as non-root user
+			User:       "judge", // Run as non-root user
 			Cmd:        []string{"tail", "-f", "/dev/null"}, // Keep container alive
 			WorkingDir: "/app",
 			Tty:        false,

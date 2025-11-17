@@ -122,6 +122,56 @@ services:
     networks:
       - assessment-net
 
+  judge-java:
+    build:
+      context: ./judge-service-go/environments/java
+      dockerfile: Dockerfile
+    image: judge-java-env
+    pull_policy: build
+    container_name: judge_java_env
+    networks:
+      - assessment-net
+
+  judge-js:
+    build:
+      context: ./judge-service-go/environments/javascript
+      dockerfile: Dockerfile
+    image: judge-js-env
+    pull_policy: build
+    container_name: judge_js_env
+    networks:
+      - assessment-net
+
+  judge-py:
+    build:
+      context: ./judge-service-go/environments/python
+      dockerfile: Dockerfile
+    image: judge-py-env
+    pull_policy: build
+    container_name: judge_py_env
+    networks:
+      - assessment-net
+
+  judge-c:
+    build:
+      context: ./judge-service-go/environments/c
+      dockerfile: Dockerfile
+    image: judge-c-env
+    pull_policy: build
+    container_name: judge_c_env
+    networks:
+      - assessment-net
+
+  judge-csharp:
+    build:
+      context: ./judge-service-go/environments/csharp
+      dockerfile: Dockerfile
+    image: judge-csharp-env
+    pull_policy: build
+    container_name: judge_csharp_env
+    networks:
+      - assessment-net
+
   frontend:
     build:
       context: ./frontend
