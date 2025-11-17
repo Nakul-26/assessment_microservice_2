@@ -18,6 +18,8 @@ async function testSubmission() {
             console.error('❌ Problem not found');
             return;
         }
+        console.log('Debug: problem object =', problem);
+        console.log('Debug: problem.functionName.java =', problem.functionName.java);
 
         const submissionData = {
             problemId: problem._id,
@@ -40,13 +42,14 @@ async function testSubmission() {
         const channel = await connection.createChannel();
         await channel.assertQueue(QUEUE_NAME, { durable: true });
 
+        console.log('Debug: problem.functionName.java =', problem.functionName.java);
         const msg = {
             submissionId: submission._id.toString(),
             problemId: problem._id.toString(),
             language: submission.language,
             code: submission.code,
-            tests: problem.tests,
-            functionName: problem.functionName,
+            tests: problem.testCases,
+            functionName: problem.functionName.java,
             schemaVersion: 'v2'
         };
 

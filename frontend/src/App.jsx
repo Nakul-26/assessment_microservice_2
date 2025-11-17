@@ -4,7 +4,7 @@ import ProblemListPage from './pages/ProblemListPage';
 import ProblemPage from './pages/ProblemPage';
 import AddProblemPage from './pages/AddProblemPage';
 import EditProblemPage from './pages/EditProblemPage';
-import './App.css';
+
 
 function App() {
     useEffect(() => {
@@ -13,11 +13,13 @@ function App() {
 
     return (
         <Router>
-            <div className="App">
+            <div className="header">
                 <h1>Placement Assessment</h1>
                 <nav>
                     <a href="/">All Problems</a> | <a href="/add-problem">Add Problem</a>
                 </nav>
+            </div>
+            <div className="container">
                 <Routes>
                     <Route path="/" element={<ProblemListPage />} />
                     <Route path="/problems/:_id" element={<ProblemPage />} />

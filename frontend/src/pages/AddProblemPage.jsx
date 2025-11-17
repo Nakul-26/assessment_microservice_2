@@ -121,10 +121,10 @@ const AddProblemPage = () => {
     };
 
     return (
-        <div>
+        <div className="container">
             <h2>Add New Problem</h2>
             {clientErrors.length > 0 && (
-                <div style={{background: '#ffecec', padding: '8px', borderRadius: 4, marginBottom: 12}}>
+                <div className="problem-card" style={{background: '#ffecec', color: '#dc3545'}}>
                     <strong>Fix the following before submitting:</strong>
                     <ul>{clientErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>
                 </div>
@@ -132,15 +132,15 @@ const AddProblemPage = () => {
             {message && <p>{message}</p>}
             
             <form onSubmit={handleSubmit}>
-                <div>
+                <div className="form-group">
                     <label>Title:</label>
                     <input type="text" name="title" value={formData.title} onChange={handleChange} required />
                 </div>
-                <div>
+                <div className="form-group">
                     <label>Description:</label>
                     <textarea name="description" value={formData.description} onChange={handleChange} required />
                 </div>
-                <div>
+                <div className="form-group">
                     <label>Difficulty:</label>
                     <select name="difficulty" value={formData.difficulty} onChange={handleChange}>
                         <option value="Easy">Easy</option>
@@ -148,11 +148,11 @@ const AddProblemPage = () => {
                         <option value="Hard">Hard</option>
                     </select>
                 </div>
-                <div>
+                <div className="form-group">
                     <label>Tags (comma-separated):</label>
                     <input type="text" name="tags" value={formData.tags} onChange={handleChange} />
                 </div>
-                <div>
+                <div className="form-group">
                     <label>
                         <input type="checkbox" name="isPremium" checked={formData.isPremium} onChange={handleChange} />
                         Is Premium?
@@ -161,16 +161,17 @@ const AddProblemPage = () => {
 
                 <h3>Test Cases</h3>
                 {formData.testCases.map((testCase, index) => (
-                    <div key={index}>
+                    <div key={index} className="form-group problem-card">
+                        <label>Test Case {index + 1}</label>
                         <textarea name="input" placeholder="Input (as JSON array)" value={testCase.input} onChange={(e) => handleTestCaseChange(index, e)} required />
                         <textarea name="expectedOutput" placeholder="Expected Output (JSON or scalar)" value={testCase.expectedOutput} onChange={(e) => handleTestCaseChange(index, e)} required />
                     </div>
                 ))}
-                <button type="button" onClick={addTestCase}>Add Test Case</button>
+                <button type="button" onClick={addTestCase} className="button">Add Test Case</button>
 
                 <h3>Function Definitions</h3>
                 {Object.keys(formData.functionDefinitions).map(lang => (
-                    <div key={lang}>
+                    <div key={lang} className="form-group problem-card">
                         <h4>{lang.charAt(0).toUpperCase() + lang.slice(1)}</h4>
                         <input type="text" placeholder="Function Name" value={formData.functionDefinitions[lang].name} onChange={e => handleFunctionDefinitionChange(lang, 'name', e.target.value)} />
                         <textarea placeholder="Function Template" value={formData.functionDefinitions[lang].template} onChange={e => handleFunctionDefinitionChange(lang, 'template', e.target.value)} />
@@ -178,21 +179,24 @@ const AddProblemPage = () => {
                 ))}
 
                 <h3>Expected I/O Types</h3>
-                <div>
+                <div className="form-group problem-card">
+                    <label>Function Name:</label>
                     <input type="text" placeholder="Function Name" value={formData.expectedIoType.functionName} onChange={e => setFormData({...formData, expectedIoType: {...formData.expectedIoType, functionName: e.target.value}})} />
                 </div>
                 {formData.expectedIoType.inputParameters.map((param, index) => (
-                    <div key={index}>
+                    <div key={index} className="form-group problem-card">
+                        <label>Input Parameter {index + 1}</label>
                         <input type="text" name="name" placeholder="Param Name" value={param.name} onChange={e => handleIoParamChange(index, e)} />
                         <input type="text" name="type" placeholder="Param Type" value={param.type} onChange={e => handleIoParamChange(index, e)} />
                     </div>
                 ))}
-                <button type="button" onClick={addIoParam}>Add Input Parameter</button>
-                <div>
+                <button type="button" onClick={addIoParam} className="button">Add Input Parameter</button>
+                <div className="form-group problem-card">
+                    <label>Return Type:</label>
                     <input type="text" placeholder="Return Type" value={formData.expectedIoType.returnType} onChange={e => setFormData({...formData, expectedIoType: {...formData.expectedIoType, returnType: e.target.value}})} />
                 </div>
 
-                <button type="submit">Create Problem</button>
+                <button type="submit" className="button mt-20">Create Problem</button>
             </form>
         </div>
     );

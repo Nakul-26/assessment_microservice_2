@@ -113,6 +113,47 @@ const sampleProblems = [
             ],
             outputType: 'boolean'
         }
+    },
+    {
+        title: 'Sum of Even Numbers',
+        description: 'Write a function that takes an array of integers and returns the sum of its even numbers.',
+        difficulty: 'Easy',
+        tags: ['Array', 'Math'],
+        isPremium: false,
+        testCases: [
+            {
+                input: [[1, 2, 3, 4, 5, 6]],
+                expectedOutput: 12,
+                isHidden: false
+            },
+            {
+                input: [[1, 3, 5, 7]],
+                expectedOutput: 0,
+                isHidden: false
+            },
+            {
+                input: [[-2, -3, -4, 5]],
+                expectedOutput: -6,
+                isHidden: false
+            },
+            {
+                input: [[0, 2, 4, 6, 8]],
+                expectedOutput: 20,
+                isHidden: false
+            }
+        ],
+        functionDefinitions: {
+            java: {
+                name: 'sumOfEvenNumbers',
+                template: 'public class Solution {\n    public static int sumOfEvenNumbers(int[] nums) {\n        // your code here\n    }\n}'
+            }
+        },
+        expectedIoType: {
+            inputParameters: [
+                { name: 'nums', type: 'int[]' }
+            ],
+            outputType: 'int'
+        }
     }
 ];
 

@@ -94,55 +94,65 @@ const ProblemPage = () => {
     };
 
     if (!problem) {
-        return <div>Loading...</div>;
+        return <div className="container">Loading...</div>;
     }
 
     const availableLanguages = problem.functionDefinitions ? Object.keys(problem.functionDefinitions) : [];
 
     return (
-        <div>
-            <h2>{problem.title} <Link to={`/problems/${problem._id}/edit`}><button>Edit</button></Link></h2>
-            <p>{problem.description}</p>
-            
-            {problem.expectedIoType && (
-                <div>
-                    <h4>I/O Specification:</h4>
-                    {problem.expectedIoType.inputParameters?.length > 0 && (
-                        <p>Input Parameters: {problem.expectedIoType.inputParameters.map(p => `${p.name}: ${p.type}`).join(', ')}</p>
-                    )}
-                    {problem.expectedIoType.outputType && (
-                        <p>Return Type: {problem.expectedIoType.outputType}</p>
-                    )}
-                </div>
-            )}
+        <div className="container">
+            <div className="problem-card">
+                <h2>{problem.title} <Link to={`/problems/${problem._id}/edit`} className="button">Edit</Link></h2>
+                <p>{problem.description}</p>
+                
+                {problem.expectedIoType && (
+                    <div>
+                        <h4>I/O Specification:</h4>
+                        {problem.expectedIoType.inputParameters?.length > 0 && (
+                            <p>Input Parameters: {problem.expectedIoType.inputParameters.map(p => `${p.name}: ${p.type}`).join(', ')}</p>
+                        )}
+                        {problem.expectedIoType.outputType && (
+                            <p>Return Type: {problem.expectedIoType.outputType}</p>
+                        )}
+                    </div>
+                )}
+            </div>
 
-            <textarea 
-                value={code} 
-                onChange={(e) => setCode(e.target.value)} 
-                rows="20"
-                cols="75"
-                disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
-            />
-            <br />
-            <label htmlFor="language-select">Language: </label>
-            <select 
-                id="language-select" 
-                value={selectedLanguage} 
-                onChange={(e) => setSelectedLanguage(e.target.value)}
-                disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
-            >
-                {availableLanguages.map(lang => (
-                    <option key={lang} value={lang}>{lang}</option>
-                ))}
-            </select>
-            <br />
+            <div className="form-group mt-20">
+                <label htmlFor="code-editor">Code:</label>
+                <textarea 
+                    id="code-editor"
+                    value={code} 
+                    onChange={(e) => setCode(e.target.value)} 
+                    rows="20"
+                    cols="75"
+                    disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
+                />
+            </div>
+            
+            <div className="form-group">
+                <label htmlFor="language-select">Language: </label>
+                <select 
+                    id="language-select" 
+                    value={selectedLanguage} 
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
+                >
+                    {availableLanguages.map(lang => (
+                        <option key={lang} value={lang}>{lang}</option>
+                    ))}
+                </select>
+            </div>
+            
             <button 
                 onClick={handleSubmit} 
                 disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
+                className="button"
             >
                 {submission && (submission.status === 'Pending' || submission.status === 'Running') ? 'Judging...' : 'Submit'}
             </button>
-            <h3>Status: {submission ? submission.status : 'Not submitted'}</h3>
+            
+            <h3 className="mt-20">Status: {submission ? submission.status : 'Not submitted'}</h3>
             {submission && submission.output && (
                 <>
                     <h3>Output:</h3>

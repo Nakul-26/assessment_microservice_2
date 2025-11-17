@@ -157,7 +157,21 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		
 		var submissionFileName string
 		if lang.ID == "java" {
-			submissionFileName = submissionMsg.FunctionName + ".java"
+			solutionFileName := "Solution.java"
+			if err := os.WriteFile(filepath.Join(tempDir, solutionFileName), []byte(submissionMsg.Code), 0644); err != nil {
+				log.Printf("Failed to write solution file: %v", err)
+				d.Nack(false, false)
+				return
+			}
+			submissionFileName = "GeneratedTester.java"
+			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(wrapperCode), 0644); err != nil {
+				log.Printf("Failed to write combined submission file: %v", err)
+				d.Nack(false, false)
+				return
+			}
+			filesToCopy = []string{solutionFileName, submissionFileName}
+			compileCmd = lang.CompileCmd
+			runCmd = lang.RunCmd
 		} else if lang.ID == "python" {
 			submissionFileName = "wrapper.py"
 			solutionFileName := "solution.py"
@@ -166,28 +180,46 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 				d.Nack(false, false)
 				return
 			}
+			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+				log.Printf("Failed to write combined submission file: %v", err)
+				d.Nack(false, false)
+				return
+			}
+			filesToCopy = []string{submissionFileName, solutionFileName}
+			compileCmd = lang.CompileCmd
+			runCmd = lang.RunCmd
 		} else if lang.ID == "c" {
 			submissionFileName = "main.c"
+			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+				log.Printf("Failed to write combined submission file: %v", err)
+				d.Nack(false, false)
+				return
+			}
+			filesToCopy = []string{submissionFileName}
+			compileCmd = lang.CompileCmd
+			runCmd = lang.RunCmd
 		} else if lang.ID == "csharp" {
 			submissionFileName = "main.cs"
+			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+				log.Printf("Failed to write combined submission file: %v", err)
+				d.Nack(false, false)
+				return
+			}
+			filesToCopy = []string{submissionFileName}
+			compileCmd = lang.CompileCmd
+			runCmd = lang.RunCmd
 		} else {
 			submissionFileName = "submission" + lang.FileExt
-		}
-
-		if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
-			log.Printf("Failed to write combined submission file: %v", err)
-			d.Nack(false, false)
-			return
-		}
-
-		if lang.ID == "python" {
-			filesToCopy = []string{submissionFileName, "solution.py"}
-		} else {
+			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+				log.Printf("Failed to write combined submission file: %v", err)
+				d.Nack(false, false)
+				return
+			}
 			filesToCopy = []string{submissionFileName}
+			compileCmd = lang.CompileCmd
+			runCmd = lang.RunCmd
 		}
 
-		compileCmd = lang.CompileCmd
-		runCmd = lang.RunCmd
 		// Replace {{CLASS_NAME}} in commands
 		if lang.ID == "java" {
 			for i, cmd := range compileCmd {

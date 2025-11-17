@@ -1,6 +1,7 @@
 package wrapper
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,27 @@ func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) 
 			return "", fmt.Errorf("failed to generate Java function call: %w", err)
 		}
 		tpl = strings.Replace(tpl, "{{FUNCTION_CALL_LINE}}", functionCallLine, 1)
+
+		// Extract tests and expected outputs for Java literals
+		var tests [][]int
+		var expected []int
+		var testCases []struct {
+			Input          [][]int `json:"input"`
+			ExpectedOutput int     `json:"expectedOutput"`
+		}
+		if err := json.Unmarshal(p.TestsJSON, &testCases); err != nil {
+			return "", fmt.Errorf("failed to unmarshal tests JSON for Java: %w", err)
+		}
+		for _, tc := range testCases {
+			tests = append(tests, tc.Input[0])
+			expected = append(expected, tc.ExpectedOutput)
+		}
+
+		testsLiteral := JavaIntArray2DLiteral(tests)
+		expectedLiteral := JavaIntArrayLiteral(expected)
+
+		tpl = strings.ReplaceAll(tpl, "{{TESTS_LITERAL}}", testsLiteral)
+		tpl = strings.ReplaceAll(tpl, "{{EXPECTED_LITERAL}}", expectedLiteral)
 	}
 
 	return tpl, nil
@@ -86,4 +108,34 @@ func toJavaType(jsonType string) string {
 		// Capitalize first letter for class types
 		return strings.ToUpper(string(jsonType[0])) + jsonType[1:]
 	}
+}
+
+func JavaIntArray2DLiteral(arr [][]int) string {
+	var sb strings.Builder
+	sb.WriteString("int[][] tests = new int[][] {\n")
+	for _, row := range arr {
+		sb.WriteString("    {")
+		for i, v := range row {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString(fmt.Sprintf("%d", v))
+		}
+		sb.WriteString("},\n")
+	}
+	sb.WriteString("};")
+	return sb.String()
+}
+
+func JavaIntArrayLiteral(arr []int) string {
+	var sb strings.Builder
+	sb.WriteString("int[] expected = new int[] {")
+	for i, v := range arr {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(fmt.Sprintf("%d", v))
+	}
+	sb.WriteString("};")
+	return sb.String()
 }

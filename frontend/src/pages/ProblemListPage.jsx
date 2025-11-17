@@ -20,19 +20,38 @@ function ProblemListPage() {
       .catch(error => console.error('Error deleting problem:', error));
   };
 
-  return (        <div>
-            <h2>Problems</h2>
-            <ul>
-                {problems.map(problem => (
-            <li key={problem._id}>
-              <Link to={`/problems/${problem._id}`}>{problem.title}</Link>
-              <Link to={`/problems/${problem._id}/edit`}><button>Edit</button></Link>
-              <button onClick={() => handleDelete(problem._id)}>Delete</button>
-            </li>
-                ))}
-            </ul>
-        </div>
-    );
-};
+  return (
+    <div className="container">
+      <h2 className="mb-20">Problems</h2>
+      <Link to="/add-problem" className="button">Add New Problem</Link>
+
+      <div className="table-container">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Difficulty</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {problems.map(problem => (
+              <tr key={problem._id}>
+                <td>
+                  <Link to={`/problems/${problem._id}`}>{problem.title}</Link>
+                </td>
+                <td>{problem.difficulty}</td>
+                <td>
+                  <Link to={`/problems/${problem._id}/edit`} className="button">Edit</Link>
+                  <button onClick={() => handleDelete(problem._id)} className="button button-danger">Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default ProblemListPage;

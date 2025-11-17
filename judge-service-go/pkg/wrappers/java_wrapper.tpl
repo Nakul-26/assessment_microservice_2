@@ -9,7 +9,7 @@ import java.lang.reflect.Type;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-{{USER_CODE}}
+
 
 public class GeneratedTester {
     // Call the user-supplied function from class Solution
