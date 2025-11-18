@@ -173,7 +173,7 @@ async function run() {
         return;
     }
 
-    const testCases = {{TESTS_JSON}};
+    const testCases = JSON.parse(`{{TESTS_JSON}}`);
 
     const results = [];
     for (let i = 0; i < testCases.length; i++) {
@@ -182,7 +182,7 @@ async function run() {
         const expectedOutput = testCase.expectedOutput;
 
         try {
-            const output = await {{FUNCTION_NAME}}(...input);
+            const output = await {{FUNCTION_NAME}}(...input[0]);
 
             if (output === undefined) {
                 results.push({

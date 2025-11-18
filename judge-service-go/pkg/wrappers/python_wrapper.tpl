@@ -178,7 +178,7 @@ def run_tests():
         expected_output = test_case['expectedOutput']
 
         try:
-            output = {{FUNCTION_NAME}}(*input_data)
+            output = {{FUNCTION_NAME}}(*input_data[0])
             
             if output is None:
                  results.append({
