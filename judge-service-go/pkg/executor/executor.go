@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -44,45 +45,49 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 		AttachStderr: true,
 		Context:      ctx,
 	}
-	exec, err := e.cli.CreateExec(execOpts)
+	execObj, err := e.cli.CreateExec(execOpts)
 	if err != nil {
 		return "", "", -1, fmt.Errorf("failed to create exec: %w", err)
 	}
 
-	// Channel to signal completion
+	// Use a child context with timeout so it cancels the StartExec if needed.
+	childCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	done := make(chan error, 1)
 	go func() {
 		startExecOptions := docker.StartExecOptions{
 			OutputStream: &stdoutBuf,
 			ErrorStream:  &stderrBuf,
-			Context:      ctx,
+			Context:      childCtx,
 		}
-		err := e.cli.StartExec(exec.ID, startExecOptions)
-		// Wait for the exec to finish. StartExec is non-blocking, but the underlying stream operations will block.
-		// Inspecting after it's done gives us the exit code.
-		if err != nil {
+		// StartExec will return when the attached streams close or context canceled.
+		if err := e.cli.StartExec(execObj.ID, startExecOptions); err != nil {
 			done <- fmt.Errorf("failed to start exec: %w", err)
 			return
 		}
 		done <- nil
 	}()
 
-	// Wait for completion or timeout
 	select {
 	case err := <-done:
 		if err != nil {
 			return stdoutBuf.String(), stderrBuf.String(), -1, err
 		}
-	case <-time.After(timeout):
-		// The execution timed out. The container will be stopped by the deferred function in RunSubmission.
-		log.Printf("Execution timed out after %v for command: %v", timeout, cmd)
-		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("execution timed out after %v", timeout)
+	case <-childCtx.Done():
+		// timed out or cancelled
+		if childCtx.Err() == context.DeadlineExceeded {
+			log.Printf("[container=%s] exec timed out after %v: %v", containerID, timeout, cmd)
+			return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("execution timed out after %v", timeout)
+		}
+		return stdoutBuf.String(), stderrBuf.String(), -1, childCtx.Err()
 	case <-ctx.Done():
+		// caller cancelled
 		return stdoutBuf.String(), stderrBuf.String(), -1, ctx.Err()
 	}
 
-	// Inspect the exec to get the exit code
-	inspect, err := e.cli.InspectExec(exec.ID)
+	// Inspect exec to get exit code
+	inspect, err := e.cli.InspectExec(execObj.ID)
 	if err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to inspect exec: %w", err)
 	}
@@ -92,69 +97,85 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 
 // RunSubmission executes user code in a Docker container
 func (e *Executor) RunSubmission(ctx context.Context, languageImage string, files []string, tempDir string, compileCmd []string, runCmd []string, timeout time.Duration) (string, string, error) {
-	// Ensure the image exists, pull if not
+	// Pull image
 	if err := e.pullImage(ctx, languageImage); err != nil {
 		return "", "", fmt.Errorf("failed to pull image %s: %w", languageImage, err)
 	}
 
+	// Overall submission timeout derived from provided timeout (multiply by factor) or environment.
+	submissionTimeout := timeout * 3
+	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
+	defer cancel()
+
+	// Decide user. Prefer numeric UID if set, else do not force "judge" name to avoid missing passwd entry.
+	user := os.Getenv("JUDGE_USER")   // e.g., "judge"
+	uid := os.Getenv("JUDGE_UID")     // e.g., "1000"
+	var containerUser string
+	if uid != "" {
+		containerUser = uid
+	} else if user != "" {
+		containerUser = user
+	} else {
+		containerUser = "" // let image default to its default user
+	}
+
 	pidsLimit := int64(1024)
-	// Create container with a long-running command to keep it alive
+
+	hostCfg := &docker.HostConfig{
+		AutoRemove:     true,
+		NetworkMode:    "none",
+		ReadonlyRootfs: false, // Set to false to allow writing files
+		Memory:         256 * 1024 * 1024,
+		CPUQuota:       50000,
+		PidsLimit:      &pidsLimit,
+	}
+
 	containerOptions := docker.CreateContainerOptions{
 		Config: &docker.Config{
 			Image:      languageImage,
-			User:       "judge", // Run as non-root user
-			Cmd:        []string{"tail", "-f", "/dev/null"}, // Keep container alive
+			Cmd:        []string{"tail", "-f", "/dev/null"},
 			WorkingDir: "/app",
 			Tty:        false,
 		},
-		HostConfig: &docker.HostConfig{
-			AutoRemove:     true,
-			NetworkMode:    "none",
-			ReadonlyRootfs: false, // Make filesystem readonly
-			Memory:         256 * 1024 * 1024, // 256 MB
-			CPUQuota:       50000,             // 50% of one CPU core
-			PidsLimit:      &pidsLimit,
-		},
+		HostConfig: hostCfg,
 	}
-	log.Printf("ReadonlyRootfs: %v", containerOptions.HostConfig.ReadonlyRootfs)
+
+	// If containerUser configured, set it
+	if containerUser != "" {
+		containerOptions.Config.User = containerUser
+	}
+
 	container, err := e.cli.CreateContainer(containerOptions)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create container: %w", err)
 	}
-
 	containerID := container.ID
-	// Use a context with cancel to ensure cleanup happens
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	// Defer stopping the container. The timeout '1' is a grace period.
+	// Ensure container is stopped on exit
 	defer func() {
-		log.Printf("Stopping container %s", containerID)
-		stopErr := e.cli.StopContainer(containerID, 1)
-		if stopErr != nil {
-			// Log if the container couldn't be stopped, but don't mask the original error.
-			log.Printf("Failed to stop container %s: %v", containerID, stopErr)
-		}
+		log.Printf("[container=%s] stopping container", containerID)
+		_ = e.cli.StopContainer(containerID, 1)
 	}()
 
-	// Start the container
+	// Start container
 	if err := e.cli.StartContainer(containerID, nil); err != nil {
 		return "", "", fmt.Errorf("failed to start container: %w", err)
 	}
 
-	        // Copy files into container
-	        for _, file := range files {
-	            content, err := os.ReadFile(filepath.Join(tempDir, file))
-	            if err != nil {
-	                return "", "", fmt.Errorf("failed to read file %s: %w", file, err)
-	            }
-	            if err := e.copyToContainer(ctx, containerID, "/app", file, string(content)); err != nil {
-	                return "", "", fmt.Errorf("failed to copy file %s to container: %w", file, err)
-	            }
-	        }
-	// Run compile command if it exists
+	// Copy files into container
+	for _, file := range files {
+		content, err := os.ReadFile(filepath.Join(tempDir, file))
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read file %s: %w", file, err)
+		}
+		if err := e.copyToContainer(subCtx, containerID, "/app", file, string(content)); err != nil {
+			return "", "", fmt.Errorf("failed to copy file %s to container: %w", file, err)
+		}
+	}
+
+	// Compile step (if present)
 	if len(compileCmd) > 0 {
-		compileStdout, compileStderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, compileCmd, timeout)
+		compileStdout, compileStderr, exitCode, err := e.runExecWithTimeout(subCtx, containerID, compileCmd, timeout)
 		if err != nil {
 			return compileStdout, compileStderr, fmt.Errorf("compilation command failed: %w", err)
 		}
@@ -163,14 +184,12 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 		}
 	}
 
-	// Run the actual command
-	runStdout, runStderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, runCmd, timeout)
+	// Run step
+	runStdout, runStderr, exitCode, err := e.runExecWithTimeout(subCtx, containerID, runCmd, timeout)
 	if err != nil {
-		// If there's a timeout or context error, we still want to return any output captured
 		return runStdout, runStderr, fmt.Errorf("execution command failed: %w", err)
 	}
 	if exitCode != 0 {
-		// For non-zero exits, we still return the output, but also the error
 		return runStdout, runStderr, fmt.Errorf("execution failed with exit code %d", exitCode)
 	}
 
@@ -179,54 +198,61 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 
 // pullImage pulls a Docker image if it's not available locally
 func (e *Executor) pullImage(ctx context.Context, image string) error {
-	// Check if image exists locally
-	_, err := e.cli.InspectImage(image)
-	if err == nil {
-		return nil // Image exists
-	}
-	if err != docker.ErrNoSuchImage {
+	// If image exists locally, skip
+	if _, err := e.cli.InspectImage(image); err == nil {
+		return nil
+	} else if err != docker.ErrNoSuchImage {
 		return fmt.Errorf("failed to inspect image %s: %w", image, err)
-		// bigdecimal
 	}
 
-	log.Printf("Pulling image: %s", image)
-	pullOptions := docker.PullImageOptions{
-		Repository:   image,
-		Context:      ctx,
-		OutputStream: io.Discard, // Suppress verbose pull output
+	// Parse image into repository and tag
+	repo, tag := image, "latest"
+	if strings.Contains(image, ":") {
+		parts := strings.SplitN(image, ":", 2)
+		repo, tag = parts[0], parts[1]
 	}
-	auth := docker.AuthConfiguration{} // Assuming public images
-	err = e.cli.PullImage(pullOptions, auth)
-	if err != nil {
+
+	log.Printf("Pulling image: %s:%s", repo, tag)
+	pullOptions := docker.PullImageOptions{
+		Repository:   repo,
+		Tag:          tag,
+		Context:      ctx,
+		OutputStream: io.Discard,
+	}
+	auth := docker.AuthConfiguration{}
+	if err := e.cli.PullImage(pullOptions, auth); err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
-
 	return nil
 }
 
 // copyToContainer copies content to a file inside the container
 func (e *Executor) copyToContainer(ctx context.Context, containerID, destPath, fileName, content string) error {
-	// Create a tar archive in memory
 	var buf bytes.Buffer
-	tarWriter := tar.NewWriter(&buf)
+	tw := tar.NewWriter(&buf)
 
 	header := &tar.Header{
 		Name: fileName,
 		Size: int64(len(content)),
-		Mode: 0755,
+		Mode: 0644,
 	}
-	if err := tarWriter.WriteHeader(header); err != nil {
+	if err := tw.WriteHeader(header); err != nil {
 		return fmt.Errorf("error writing tar header: %w", err)
 	}
-	if _, err := tarWriter.Write([]byte(content)); err != nil {
+	if _, err := tw.Write([]byte(content)); err != nil {
 		return fmt.Errorf("error writing tar content: %w", err)
 	}
-	tarWriter.Close()
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("error closing tar writer: %w", err)
+	}
 
-	// Upload the tar archive to the container
-	return e.cli.UploadToContainer(containerID, docker.UploadToContainerOptions{
+	opts := docker.UploadToContainerOptions{
 		Context:     ctx,
 		Path:        destPath,
 		InputStream: &buf,
-	})
+	}
+	if err := e.cli.UploadToContainer(containerID, opts); err != nil {
+		return fmt.Errorf("UploadToContainer failed: %w", err)
+	}
+	return nil
 }

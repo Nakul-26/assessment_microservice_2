@@ -9,5 +9,7 @@ RUN wget -O /tmp/gson.jar https://repo1.maven.org/maven2/com/google/code/gson/gs
     && mkdir -p /usr/share/java \
     && mv /tmp/gson.jar /usr/share/java/gson.jar
 
+ENV CLASSPATH /usr/share/java/gson.jar:.
+
 # Set the user
 USER judge

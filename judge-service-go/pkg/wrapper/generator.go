@@ -1,141 +1,208 @@
 package wrapper
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"text/template"
 
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
 )
 
-func GenerateWrapper(p models.Problem, lang languages.Language) (string, error) {
+// safe identifier regexp
+var validIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+
+func escapeForJavaString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `
+`, `\n`)
+	s = strings.ReplaceAll(s, `
+`, `\r`)
+	s = strings.ReplaceAll(s, `	`, `\t`)
+	return s
+}
+
+// GenerateWrapper generates the wrapper source for a problem + language.
+func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncName string) (string, error) {
+	if len(p.TestCases) == 0 && len(p.TestsJSON) > 0 {
+		if err := p.ParseTestsJSON(); err != nil {
+			return "", fmt.Errorf("failed to parse TestsJSON: %w", err)
+		}
+	}
+
 	tplPath := filepath.Join("pkg", "wrappers", lang.WrapperTemplate)
 	b, err := os.ReadFile(tplPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read template %s: %w", tplPath, err)
 	}
-	tpl := string(b)
 
-	// Replace generic placeholders
-	functionName := p.ExpectedIoType.FunctionName
-	if functionName == "" {
-		// Fallback to functionDefinitions if ExpectedIoType.FunctionName is not set
-		if def, ok := p.FunctionDefinitions[lang.ID]; ok {
-			functionName = def.Name
-		}
+	sanitizedFuncName, _ := sanitizeIdentifier(submissionFuncName)
+
+	ctx := map[string]interface{}{
+		"FUNCTION_NAME":        sanitizedFuncName,
+		"EXPECTED_OUTPUT_TYPE": p.ExpectedIoType.ReturnType,
 	}
-	tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", functionName)
-	tpl = strings.ReplaceAll(tpl, "{{EXPECTED_OUTPUT_TYPE}}", p.ExpectedIoType.ReturnType)
-	tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(p.TestsJSON)) // assume TestsJSON is []byte or string
 
-	// Java-specific logic
 	if lang.ID == "java" {
-		functionCallLine, err := generateJavaFunctionCall(p)
+		ctx["CLASS_NAME"] = "Solution"
+	}
+
+	switch lang.ID {
+	case "java":
+		javaTests, javaExpected, err := buildJavaTestLiterals(p)
 		if err != nil {
-			return "", fmt.Errorf("failed to generate Java function call: %w", err)
+			return "", fmt.Errorf("failed to build Java test literals: %w", err)
 		}
-		tpl = strings.Replace(tpl, "{{FUNCTION_CALL_LINE}}", functionCallLine, 1)
-
-		// Extract tests and expected outputs for Java literals
-		var tests [][]int
-		var expected []int
-		var testCases []struct {
-			Input          [][]int `json:"input"`
-			ExpectedOutput int     `json:"expectedOutput"`
-		}
-		if err := json.Unmarshal(p.TestsJSON, &testCases); err != nil {
-			return "", fmt.Errorf("failed to unmarshal tests JSON for Java: %w", err)
-		}
-		for _, tc := range testCases {
-			tests = append(tests, tc.Input[0])
-			expected = append(expected, tc.ExpectedOutput)
-		}
-
-		testsLiteral := JavaIntArray2DLiteral(tests)
-		expectedLiteral := JavaIntArrayLiteral(expected)
-
-		tpl = strings.ReplaceAll(tpl, "{{TESTS_LITERAL}}", testsLiteral)
-		tpl = strings.ReplaceAll(tpl, "{{EXPECTED_LITERAL}}", expectedLiteral)
-	}
-
-	return tpl, nil
-}
-
-func generateJavaFunctionCall(p models.Problem) (string, error) {
-	if len(p.ExpectedIoType.InputParameters) == 0 {
-		// Handle cases with no input parameters or problems without defined IO types
-		return "new {{CLASS_NAME}}().{{FUNCTION_NAME}}()", nil
-	}
-
-	var args []string
-	for i, param := range p.ExpectedIoType.InputParameters {
-		javaType := toJavaType(param.Type)
-		if strings.HasPrefix(javaType, "ListNode") {
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), %s.class)", i, "ListNode"))
-		} else if strings.HasPrefix(javaType, "TreeNode") {
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), %s.class)", i, "TreeNode"))
-		} else {
-			args = append(args, fmt.Sprintf("gson.fromJson(inputArgs.get(%d), %s.class)", i, javaType))
-		}
-	}
-
-	// The class name and function name will be replaced in main.go
-	return fmt.Sprintf("new {{CLASS_NAME}}().{{FUNCTION_NAME}}(%s)", strings.Join(args, ", ")), nil
-}
-
-func toJavaType(jsonType string) string {
-	switch jsonType {
-	case "int":
-		return "Integer"
-	case "String":
-		return "String"
-	case "int[]":
-		return "int[]"
-	case "String[]":
-		return "String[]"
-	case "boolean":
-		return "Boolean"
-	case "double":
-		return "Double"
-	case "ListNode":
-		return "ListNode"
-	case "TreeNode":
-		return "TreeNode"
+		ctx["TESTS_LITERAL"] = javaTests
+		ctx["EXPECTED_LITERAL"] = javaExpected
 	default:
-		// Capitalize first letter for class types
-		return strings.ToUpper(string(jsonType[0])) + jsonType[1:]
+		ctx["TESTS_JSON"] = string(p.TestsJSON)
 	}
+
+	t, err := template.New("wrapper").Option("missingkey=error").Parse(string(b))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template %s: %w", tplPath, err)
+	}
+	var out bytes.Buffer
+	if err := t.Execute(&out, ctx); err != nil {
+		return "", fmt.Errorf("failed to execute template %s: %w", tplPath, err)
+	}
+
+	result := out.String()
+	tempResult := strings.ReplaceAll(result, "{{COMPARE_MODE}}", "")
+	if strings.Contains(tempResult, "{{") || strings.Contains(tempResult, "}}") {
+		snippet := tempResult
+		if len(snippet) > 1000 {
+			snippet = snippet[:1000]
+		}
+		return "", fmt.Errorf("template produced unreplaced tokens: snippet: %.300s", snippet)
+	}
+
+	return result, nil
 }
 
-func JavaIntArray2DLiteral(arr [][]int) string {
-	var sb strings.Builder
-	sb.WriteString("int[][] tests = new int[][] {\n")
-	for _, row := range arr {
-		sb.WriteString("    {")
-		for i, v := range row {
-			if i > 0 {
-				sb.WriteString(",")
+func sanitizeIdentifier(name string) (string, bool) {
+	if validIdent.MatchString(name) {
+		return name, true
+	}
+	re := regexp.MustCompile(`[^A-Za-z0-9_]`)
+	s := re.ReplaceAllString(name, "_")
+	if !regexp.MustCompile(`^[A-Za-z_]`).MatchString(s) {
+		s = "f_" + s
+	}
+	if len(s) > 127 {
+		s = s[:127]
+	}
+	return s, false
+}
+
+func buildJavaTestLiterals(p models.Problem) (string, string, error) {
+	var testsBuf strings.Builder
+	var expectedBuf strings.Builder
+
+	allIntInputs := true
+	for _, tc := range p.TestCases {
+		for _, in := range tc.Input {
+			switch v := in.(type) {
+			case []interface{}:
+				for _, e := range v {
+					_, okFloat := e.(float64)
+					_, okInt64 := e.(int64)
+					_, okInt := e.(int)
+					if !(okFloat || okInt64 || okInt) {
+						allIntInputs = false
+					}
+				}
+			default:
+				_, okFloat := in.(float64)
+				_, okInt64 := in.(int64)
+				_, okInt := in.(int)
+				if !(okFloat || okInt64 || okInt) {
+					allIntInputs = false
+				}
 			}
-			sb.WriteString(fmt.Sprintf("%d", v))
 		}
-		sb.WriteString("},\n")
 	}
-	sb.WriteString("};")
-	return sb.String()
+
+	if allIntInputs {
+		testsBuf.WriteString("Object[][] tests = new Object[][]{\n")
+		expectedBuf.WriteString("Object[] expected = new Object[]{\n")
+
+		for _, tc := range p.TestCases {
+			testsBuf.WriteString("    new Object[]{")
+			for i, in := range tc.Input {
+				if arr, ok := in.([]interface{}); ok {
+					testsBuf.WriteString("new int[]{")
+					for j, vv := range arr {
+						num := numericToInt(vv)
+						if j > 0 {
+							testsBuf.WriteString(",")
+						}
+						testsBuf.WriteString(fmt.Sprintf("%d", num))
+					}
+					testsBuf.WriteString("}")
+				} else {
+					num := numericToInt(in)
+					testsBuf.WriteString(fmt.Sprintf("%d", num))
+				}
+				if i < len(tc.Input)-1 {
+					testsBuf.WriteString(", ")
+				}
+			}
+			testsBuf.WriteString("},\n")
+
+			switch exp := tc.ExpectedOutput.(type) {
+			case float64:
+				expectedBuf.WriteString(fmt.Sprintf("    %d,\n", int64(exp)))
+			case int64:
+				expectedBuf.WriteString(fmt.Sprintf("    %d,\n", exp))
+			case int:
+				expectedBuf.WriteString(fmt.Sprintf("    %d,\n", exp))
+			case []interface{}:
+				expectedBuf.WriteString("    new int[]{")
+				for j, vv := range exp {
+					num := numericToInt(vv)
+					if j > 0 {
+						expectedBuf.WriteString(",")
+					}
+					expectedBuf.WriteString(fmt.Sprintf("%d", num))
+				}
+				expectedBuf.WriteString("},\n")
+			default:
+				jb, _ := json.Marshal(exp)
+				expectedBuf.WriteString(fmt.Sprintf("    %s,\n", string(jb)))
+			}
+		}
+
+		testsBuf.WriteString("};")
+		expectedBuf.WriteString("};")
+		return testsBuf.String(), expectedBuf.String(), nil
+	}
+
+	jb, err := json.Marshal(p.TestCases)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal tests to json: %w", err)
+	}
+	escaped := escapeForJavaString(string(jb))
+	testsLiteral := fmt.Sprintf("String testsJson = \"%s\";", escaped)
+	return testsLiteral, "", nil
 }
 
-func JavaIntArrayLiteral(arr []int) string {
-	var sb strings.Builder
-	sb.WriteString("int[] expected = new int[] {")
-	for i, v := range arr {
-		if i > 0 {
-			sb.WriteString(",")
-		}
-		sb.WriteString(fmt.Sprintf("%d", v))
+func numericToInt(v interface{}) int64 {
+	switch n := v.(type) {
+	case float64:
+		return int64(n)
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	default:
+		return 0
 	}
-	sb.WriteString("};")
-	return sb.String()
 }

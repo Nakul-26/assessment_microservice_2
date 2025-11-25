@@ -13,7 +13,7 @@ async function testSubmission() {
         await mongoose.connect(MONGO_URI, { dbName: 'assessment_db' });
         console.log('✅ Test script connected to MongoDB');
 
-        const problem = await Problem.findOne({ title: 'Sum of Even Numbers' });
+        const problem = await Problem.findOne({ title: 'Sum of Two Numbers' });
         if (!problem) {
             console.error('❌ Problem not found');
             return;
@@ -22,13 +22,9 @@ async function testSubmission() {
         const submissionData = {
             problemId: problem._id,
             language: 'java',
-            code: `public class Solution {
-    public static int sumOfEvenNumbers(int[] nums) {
-        int sum = 0;
-        for (int x : nums) {
-            if (x % 2 == 0) sum += x;
-        }
-        return sum;
+            code: `class Solution {
+    public int sumTwoNumbers(int a, int b) {
+        return a + b;
     }
 }`
         };
@@ -40,13 +36,21 @@ async function testSubmission() {
         const channel = await connection.createChannel();
         await channel.assertQueue(QUEUE_NAME, { durable: true });
 
+        const tests = problem.testCases.map(tc => ({
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            isHidden: tc.isHidden
+        }));
+
+        const functionName = problem.functionDefinitions.get('java')?.name || 'solution';
+
         const msg = {
             submissionId: submission._id.toString(),
             problemId: problem._id.toString(),
             language: submission.language,
             code: submission.code,
-            tests: problem.tests,
-            functionName: problem.functionName,
+            tests: tests,
+            functionName: functionName,
             schemaVersion: 'v2'
         };
 
@@ -57,6 +61,7 @@ async function testSubmission() {
         await connection.close();
 
         // Wait for a few seconds to allow the judge to process the submission
+        console.log('Waiting for results...');
         await new Promise(resolve => setTimeout(resolve, 5000));
 
         const result = await Submission.findById(submission._id);

@@ -1,19 +1,32 @@
-# .air.toml
+# .air.toml - development config for live reload of the Go judge service
 root = "."
 tmp_dir = "tmp"
 
 [build]
+  # build command (produce binary in tmp/)
   cmd = "go build -o ./tmp/go-judge-service ."
+  # path to binary used by runner
   bin = "./tmp/go-judge-service"
+  # run the built binary with development env (add any other dev envs here)
   full_bin = "APP_ENV=development ./tmp/go-judge-service"
-  include_ext = ["go", "tpl", "json"] # Watch Go files, templates, and JSON
+  # watch extensions: include .tpl so template changes rebuild the binary
+  include_ext = ["go", "tpl", "json"]
+  # skip heavy directories
   exclude_dir = ["tmp", "vendor", "node_modules"]
   follow_symlink = true
-  delay = 1000 # ms
+  # ms to wait after file change before rebuild; 300-500ms is snappy
+  delay = 500
 
 [run]
-  # You can add environment variables specific to development here
-  # env = ["DEBUG=true"]
+  # Recommended local dev environment variables. Adjust to your Docker / local setup.
+  env = [
+    "APP_ENV=development",
+    "MONGO_URI=mongodb://localhost:27017/assessment_db",
+    "REDIS_URI=redis://localhost:6379",
+    "RABBITMQ_URL=amqp://guest:guest@localhost:5672/",
+    "LOG_LEVEL=debug"
+  ]
+  # you can optionally set args or a custom command here.
 
 [log]
   time = true

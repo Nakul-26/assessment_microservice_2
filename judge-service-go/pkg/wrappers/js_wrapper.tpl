@@ -1,5 +1,59 @@
+const { performance } = require('perf_hooks');
 const COMPARE_MODE = "{{COMPARE_MODE}}"; // STRUCTURAL, STRICT, APPROX, ORDER_INSENSITIVE, TEXT
 const { {{FUNCTION_NAME}} } = require('./submission.js');
+
+// Helper to capture stdout/stderr for a specific (possibly async) function call
+async function captureStreamsAsync(func) {
+    const oldStdoutWrite = process.stdout.write;
+    const oldStderrWrite = process.stderr.write;
+
+    let stdout = '';
+    let stderr = '';
+
+    // wrapper that mimics the original signature (chunk, encoding, cb)
+    function makeWriteWrapper(original, accumulator) {
+        return function (chunk, encoding, callback) {
+            try {
+                // chunk may be Buffer or string
+                accumulator += chunk && chunk.toString ? chunk.toString() : String(chunk);
+            } catch (e) {
+                // ignore
+            }
+            // forward to original so internals still work
+            try {
+                return original.apply(this, arguments);
+            } catch (e) {
+                // some environments may not want forwarding; ignore
+                return true;
+            }
+        };
+    }
+
+    process.stdout.write = makeWriteWrapper(oldStdoutWrite, stdout);
+    process.stderr.write = makeWriteWrapper(oldStderrWrite, stderr);
+
+    // But we can't update the closed-over stdout/stderr used above; use closures that push to variables:
+    // Replace with more robust approach:
+    stdout = '';
+    stderr = '';
+    process.stdout.write = function (chunk, encoding, callback) {
+        stdout += (chunk && chunk.toString) ? chunk.toString() : String(chunk);
+        return oldStdoutWrite.apply(process.stdout, arguments);
+    };
+    process.stderr.write = function (chunk, encoding, callback) {
+        stderr += (chunk && chunk.toString) ? chunk.toString() : String(chunk);
+        return oldStderrWrite.apply(process.stderr, arguments);
+    };
+
+    try {
+        const result = await func(); // await promises as needed
+        return { result, stdout, stderr };
+    } finally {
+        // restore originals no matter what
+        process.stdout.write = oldStdoutWrite;
+        process.stderr.write = oldStderrWrite;
+    }
+}
 
 function normalize(value, visited = new Set(), depth = 0) {
     const maxDepth = 1000; // prevent infinite loops
@@ -8,49 +62,48 @@ function normalize(value, visited = new Set(), depth = 0) {
         return '[Max Depth Exceeded]';
     }
 
-    // Avoid circular references
-    if (value && typeof value === 'object') {
-        if (visited.has(value)) return '[Circular]';
-        visited.add(value);
-    }
-
     if (value === null || typeof value !== 'object') return value;
 
-    // Handle linked lists
-    if (value && 'val' in value && 'next' in value) {
-        const nodes = [];
-        let curr = value;
-        let currentDepth = 0;
-        while (curr && currentDepth < maxDepth) {
-            nodes.push(curr.val);
-            curr = curr.next;
-            currentDepth++;
+    if (visited.has(value)) return '[Circular]';
+    visited.add(value);
+
+    try {
+        if (value && typeof value === 'object' && 'val' in value && 'next' in value) {
+            const nodes = [];
+            let curr = value;
+            let currentDepth = 0;
+            while (curr && currentDepth < maxDepth) {
+                // check safely for val property
+                nodes.push(curr.val);
+                curr = curr.next;
+                currentDepth++;
+            }
+            return { __type: 'LinkedList', values: nodes };
         }
-        return { __type: 'LinkedList', values: nodes };
-    }
 
-    // Handle trees (e.g. binary tree nodes)
-    if (value && 'val' in value && ('left' in value || 'right' in value)) {
-        return {
-            __type: 'TreeNode',
-            val: value.val,
-            left: normalize(value.left, visited, depth + 1),
-            right: normalize(value.right, visited, depth + 1),
-        };
-    }
+        if (value && typeof value === 'object' && 'val' in value && ('left' in value || 'right' in value)) {
+            return {
+                __type: 'TreeNode',
+                val: value.val,
+                left: normalize(value.left, visited, depth + 1),
+                right: normalize(value.right, visited, depth + 1),
+            };
+        }
 
-    // Handle generic arrays
-    if (Array.isArray(value)) {
-        return value.map(v => normalize(v, visited, depth + 1));
-    }
+        if (Array.isArray(value)) {
+            return value.map(v => normalize(v, visited, depth + 1));
+        }
 
-    // Handle generic objects with sorted keys
-    const obj = {};
-    const keys = Object.keys(value).sort();
-    for (const key of keys) {
-        obj[key] = normalize(value[key], visited, depth + 1);
+        const obj = {};
+        const keys = Object.keys(value).sort();
+        for (const key of keys) {
+            obj[key] = normalize(value[key], visited, depth + 1);
+        }
+        return obj;
+    } finally {
+        // remove from visited to avoid false-circular on sibling branches
+        visited.delete(value);
     }
-    return obj;
 }
 
 function normalizeText(value) {
@@ -73,12 +126,9 @@ function deepEqual(a, b, epsilon = 1e-6) {
             if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
                 return false;
             }
-            // This is a simplified sort for demonstration. A more robust solution
-            // would handle nested objects and arrays within the unsorted array.
             const sortedA = [...a].sort();
             const sortedB = [...b].sort();
-            return deepEqual(sortedA, sortedB, epsilon);
-        case 'STRUCTURAL':
+            return _structuralDeepEqual(sortedA, sortedB, epsilon); // Use structural equal for sorted arrays
         default:
             return _structuralDeepEqual(a, b, epsilon);
     }
@@ -88,7 +138,6 @@ function _structuralDeepEqual(a, b, epsilon) {
     if (a === b) return true;
 
     if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
-        // Fallback to approx for numbers if they weren't caught by a specific mode
         if (typeof a === 'number' && typeof b === 'number') {
             return Math.abs(a - b) < epsilon * Math.max(1, Math.abs(a), Math.abs(b));
         }
@@ -103,13 +152,14 @@ function _structuralDeepEqual(a, b, epsilon) {
         return true;
     }
 
-    const keysA = Object.keys(a);
-    const keysB = Object.keys(b);
+    const keysA = Object.keys(a).sort();
+    const keysB = Object.keys(b).sort();
 
     if (keysA.length !== keysB.length) return false;
 
-    for (const key of keysA) {
-        if (!keysB.includes(key) || !_structuralDeepEqual(a[key], b[key], epsilon)) {
+    for (let i = 0; i < keysA.length; i++) {
+        const key = keysA[i];
+        if (keysB[i] !== key || !_structuralDeepEqual(a[key], b[key], epsilon)) {
             return false;
         }
     }
@@ -117,17 +167,29 @@ function _structuralDeepEqual(a, b, epsilon) {
     return true;
 }
 
-function safeStringify(obj) {
+function safeStringify(obj, maxLen = 2000) {
     const cache = new Set();
-    return JSON.stringify(obj, (key, value) => {
-        if (typeof value === 'object' && value !== null) {
-            if (cache.has(value)) {
-                return '[Circular]';
+    try {
+        const s = JSON.stringify(obj, (key, value) => {
+            if (typeof value === 'object' && value !== null) {
+                if (cache.has(value)) {
+                    return '[Circular]';
+                }
+                cache.add(value);
             }
-            cache.add(value);
+            if (typeof value === 'bigint') {
+                return value.toString();
+            }
+            return value;
+        }, 2);
+        if (s && s.length > maxLen) {
+            return s.slice(0, maxLen) + '…(truncated)';
         }
-        return value;
-    }, 2); // Add indentation for readability
+        return s;
+    } catch (e) {
+        // fallback
+        try { return String(obj).slice(0, maxLen); } catch (_) { return '[Unserializable]'; }
+    }
 }
 
 function diffSummary(actual, expected) {
@@ -141,31 +203,17 @@ function diffSummary(actual, expected) {
             }
         }
     }
-    if (typeof actual === 'object' && actual !== null && typeof expected === 'object' && expected !== null) {
-        const keysA = Object.keys(actual);
-        const keysB = Object.keys(expected);
-        if (keysA.length !== keysB.length) {
-            return `Object key count mismatch: expected ${keysB.length}, got ${keysA.length}`;
-        }
-        for (const key of keysB) {
-            if (!keysA.includes(key)) {
-                return `Missing key in output: "${key}"`;
-            }
-            if (!deepEqual(actual[key], expected[key])) {
-                return `Mismatch at key "${key}": expected ${safeStringify(expected[key])}, got ${safeStringify(actual[key])}`;
-            }
-        }
-    }
     return `Values differ: expected ${safeStringify(expected)}, got ${safeStringify(actual)}`;
 }
 
+// Ensure truncation returns a string
 function truncateOutput(obj, maxLen = 2000) {
-    const s = safeStringify(obj);
-    if (s.length > maxLen) {
-        return s.slice(0, maxLen) + '…(truncated)';
-    }
-    return obj;
+    return safeStringify(obj, maxLen);
 }
+
+// --- IMPORTANT: the generator should insert raw JSON here (no quotes) ---
+// e.g. const testCases = [{"input":[1,2],"expectedOutput":3}, ...];
+const testCases = {{TESTS_JSON}};
 
 async function run() {
     if (typeof {{FUNCTION_NAME}} !== 'function') {
@@ -173,62 +221,76 @@ async function run() {
         return;
     }
 
-    const testCases = JSON.parse(`{{TESTS_JSON}}`);
+    // small guard for runaway number of tests
+    if (!Array.isArray(testCases) || testCases.length > 5000) {
+        console.log(safeStringify({ status: 'error', message: 'Invalid or too many test cases' }));
+        return;
+    }
 
-    const results = [];
+    const submissionResult = {
+        status: 'finished',
+        passed: 0,
+        total: testCases.length,
+        details: [],
+    };
+
     for (let i = 0; i < testCases.length; i++) {
         const testCase = testCases[i];
-        const input = testCase.input;
-        const expectedOutput = testCase.expectedOutput;
+        const { input = [], expectedOutput } = testCase;
 
+        let output, error, stack, stdout, stderr;
+        let ok = false;
+
+        const startTime = performance.now();
         try {
-            const output = await {{FUNCTION_NAME}}(...input[0]);
+            const captureResult = await captureStreamsAsync(async () => {
+                return await {{FUNCTION_NAME}}(...input);
+            });
+
+            output = captureResult.result;
+            stdout = captureResult.stdout;
+            stderr = captureResult.stderr;
 
             if (output === undefined) {
-                results.push({
-                    test: i + 1,
-                    ok: false,
-                    error: 'Function returned undefined',
-                    expected: truncateOutput(expectedOutput),
-                });
-                continue;
-            }
+                error = 'Function returned undefined';
+            } else {
+                const normalizedOutput = normalize(output);
+                const normalizedExpected = normalize(expectedOutput);
+                ok = deepEqual(normalizedOutput, normalizedExpected);
 
-            // Normalize complex structures before comparing
-            const normalizedOutput = normalize(output);
-            const normalizedExpected = normalize(expectedOutput);
-
-            const isCorrect = deepEqual(normalizedOutput, normalizedExpected);
-            const result = {
-                test: i + 1,
-                ok: isCorrect,
-                output: truncateOutput(normalizedOutput),
-                expected: truncateOutput(normalizedExpected),
-            };
-            if (!isCorrect) {
-                result.diff = diffSummary(normalizedOutput, normalizedExpected);
+                if (!ok) {
+                    error = diffSummary(normalizedOutput, normalizedExpected);
+                }
+                output = normalizedOutput;
             }
-            results.push(result);
-        } catch (error) {
-            results.push({
-                test: i + 1,
-                ok: false,
-                error: error.toString(),
-                expected: truncateOutput(expectedOutput),
-            });
+        } catch (e) {
+            error = e && e.toString ? e.toString() : String(e);
+            stack = e && e.stack ? e.stack : undefined;
+            stdout = stdout || '';
+            stderr = (stderr || '') + (e && e.stderr ? e.stderr : '');
+        }
+        const durationMs = performance.now() - startTime;
+
+        submissionResult.details.push({
+            test: i, // 0-based index (consistent with other parts of your system)
+            ok,
+            output: truncateOutput(output),
+            expected: truncateOutput(normalize(expectedOutput)),
+            error: error,
+            stack: stack,
+            stdout: truncateOutput(stdout, 2000),
+            stderr: truncateOutput(stderr, 2000),
+            durationMs: durationMs,
+        });
+
+        if (ok) {
+            submissionResult.passed++;
         }
     }
 
-    const summary = {
-        status: 'finished',
-        passed: results.filter(r => r.ok).length,
-        total: results.length,
-        details: results,
-    };
-
-    console.log(safeStringify(summary));
+    console.log(safeStringify(submissionResult, 1000000));
 }
 
 run().catch(error => {
-    console.log(safeStringify({ status: 'error', message: error.toString() }));
+    console.log(safeStringify({ status: 'error', message: error.toString(), stack: error.stack }, 1000000));
 });

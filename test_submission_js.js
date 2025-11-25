@@ -1,8 +1,8 @@
 
 import amqp from 'amqplib';
 import mongoose from 'mongoose';
-import Submission from './assessment-api/models/Submission.mjs';
-import Problem from './assessment-api/models/Problem.mjs';
+import Submission from './models/Submission.mjs';
+import Problem from './models/Problem.mjs';
 
 const MONGO_URI = 'mongodb://mongo:27017/assessment_db';
 const RABBITMQ_URI = 'amqp://user:password@rabbitmq:5672';
@@ -32,7 +32,25 @@ async function testSubmission() {
         const channel = await connection.createChannel();
         await channel.assertQueue(QUEUE_NAME, { durable: true });
 
-        channel.sendToQueue(QUEUE_NAME, Buffer.from(submission._id.toString()), { persistent: true });
+        const tests = problem.testCases.map(tc => ({
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            isHidden: tc.isHidden
+        }));
+
+        const functionName = problem.functionDefinitions.get(submission.language)?.name || 'solution';
+
+        const messageBody = {
+            schemaVersion: 'v2', // New version
+            submissionId: submission._id.toString(),
+            problemId: problem._id.toString(),
+            language: submission.language,
+            code: submission.code,
+            tests: tests,
+            functionName: functionName
+        };
+
+        channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(messageBody)), { persistent: true });
         console.log(`📥 Submission ID sent to queue: ${submission._id}`);
 
         await channel.close();

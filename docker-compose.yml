@@ -105,8 +105,8 @@ services:
       context: ./judge-service-go
       dockerfile: Dockerfile
     container_name: codespace_judge_service_go
+    command: sh -c "go build -o ./tmp/go-judge-service . && ./tmp/go-judge-service"
     volumes:
-      - ./judge-service-go:/app
       - /var/run/docker.sock:/var/run/docker.sock # Needed for Docker-in-Docker functionality
     environment:
       - MONGO_URI=mongodb://mongo:27017/assessment_db

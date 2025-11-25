@@ -1,9 +1,10 @@
-# **/.env
-# .env
-# **/.env.local
-# .env.local
-# **/.env.*.local
-# .env.*.local
+# dotenv environment variables file
+**/.env
+.env
+**/.env.local
+.env.local
+**/.env.*.local
+.env.*.local
 
 # Logs
 logs
@@ -14,10 +15,15 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Dependency directories
+node_modules/
+dist/
+dist-ssr/
+build/
 *.local
+
+# Go binaries
+judge-service-go
 
 # Editor directories and files
 .vscode/*
@@ -30,16 +36,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Environment and node
-node_modules/
-# .env
-# *.env
-dist/
-build/
-.vscode/
-.DS_Store
+# Temporary files
 /tmp
-/*.log
 
 # Docker
 docker-compose.override.yml
