@@ -25,7 +25,9 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN addgroup -S app && adduser -S -G app app
 
 COPY --from=builder /out/go-judge-service /usr/local/bin/go-judge-service
+COPY --from=builder /src/pkg/wrappers /app/pkg/wrappers
 RUN chown app:app /usr/local/bin/go-judge-service
+RUN chown -R app:app /app/pkg/wrappers
 
 USER app
 WORKDIR /app

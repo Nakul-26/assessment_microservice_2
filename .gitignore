@@ -23,7 +23,7 @@ build/
 *.local
 
 # Go binaries
-judge-service-go
+#judge-service-go
 
 # Editor directories and files
 .vscode/*
@@ -37,7 +37,7 @@ judge-service-go
 *.sw?
 
 # Temporary files
-/tmp
+#/tmp
 
 # Docker
 docker-compose.override.yml

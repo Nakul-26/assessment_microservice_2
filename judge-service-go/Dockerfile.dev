@@ -1,0 +1,41 @@
+# Dockerfile.dev - development image with live reload (air)
+FROM golang:1.24-alpine AS base
+
+# Install system packages needed for development
+RUN apk add --no-cache \
+    build-base \
+    git \
+    bash \
+    ca-certificates \
+    openssh-client \
+    curl
+
+# If you truly need mono/json-c for building language wrappers in this container,
+# install them here. Otherwise leave them out and put them in language images.
+# RUN apk add --no-cache mono json-c-dev
+
+# Make a non-root user for safety
+RUN addgroup -S app && adduser -S -G app app
+WORKDIR /app
+ENV CGO_ENABLED=1
+ENV GOPATH=/go
+ENV PATH=$PATH:/go/bin:$GOPATH/bin
+
+# Install 'air' for live reloading (explicit canonical repo)
+# Replace with your fork if desired.
+RUN go install github.com/cosmtrek/air@v1.40.0
+
+# Copy go mod files and download deps before copying the rest (cache-friendly)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of the source
+COPY . .
+
+# Change ownership so the non-root user can access files
+RUN chown -R app:app /app
+
+USER app
+
+# Use air with your config (air reads .air.toml)
+CMD ["air", "-c", ".air.toml"]

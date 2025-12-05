@@ -21,7 +21,9 @@
   "portsAttributes": {
     "3000": { "label": "Backend API" },
     "5173": { "label": "Frontend" },
-    "15672": { "label": "RabbitMQ Dashboard" }
+    "6379": { "label": "Redis" },
+    "27017": { "label": "MongoDB" },
+    "5672": { "label": "RabbitMQ" }
   },
 
   // ✅ Fix: run as root (since vscode user doesn’t exist)

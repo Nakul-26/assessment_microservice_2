@@ -1,11 +1,11 @@
 
 import amqp from 'amqplib';
 import mongoose from 'mongoose';
-import Submission from './models/Submission.mjs';
-import Problem from './models/Problem.mjs';
+import Submission from './assessment-api/models/Submission.mjs';
+import Problem from './assessment-api/models/Problem.mjs';
 
-const MONGO_URI = 'mongodb://mongo:27017/assessment_db';
-const RABBITMQ_URI = 'amqp://user:password@rabbitmq:5672';
+const MONGO_URI = 'mongodb://localhost:27017/assessment_db';
+const RABBITMQ_URI = 'amqp://user:password@localhost:5672';
 const QUEUE_NAME = 'submission_queue';
 
 async function testSubmission() {

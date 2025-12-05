@@ -47,6 +47,7 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 	ctx := map[string]interface{}{
 		"FUNCTION_NAME":        sanitizedFuncName,
 		"EXPECTED_OUTPUT_TYPE": p.ExpectedIoType.ReturnType,
+		"TestCases":            p.TestCases,
 	}
 
 	if lang.ID == "java" {
@@ -61,11 +62,16 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 		}
 		ctx["TESTS_LITERAL"] = javaTests
 		ctx["EXPECTED_LITERAL"] = javaExpected
-	default:
-		ctx["TESTS_JSON"] = string(p.TestsJSON)
 	}
 
-	t, err := template.New("wrapper").Option("missingkey=error").Parse(string(b))
+	funcMap := template.FuncMap{
+		"TESTS_JSON": func(tests interface{}) string {
+			b, _ := json.Marshal(tests)
+			return string(b)
+		},
+	}
+
+	t, err := template.New("wrapper").Funcs(funcMap).Option("missingkey=error").Parse(string(b))
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template %s: %w", tplPath, err)
 	}

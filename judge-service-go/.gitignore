@@ -1,0 +1,18 @@
+# Binaries
+#judge-service-go
+
+# Environment variables
+#.env
+
+# Temporary files
+#tmp/
+
+# Editor directories and files
+#.vscode/
+#.idea/
+#.DS_Store
+#*.suo
+#*.ntvs*
+#*.njsproj
+#*.sln
+#*.sw?
