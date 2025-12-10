@@ -23,11 +23,15 @@ for builtin_name in restricted_builtins:
 # USER_CODE_MARKER
 
 def run_tests():
-    tests = {{TESTS_JSON}}  # inserted by wrapper generator, array of {"input": [...], "expected": ...}
+    tests = json.loads('''{{.TESTS_JSON_STRING}}''') # inserted by wrapper generator, array of {"input": [...], "expected": ...}
     results = []
     for i, t in enumerate(tests):
         try:
-            out = {{FUNCTION_NAME}}(**t.get("input", {}))
+            test_input = t.get("input", {})
+            if isinstance(test_input, list):
+                out = {{.FUNCTION_NAME}}(*test_input)
+            else:
+                out = {{.FUNCTION_NAME}}(**test_input)
             ok = out == t.get("expectedOutput")
             results.append({"test": i+1, "ok": ok, "output": out})
         except Exception as e:

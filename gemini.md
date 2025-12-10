@@ -99,7 +99,30 @@ When reporting a bug, include:
 - Maintainer: Gemini CLI
 
 
-## other things
+## 15) Dev environment hot-reload behavior (important)
+
+- **Assessment API (Node.js):** Uses `nodemon`.  
+  ➜ No manual restart is needed for file changes. Restart only when Docker build-related files change.
+
+- **Judge Service (Go):** Uses `air` for hot reload.  
+  ➜ No manual restart for normal code changes. Restart only when Docker build-related files change.
+
+- **Frontend (React):** Automatically reloads on file changes via the React dev server.  
+  ➜ No manual restart for frontend code changes. Restart only when Docker build-related files change.
+
+**Assistant rule:**  
+When proposing fixes or edits, *never* suggest restarting these services unless the change affects Docker builds, environment configuration, or dev tooling setup.
+
+## 16) Stability rule for existing functionality
+
+When proposing or generating changes:
+
+- **Do not modify code that is already working correctly** unless the change is explicitly requested.
+- Avoid refactoring or rewriting stable areas of the codebase unless necessary for the requested feature or fix.
+- Ensure that any new changes are isolated, minimally invasive, and do not break existing behavior.
+- Always consider regression risks. If a change could impact stable functionality, call it out clearly.
+
+Assistant rule: Prioritize preserving existing, fully functional code paths. Changes should be targeted, incremental, and safe.
 
 
 # End of GEMINI.md

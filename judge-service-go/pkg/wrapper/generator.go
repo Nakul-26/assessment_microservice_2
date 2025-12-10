@@ -41,56 +41,64 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 	if err != nil {
 		return "", fmt.Errorf("failed to read template %s: %w", tplPath, err)
 	}
+	tpl := string(b)
 
 	sanitizedFuncName, _ := sanitizeIdentifier(submissionFuncName)
 
-	ctx := map[string]interface{}{
-		"FUNCTION_NAME":        sanitizedFuncName,
-		"EXPECTED_OUTPUT_TYPE": p.ExpectedIoType.ReturnType,
-		"TestCases":            p.TestCases,
-	}
-
+	// For Java, continue using the template engine because it has complex logic.
 	if lang.ID == "java" {
-		ctx["CLASS_NAME"] = "Solution"
-	}
+		ctx := map[string]interface{}{
+			"FUNCTION_NAME":        sanitizedFuncName,
+			"EXPECTED_OUTPUT_TYPE": p.ExpectedIoType.ReturnType,
+			"TestCases":            p.TestCases,
+			"CLASS_NAME":           "Solution",
+		}
 
-	switch lang.ID {
-	case "java":
 		javaTests, javaExpected, err := buildJavaTestLiterals(p)
 		if err != nil {
 			return "", fmt.Errorf("failed to build Java test literals: %w", err)
 		}
 		ctx["TESTS_LITERAL"] = javaTests
 		ctx["EXPECTED_LITERAL"] = javaExpected
-	}
 
-	funcMap := template.FuncMap{
-		"TESTS_JSON": func(tests interface{}) string {
-			b, _ := json.Marshal(tests)
-			return string(b)
-		},
-	}
-
-	t, err := template.New("wrapper").Funcs(funcMap).Option("missingkey=error").Parse(string(b))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template %s: %w", tplPath, err)
-	}
-	var out bytes.Buffer
-	if err := t.Execute(&out, ctx); err != nil {
-		return "", fmt.Errorf("failed to execute template %s: %w", tplPath, err)
-	}
-
-	result := out.String()
-	tempResult := strings.ReplaceAll(result, "{{COMPARE_MODE}}", "")
-	if strings.Contains(tempResult, "{{") || strings.Contains(tempResult, "}}") {
-		snippet := tempResult
-		if len(snippet) > 1000 {
-			snippet = snippet[:1000]
+		testsJSONBytes, err := json.Marshal(p.TestCases)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal TestCases to JSON: %w", err)
 		}
-		return "", fmt.Errorf("template produced unreplaced tokens: snippet: %.300s", snippet)
+		ctx["TESTS_JSON_STRING"] = string(testsJSONBytes)
+
+		t, err := template.New("wrapper").Option("missingkey=error").Parse(string(b))
+		if err != nil {
+			return "", fmt.Errorf("failed to parse template %s: %w", tplPath, err)
+		}
+		var out bytes.Buffer
+		if err := t.Execute(&out, ctx); err != nil {
+			return "", fmt.Errorf("failed to execute template %s: %w", tplPath, err)
+		}
+
+		result := out.String()
+		result = strings.ReplaceAll(result, "{{COMPARE_MODE}}", "") // Assuming empty for now
+		return result, nil
 	}
 
-	return result, nil
+	// For other languages (JS, Python, etc.), use simple string replacement.
+	tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
+
+	// Use TestsJSON if available, otherwise marshal TestCases.
+	if len(p.TestsJSON) > 0 {
+		tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(p.TestsJSON))
+	} else {
+		testsJSONBytes, err := json.Marshal(p.TestCases)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal TestCases to JSON: %w", err)
+		}
+		tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(testsJSONBytes))
+	}
+
+	tpl = strings.ReplaceAll(tpl, "{{EXPECTED_OUTPUT_TYPE}}", p.ExpectedIoType.ReturnType)
+	tpl = strings.ReplaceAll(tpl, "{{COMPARE_MODE}}", "") // Default to empty string
+
+	return tpl, nil
 }
 
 func sanitizeIdentifier(name string) (string, bool) {
