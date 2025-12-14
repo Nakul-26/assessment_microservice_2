@@ -67,55 +67,97 @@ const AddProblemPage = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
         setMessage('');
         setClientErrors([]);
-        
+
         const errs = [];
-        if (!formData.title.trim()) errs.push('Title is required');
-        if (!formData.description.trim()) errs.push('Description is required');
+        const parsedTestCases = [];
+
+        // 🔹 Basic validation
+        if (!formData.title.trim()) {
+            errs.push('Title is required');
+        }
+
+        if (!formData.description.trim()) {
+            errs.push('Description is required');
+        }
+
+        // 🔹 Validate & parse test cases
         formData.testCases.forEach((tc, i) => {
+            let parsedInput;
+            let parsedExpected;
+
+            // Validate input JSON
             try {
-                JSON.parse(tc.input);
+                parsedInput = JSON.parse(tc.input);
             } catch {
-                errs.push(`Test case ${i+1}: input must be valid JSON`);
+                errs.push(`Test case ${i + 1}: input must be valid JSON`);
+                return;
             }
+
+            // Validate expected output (JSON or scalar)
+            try {
+                parsedExpected = JSON.parse(tc.expectedOutput);
+            } catch {
+                // Allow scalar values like number/string
+                parsedExpected = tc.expectedOutput;
+            }
+
+            parsedTestCases.push({
+                ...tc,
+                input: parsedInput,
+                expectedOutput: parsedExpected,
+            });
         });
-        const hasFn = Object.values(formData.functionDefinitions).some(v => v.name.trim() !== '' && v.template.trim() !== '');
-        if (!hasFn) errs.push('At least one function definition (name and template) must be provided');
-        
-        if (errs.length) {
-            setClientErrors(errs);
+
+        // 🔹 Validate function definitions
+        const hasFunctionDefinition = Object.values(formData.functionDefinitions).some(
+            def => def.name.trim() !== '' && def.template.trim() !== ''
+        );
+
+        if (!hasFunctionDefinition) {
+            errs.push('At least one function definition (name and template) must be provided');
+        }
+
+        // 🔹 Stop if validation failed
+        if (errs.length > 0) {
+            setClientErrors(() => errs);
             return;
         }
 
+        // 🔹 Final payload normalization
         const problemData = {
             ...formData,
-            tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-            testCases: formData.testCases.map(tc => {
-                let expected;
-                try {
-                    expected = JSON.parse(tc.expectedOutput);
-                } catch (e) {
-                    expected = tc.expectedOutput;
-                }
-                return {
-                    ...tc,
-                    input: JSON.parse(tc.input),
-                    expectedOutput: expected,
-                };
-            }),
+            tags: formData.tags
+                .split(',')
+                .map(tag => tag.trim())
+                .filter(Boolean),
+
+            testCases: parsedTestCases,
+
             expectedIoType: {
                 ...formData.expectedIoType,
-                inputParameters: formData.expectedIoType.inputParameters.filter(p => p.name.trim() !== ''),
-            }
+                inputParameters: formData.expectedIoType.inputParameters.filter(
+                    p => p.name.trim() !== ''
+                ),
+            },
         };
 
+        // 🔹 Submit to backend
         try {
             const res = await axios.post('/api/problems', problemData);
-            setMessage(res.data.message || 'Problem created');
+
+            setMessage(res.data?.message || 'Problem created successfully');
             console.log('Problem created:', res.data.problem || res.data);
+
         } catch (err) {
-            setMessage('Error creating problem: ' + (err.response?.data ? JSON.stringify(err.response.data) : String(err)));
+            const serverMsg =
+                err.response?.data?.message ||
+                err.response?.data?.error ||
+                'Failed to create problem';
+
+            setMessage(`Error creating problem: ${serverMsg}`);
             console.error('Error creating problem:', err);
         }
     };
