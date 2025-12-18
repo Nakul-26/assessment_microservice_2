@@ -68,18 +68,18 @@ mongoose.connect(uri, {
 
 
 // Logging middleware
-app.use((req, res, next) => {
-  console.log(`📥 Incoming request: ${req.method} ${req.url}`);
-  console.log("👉 Headers:", req.headers.origin);
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log("👉 Body:", req.body);
-  }
-  console.log("👉 Query:", req.query);
-  console.log("👉 Params:", req.params);
-  console.log("👉 IP:", req.ip);
-  console.log("⏰ Time:", new Date().toISOString());
-  next();
-});
+// app.use((req, res, next) => {
+//   console.log(`📥 Incoming request: ${req.method} ${req.url}`);
+//   console.log("👉 Headers:", req.headers.origin);
+//   if (req.body && Object.keys(req.body).length > 0) {
+//     console.log("👉 Body:", req.body);
+//   }
+//   console.log("👉 Query:", req.query);
+//   console.log("👉 Params:", req.params);
+//   console.log("👉 IP:", req.ip);
+//   console.log("⏰ Time:", new Date().toISOString());
+//   next();
+// });
 
 // --- Routes ---
 app.use("/api", API);
