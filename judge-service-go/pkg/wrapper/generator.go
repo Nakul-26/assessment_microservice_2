@@ -84,16 +84,12 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 	// For other languages (JS, Python, etc.), use simple string replacement.
 	tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
 
-	// Use TestsJSON if available, otherwise marshal TestCases.
-	if len(p.TestsJSON) > 0 {
-		tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(p.TestsJSON))
-	} else {
-		testsJSONBytes, err := json.Marshal(p.TestCases)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal TestCases to JSON: %w", err)
-		}
-		tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(testsJSONBytes))
+	// Always marshal p.TestCases to ensure valid JSON is injected.
+	testsJSONBytes, err := json.Marshal(p.TestCases)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal TestCases to JSON: %w", err)
 	}
+	tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(testsJSONBytes))
 
 	tpl = strings.ReplaceAll(tpl, "{{EXPECTED_OUTPUT_TYPE}}", p.ExpectedIoType.ReturnType)
 	tpl = strings.ReplaceAll(tpl, "{{COMPARE_MODE}}", "") // Default to empty string
