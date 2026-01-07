@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
+import SubmissionOutput from '../components/SubmissionOutput';
 
 const ProblemPage = () => {
     const { _id } = useParams();
@@ -97,7 +98,7 @@ const ProblemPage = () => {
         return <div className="container">Loading...</div>;
     }
 
-    const availableLanguages = problem.functionDefinitions ? Object.keys(problem.functionDefinitions) : [];
+    const availableLanguages = problem.functionDefinitions ? Object.keys(problem.functionDefinitions).filter(lang => lang === 'python' || lang === 'javascript') : [];
 
     return (
         <div className="container">
@@ -156,7 +157,7 @@ const ProblemPage = () => {
             {submission && submission.output && (
                 <>
                     <h3>Output:</h3>
-                    <pre>{submission.output}</pre>
+                    <SubmissionOutput output={submission.output} />
                 </>
             )}
         </div>
