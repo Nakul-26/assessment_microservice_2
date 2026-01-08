@@ -8,7 +8,7 @@ The system is composed of three main services that communicate asynchronously:
 
 - **`frontend`**: A React-based single-page application that provides the user interface for viewing problems, submitting code, and seeing the results.
 - **`assessment-api`**: A Node.js/Express backend that serves as the main entry point for the frontend. It handles user submissions, manages problems, and provides status updates on submissions.
-- **`judge-service-go`**: A Go service that acts as an asynchronous worker. It is responsible for securely executing user-submitted code in isolated Docker containers and evaluating the output against the problem's test cases.
+- **`judge-service-go`**: A Go service that acts as an asynchronous worker. It is responsible for securely executing user-submitted code in isolated Docker containers and evaluating the output against the problem's test cases. It is designed for high performance and scalability, using a container pool and `tmpfs` volumes to optimize execution time and resource usage.
 
 ### Service Communication
 

@@ -1,0 +1,13 @@
+Yes, all the proposed changes have been implemented.
+
+Here's a summary of the implemented optimizations:
+
+1.  **Container Pooling:** A container pool has been implemented in `pkg/pool/pool.go` and integrated into `main.go`. This allows for reusing pre-warmed Docker containers for each language, significantly reducing startup overhead per submission.
+
+2.  **`tmpfs` Volume for File I/O:** The container creation logic in `pkg/pool/pool.go` now configures containers with `tmpfs` volume mounts (`HostConfig.Binds`). This enables the judge service to write submission files directly to a host path that is instantly visible to the container, eliminating `tar` archiving and copying overhead.
+
+3.  **Parallel Execution:** The `main.go` function now utilizes `runtime.NumCPU()` to spawn multiple goroutines, allowing the service to process submissions in parallel from the RabbitMQ queue.
+
+4.  **Smarter Image Strategy:** The `pool.WarmUp` function now includes logic to pre-pull all necessary Docker images at startup, avoiding image pull delays during submission execution.
+
+I have also updated the `judge-service-go/README.md` and the main `README.md` files to document these architectural improvements.

@@ -70,3 +70,12 @@ func GetLanguage(id string) *Language {
 	}
 	return nil
 }
+
+// GetSupportedLanguages returns a slice of all supported languages.
+func GetSupportedLanguages() []*Language {
+	supported := make([]*Language, 0, len(Languages))
+	for _, lang := range Languages {
+		supported = append(supported, lang)
+	}
+	return supported
+}

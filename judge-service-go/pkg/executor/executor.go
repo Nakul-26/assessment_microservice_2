@@ -1,15 +1,10 @@
 package executor
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -32,6 +27,11 @@ func NewExecutor() (*Executor, error) {
 		}
 	}
 	return &Executor{cli: cli}, nil
+}
+
+// Client returns the underlying Docker client.
+func (e *Executor) Client() *docker.Client {
+	return e.cli
 }
 
 // runExecWithTimeout handles the full lifecycle of creating, running, and waiting for an exec instance.
@@ -95,83 +95,12 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
 }
 
-// RunSubmission executes user code in a Docker container
-func (e *Executor) RunSubmission(ctx context.Context, languageImage string, files []string, tempDir string, compileCmd []string, runCmd []string, timeout time.Duration) (string, string, error) {
-	// Pull image
-	if err := e.pullImage(ctx, languageImage); err != nil {
-		return "", "", fmt.Errorf("failed to pull image %s: %w", languageImage, err)
-	}
-
+// RunInContainer executes user code in a given Docker container
+func (e *Executor) RunInContainer(ctx context.Context, containerID string, files []string, workDir string, compileCmd []string, runCmd []string, timeout time.Duration) (string, string, error) {
 	// Overall submission timeout derived from provided timeout (multiply by factor) or environment.
 	submissionTimeout := timeout * 3
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
-
-	// Decide user. Prefer numeric UID if set, else do not force "judge" name to avoid missing passwd entry.
-	user := os.Getenv("JUDGE_USER")   // e.g., "judge"
-	uid := os.Getenv("JUDGE_UID")     // e.g., "1000"
-	var containerUser string
-	if uid != "" {
-		containerUser = uid
-	} else if user != "" {
-		containerUser = user
-	} else {
-		containerUser = "" // let image default to its default user
-	}
-
-	pidsLimit := int64(1024)
-
-	hostCfg := &docker.HostConfig{
-		AutoRemove:     true,
-		NetworkMode:    "none",
-		ReadonlyRootfs: false, // Set to false to allow writing files
-		Memory:         256 * 1024 * 1024,
-		CPUQuota:       50000,
-		PidsLimit:      &pidsLimit,
-	}
-
-	containerOptions := docker.CreateContainerOptions{
-		Config: &docker.Config{
-			Image:      languageImage,
-			Cmd:        []string{"tail", "-f", "/dev/null"},
-			WorkingDir: "/app",
-			Tty:        false,
-		},
-		HostConfig: hostCfg,
-	}
-
-	// If containerUser configured, set it
-	if containerUser != "" {
-		containerOptions.Config.User = containerUser
-	}
-
-	container, err := e.cli.CreateContainer(containerOptions)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create container: %w", err)
-	}
-	containerID := container.ID
-
-	// Ensure container is stopped on exit
-	defer func() {
-		log.Printf("[container=%s] stopping container", containerID)
-		_ = e.cli.StopContainer(containerID, 1)
-	}()
-
-	// Start container
-	if err := e.cli.StartContainer(containerID, nil); err != nil {
-		return "", "", fmt.Errorf("failed to start container: %w", err)
-	}
-
-	// Copy files into container
-	for _, file := range files {
-		content, err := os.ReadFile(filepath.Join(tempDir, file))
-		if err != nil {
-			return "", "", fmt.Errorf("failed to read file %s: %w", file, err)
-		}
-		if err := e.copyToContainer(subCtx, containerID, "/app", file, string(content)); err != nil {
-			return "", "", fmt.Errorf("failed to copy file %s to container: %w", file, err)
-		}
-	}
 
 	// Compile step (if present)
 	if len(compileCmd) > 0 {
@@ -196,63 +125,3 @@ func (e *Executor) RunSubmission(ctx context.Context, languageImage string, file
 	return runStdout, runStderr, nil
 }
 
-// pullImage pulls a Docker image if it's not available locally
-func (e *Executor) pullImage(ctx context.Context, image string) error {
-	// If image exists locally, skip
-	if _, err := e.cli.InspectImage(image); err == nil {
-		return nil
-	} else if err != docker.ErrNoSuchImage {
-		return fmt.Errorf("failed to inspect image %s: %w", image, err)
-	}
-
-	// Parse image into repository and tag
-	repo, tag := image, "latest"
-	if strings.Contains(image, ":") {
-		parts := strings.SplitN(image, ":", 2)
-		repo, tag = parts[0], parts[1]
-	}
-
-	log.Printf("Pulling image: %s:%s", repo, tag)
-	pullOptions := docker.PullImageOptions{
-		Repository:   repo,
-		Tag:          tag,
-		Context:      ctx,
-		OutputStream: io.Discard,
-	}
-	auth := docker.AuthConfiguration{}
-	if err := e.cli.PullImage(pullOptions, auth); err != nil {
-		return fmt.Errorf("failed to pull image %s: %w", image, err)
-	}
-	return nil
-}
-
-// copyToContainer copies content to a file inside the container
-func (e *Executor) copyToContainer(ctx context.Context, containerID, destPath, fileName, content string) error {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-
-	header := &tar.Header{
-		Name: fileName,
-		Size: int64(len(content)),
-		Mode: 0644,
-	}
-	if err := tw.WriteHeader(header); err != nil {
-		return fmt.Errorf("error writing tar header: %w", err)
-	}
-	if _, err := tw.Write([]byte(content)); err != nil {
-		return fmt.Errorf("error writing tar content: %w", err)
-	}
-	if err := tw.Close(); err != nil {
-		return fmt.Errorf("error closing tar writer: %w", err)
-	}
-
-	opts := docker.UploadToContainerOptions{
-		Context:     ctx,
-		Path:        destPath,
-		InputStream: &buf,
-	}
-	if err := e.cli.UploadToContainer(containerID, opts); err != nil {
-		return fmt.Errorf("UploadToContainer failed: %w", err)
-	}
-	return nil
-}

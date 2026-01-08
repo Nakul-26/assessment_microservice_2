@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -23,16 +25,18 @@ import (
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
+	"judge-service-go/pkg/pool"
 	"judge-service-go/pkg/wrapper"
 )
 
 const (
-	defaultRabbitMQURL     = "amqp://user:password@rabbitmq:5672"
-	defaultSubmissionQueue = "submission_queue"
-	defaultMongoURI        = "mongodb://mongo:27017/assessment_db"
-	defaultRedisURI        = "redis://redis:6379"
-	defaultSandboxTimeout  = 5 * time.Second
-	maxTestsBytes          = 1 << 20 // 1MB
+	defaultRabbitMQURL        = "amqp://user:password@rabbitmq:5672"
+	defaultSubmissionQueue    = "submission_queue"
+	defaultMongoURI           = "mongodb://mongo:27017/assessment_db"
+	defaultRedisURI           = "redis://redis:6379"
+	defaultSandboxTimeout     = 5 * time.Second
+	maxTestsBytes             = 1 << 20 // 1MB
+	defaultPoolSizePerLang    = 2
 )
 
 func toSnakeCase(str string) string {
@@ -262,7 +266,7 @@ func processAndStoreResults(ctx context.Context, stdout, stderr string, execErr 
 }
 
 // processSubmission is the main coordinator for handling a submission message.
-func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor) {
+func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
 
 	submissionMsg, err := validateAndDecodeSubmission(d)
@@ -293,15 +297,16 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		return
 	}
 
-	tempDir, err := os.MkdirTemp("", "submission-")
-	if err != nil {
-		log.Printf("[submission=%s] Failed to create temp dir: %v", submissionMsg.SubmissionID, err)
-		d.Nack(false, true) // Could be a transient host issue
+	// Acquire a container from the pool
+	pooledContainer := containerPool.Acquire(lang.ID)
+	if pooledContainer == nil {
+		log.Printf("[submission=%s] No available containers for language %s, retrying...", submissionMsg.SubmissionID, lang.ID)
+		d.Nack(false, true)
 		return
 	}
-	defer os.RemoveAll(tempDir)
+	defer containerPool.Release(pooledContainer)
 
-	filesToCopy, compileCmd, runCmd, err := prepareSubmissionFiles(submissionMsg, problem, lang, tempDir)
+	filesToCopy, compileCmd, runCmd, err := prepareSubmissionFiles(submissionMsg, problem, lang, pooledContainer.WorkDir)
 	if err != nil {
 		log.Printf("[submission=%s] Failed to prepare submission files: %v", submissionMsg.SubmissionID, err)
 		d.Nack(false, false)
@@ -310,11 +315,13 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 
 	execCtx, cancel := context.WithTimeout(ctx, 2*defaultSandboxTimeout)
 	defer cancel()
-	stdout, stderr, execErr := executor.RunSubmission(
+
+	// RunSubmission needs to be refactored to use the pooled container
+	stdout, stderr, execErr := executor.RunInContainer(
 		execCtx,
-		lang.Image,
+		pooledContainer.ID,
 		filesToCopy,
-		tempDir,
+		pooledContainer.WorkDir,
 		compileCmd,
 		runCmd,
 		defaultSandboxTimeout,
@@ -323,7 +330,33 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 
 	processAndStoreResults(ctx, stdout, stderr, execErr, submissionMsg, submissionsCollection, redisClient)
 
+	// Cleanup the workspace for the next submission
+	// This should be improved to be more robust
+	err = cleanWorkspace(pooledContainer.WorkDir)
+	if err != nil {
+		log.Printf("[submission=%s] Failed to cleanup container workspace: %v", submissionMsg.SubmissionID, err)
+	}
+
 	d.Ack(false)
+}
+
+func cleanWorkspace(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func main() {
@@ -350,6 +383,24 @@ func main() {
 	// Initialize Docker Executor
 	executor, err := executor.NewExecutor()
 	failOnError(err, "Failed to create Docker executor")
+
+	// Initialize Container Pool
+	containerPool := pool.NewPool(executor.Client(), defaultPoolSizePerLang)
+	log.Println("Warming up container pool...")
+	var wg sync.WaitGroup
+	for _, lang := range languages.GetSupportedLanguages() {
+		wg.Add(1)
+		go func(l *languages.Language) {
+			defer wg.Done()
+			log.Printf("Warming up pool for %s...", l.ID)
+			err := containerPool.WarmUp(context.Background(), l.ID, l.Image, defaultPoolSizePerLang)
+			if err != nil {
+				log.Printf("Failed to warm up pool for %s: %v", l.ID, err)
+			}
+		}(lang)
+	}
+	wg.Wait()
+	log.Println("Container pool warmed up.")
 
 	// Connect to MongoDB
 	mongoClient, err := mongo.Connect(context.Background(), options.Client().ApplyURI(mongoURI))
@@ -415,11 +466,13 @@ func main() {
 
 	forever := make(chan struct{})
 
-	go func() {
-		for d := range msgs {
-			processSubmission(d, problemsCollection, submissionsCollection, redisClient, executor)
-		}
-	}()
+	for i := 0; i < runtime.NumCPU(); i++ { // Number of concurrent workers
+		go func() {
+			for d := range msgs {
+				processSubmission(d, problemsCollection, submissionsCollection, redisClient, executor, containerPool)
+			}
+		}()
+	}
 
 	<-forever
 }
