@@ -1,10 +1,10 @@
-# dotenv environment variables file
+# Environment variables
 **/.env
-.env
-**/.env.local
-.env.local
 **/.env.*.local
+**/.env.local
+.env
 .env.*.local
+.env.local
 
 # Logs
 logs
@@ -15,20 +15,53 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependency directories
-node_modules/
-dist/
-dist-ssr/
-build/
-*.local
+# Node dependency directories
+**/node_modules/
 
-# Go binaries
-#judge-service-go
+# Build output
+**/dist/
+**/dist-ssr/
+**/build/
+**/.next/
+**/.nuxt/
+**/.output/
+**/out/
+
+# Test/coverage output
+**/coverage/
+**/.nyc_output/
+**/.pytest_cache/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+
+# Go build output
+**/*.exe
+**/*.exe~
+**/*.dll
+**/*.so
+**/*.dylib
+**/*.test
+**/*.out
+**/bin/
+**/dist/
+
+# Tool caches
+**/.cache/
+**/.eslintcache
+**/.parcel-cache/
+**/.turbo/
+**/.npm/
+**/.pnpm-store/
+**/.yarn/
 
 # Editor directories and files
-.vscode/*
+**/.vscode/*
 !.vscode/extensions.json
-.idea
+**/.idea/
 .DS_Store
 *.suo
 *.ntvs*
@@ -37,7 +70,8 @@ build/
 *.sw?
 
 # Temporary files
-#/tmp
+**/tmp/
+**/temp/
 
 # Docker
 docker-compose.override.yml

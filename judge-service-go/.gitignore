@@ -1,18 +1,33 @@
 # Binaries
-#judge-service-go
+judge-service-go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+dist/
 
 # Environment variables
-#.env
+.env
+.env.local
+.env.*.local
 
 # Temporary files
-#tmp/
+tmp/
+temp/
 
 # Editor directories and files
-#.vscode/
-#.idea/
-#.DS_Store
-#*.suo
-#*.ntvs*
-#*.njsproj
-#*.sln
-#*.sw?
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Go workspace/cache
+go.work.sum
