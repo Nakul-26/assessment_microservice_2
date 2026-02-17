@@ -98,7 +98,10 @@ const ProblemPage = () => {
         return <div className="container">Loading...</div>;
     }
 
-    const availableLanguages = problem.functionDefinitions ? Object.keys(problem.functionDefinitions).filter(lang => lang === 'python' || lang === 'javascript') : [];
+    const supportedLanguages = ['python', 'javascript', 'c'];
+    const availableLanguages = problem.functionDefinitions
+        ? Object.keys(problem.functionDefinitions).filter(lang => supportedLanguages.includes(lang))
+        : [];
 
     return (
         <div className="container">

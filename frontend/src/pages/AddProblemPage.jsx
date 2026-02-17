@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const AddProblemPage = () => {
+    const navigate = useNavigate();
     const [formData, setFormData] = useState({
         title: '',
         description: '',
@@ -148,8 +150,8 @@ const AddProblemPage = () => {
         try {
             const res = await axios.post('/api/problems', problemData);
 
-            setMessage(res.data?.message || 'Problem created successfully');
             console.log('Problem created:', res.data.problem || res.data);
+            navigate('/');
 
         } catch (err) {
             const serverMsg =
