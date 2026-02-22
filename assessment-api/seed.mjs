@@ -154,6 +154,87 @@ const sampleProblems = [
             ],
             outputType: 'int'
         }
+    },
+    {
+        title: 'Kth Largest Element',
+        description: 'Given an array of integers and an integer k, return the k-th largest element (1-based).',
+        difficulty: 'Medium',
+        tags: ['Array', 'Sorting', 'Heap'],
+        isPremium: false,
+        testCases: [
+            {
+                input: [[3, 2, 1, 5, 6, 4], 2],
+                expectedOutput: 5,
+                isHidden: false
+            },
+            {
+                input: [[3, 2, 3, 1, 2, 4, 5, 5, 6], 4],
+                expectedOutput: 4,
+                isHidden: false
+            },
+            {
+                input: [[1], 1],
+                expectedOutput: 1,
+                isHidden: false
+            }
+        ],
+        functionDefinitions: {
+            javascript: {
+                name: 'kthLargest',
+                template: 'function kthLargest(nums, k) {\n  // your code here\n}'
+            },
+            python: {
+                name: 'kth_largest',
+                template: 'def kth_largest(nums, k):\n    pass'
+            }
+        },
+        expectedIoType: {
+            inputParameters: [
+                { name: 'nums', type: 'number[]' },
+                { name: 'k', type: 'number' }
+            ],
+            outputType: 'number'
+        }
+    },
+    {
+        title: 'Longest Common Prefix',
+        description: 'Given an array of strings, return the longest common prefix among them.',
+        difficulty: 'Hard',
+        tags: ['String', 'Prefix'],
+        isPremium: false,
+        testCases: [
+            {
+                input: [['flower', 'flow', 'flight']],
+                expectedOutput: 'fl',
+                isHidden: false
+            },
+            {
+                input: [['dog', 'racecar', 'car']],
+                expectedOutput: '',
+                isHidden: false
+            },
+            {
+                input: [['interview', 'internet', 'internal']],
+                expectedOutput: 'inter',
+                isHidden: false
+            }
+        ],
+        functionDefinitions: {
+            javascript: {
+                name: 'longestCommonPrefix',
+                template: 'function longestCommonPrefix(strs) {\n  // your code here\n}'
+            },
+            python: {
+                name: 'longest_common_prefix',
+                template: 'def longest_common_prefix(strs):\n    pass'
+            }
+        },
+        expectedIoType: {
+            inputParameters: [
+                { name: 'strs', type: 'string[]' }
+            ],
+            outputType: 'string'
+        }
     }
 ];
 
@@ -161,17 +242,19 @@ const seedDB = async () => {
     try {
         await mongoose.connect(dbURI, { dbName: 'assessment_db' });
         console.log('MongoDB connected for seeding...');
-        // Drop the collection to remove all documents and indexes
-        await mongoose.connection.db.dropCollection('problems').catch(err => {
-            if (err.code === 26) { // 26 is the error code for "ns not found" (collection doesn't exist)
-                console.log('Collection "problems" not found, skipping drop.');
-            } else {
-                throw err;
+        const bulkOps = sampleProblems.map(problem => ({
+            updateOne: {
+                filter: { title: problem.title },
+                update: { $set: problem },
+                upsert: true
             }
+        }));
+        const result = await Problem.bulkWrite(bulkOps, { ordered: false });
+        console.log('Database seeded (upsert):', {
+            inserted: result.upsertedCount,
+            modified: result.modifiedCount,
+            matched: result.matchedCount
         });
-        await Problem.deleteMany({});
-        await Problem.create(sampleProblems);
-        console.log('Database seeded!');
     } catch (err) {
         console.error('Seeding error:', err);
     } finally {

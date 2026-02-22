@@ -1,10 +1,13 @@
 package executor
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -95,12 +98,71 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
 }
 
+func (e *Executor) copyFilesToContainer(containerID string, workDir string, files []string) error {
+	if len(files) == 0 {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, name := range files {
+		path := filepath.Join(workDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			_ = tw.Close()
+			return fmt.Errorf("failed to stat %s: %w", path, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			_ = tw.Close()
+			return fmt.Errorf("failed to read %s: %w", path, err)
+		}
+		hdr := &tar.Header{
+			Name:    name,
+			Mode:    int64(info.Mode().Perm()),
+			Size:    int64(len(data)),
+			ModTime: info.ModTime(),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			_ = tw.Close()
+			return fmt.Errorf("failed to write tar header for %s: %w", name, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			_ = tw.Close()
+			return fmt.Errorf("failed to write tar data for %s: %w", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	opts := docker.UploadToContainerOptions{
+		InputStream: &buf,
+		Path:        "/app",
+	}
+	if err := e.cli.UploadToContainer(containerID, opts); err != nil {
+		return fmt.Errorf("failed to upload files to container: %w", err)
+	}
+	return nil
+}
+
 // RunInContainer executes user code in a given Docker container
 func (e *Executor) RunInContainer(ctx context.Context, containerID string, files []string, workDir string, compileCmd []string, runCmd []string, timeout time.Duration) (string, string, error) {
 	// Overall submission timeout derived from provided timeout (multiply by factor) or environment.
 	submissionTimeout := timeout * 3
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
+
+	// Clean workspace inside the container to avoid cross-run leakage.
+	_, _, _, err := e.runExecWithTimeout(subCtx, containerID, []string{"sh", "-c", "mkdir -p /app && rm -rf /app/*"}, timeout)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to clean container workspace: %w", err)
+	}
+
+	// Upload current submission files into the container.
+	if err := e.copyFilesToContainer(containerID, workDir, files); err != nil {
+		return "", "", err
+	}
 
 	// Compile step (if present)
 	if len(compileCmd) > 0 {
@@ -124,4 +186,3 @@ func (e *Executor) RunInContainer(ctx context.Context, containerID string, files
 
 	return runStdout, runStderr, nil
 }
-

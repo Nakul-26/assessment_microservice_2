@@ -1,0 +1,12 @@
+import express from "express";
+import problemsRoutes from "./problems.routes.js";
+import submissionsRoutes from "./submissions.routes.js";
+import previewRoutes from "./preview.routes.js";
+
+const router = express.Router();
+
+router.use("/problems", problemsRoutes);
+router.use("/submissions", submissionsRoutes);
+router.use("/preview", previewRoutes);
+
+export default router;
