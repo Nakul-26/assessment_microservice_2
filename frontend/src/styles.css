@@ -44,6 +44,12 @@ body {
     text-decoration: underline;
 }
 
+.header nav .button {
+    margin-left: 20px;
+    padding: 6px 10px;
+    font-size: 14px;
+}
+
 /* Button Styles */
 .button {
     background-color: #007bff;

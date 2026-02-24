@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 
 const EditProblemPage = () => {
     const { _id } = useParams();
@@ -33,7 +33,7 @@ const EditProblemPage = () => {
     useEffect(() => {
         const fetchProblem = async () => {
             try {
-                const res = await axios.get(`/api/problems/${_id}`);
+                const res = await api.get(`/api/problems/${_id}`);
                 const problem = res.data;
 
                 // Transform fetched data to match form state
@@ -129,7 +129,7 @@ const EditProblemPage = () => {
         };
 
         try {
-            await axios.put(`/api/problems/${_id}`, problemData);
+            await api.put(`/api/problems/${_id}`, problemData);
             setMessage('Problem updated successfully.');
             navigate(`/problems/${_id}`);
         } catch (err) {

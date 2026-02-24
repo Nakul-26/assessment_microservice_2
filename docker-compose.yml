@@ -63,6 +63,7 @@ services:
       - PORT=3000
       - REDIS_URI=redis://redis:6379
       - RABBITMQ_URI=amqp://user:password@rabbitmq:5672
+      - JWT_SECRET=dev_secret_change_me
     depends_on:
       rabbitmq:
         condition: service_healthy

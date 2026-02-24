@@ -8,6 +8,11 @@ const SubmissionSchema = new Schema({
         ref: 'Problem',
         required: true
     },
+    userId: {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
     code: {
         type: String,
         required: true
@@ -34,8 +39,5 @@ const SubmissionSchema = new Schema({
 
 // Optional: add an index for faster lookups by status
 SubmissionSchema.index({ status: 1 });
-
-// Add userId virtual if needed later
-SubmissionSchema.add({ userId: { type: Schema.Types.ObjectId, ref: 'User', required: false } });
 
 export default mongoose.model('Submission', SubmissionSchema);

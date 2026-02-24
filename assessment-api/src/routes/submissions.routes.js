@@ -1,5 +1,6 @@
 import express from "express";
 import { validate } from "../../middleware/validator.mjs";
+import { verifyToken } from "../middleware/auth.mjs";
 import {
   submitSolution,
   getSubmissionById
@@ -7,7 +8,7 @@ import {
 
 const router = express.Router();
 
-router.post("/", validate("submission"), submitSolution);
-router.get("/:_id", getSubmissionById);
+router.post("/", verifyToken, validate("submission"), submitSolution);
+router.get("/:_id", verifyToken, getSubmissionById);
 
 export default router;

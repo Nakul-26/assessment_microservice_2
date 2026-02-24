@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 
 const AddProblemPage = () => {
     const navigate = useNavigate();
@@ -148,7 +148,7 @@ const AddProblemPage = () => {
 
         // 🔹 Submit to backend
         try {
-            const res = await axios.post('/api/problems', problemData);
+            const res = await api.post('/api/problems', problemData);
 
             console.log('Problem created:', res.data.problem || res.data);
             navigate('/');

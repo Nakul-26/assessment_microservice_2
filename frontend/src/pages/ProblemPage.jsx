@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 
 const ProblemPage = () => {
@@ -10,11 +10,12 @@ const ProblemPage = () => {
     const [selectedLanguage, setSelectedLanguage] = useState('javascript');
     const [submission, setSubmission] = useState(null);
     const intervalRef = useRef(null);
+    const isAuthed = !!localStorage.getItem('token');
 
     useEffect(() => {
         const fetchProblem = async () => {
             try {
-                const res = await axios.get(`/api/problems/${_id}`);
+                const res = await api.get(`/api/problems/${_id}`);
                 const fetchedProblem = res.data;
                 setProblem(fetchedProblem);
                 if (fetchedProblem.functionDefinitions && fetchedProblem.functionDefinitions[selectedLanguage]) {
@@ -51,7 +52,7 @@ const ProblemPage = () => {
 
     const checkStatus = async (submissionId) => {
         try {
-            const res = await axios.get(`/api/submissions/${submissionId}`);
+            const res = await api.get(`/api/submissions/${submissionId}`);
             const currentSubmission = res.data;
             setSubmission(currentSubmission);
 
@@ -68,6 +69,10 @@ const ProblemPage = () => {
     };
 
     const handleSubmit = async () => {
+        if (!isAuthed) {
+            setSubmission({ status: 'Unauthorized', output: 'Please log in to submit.' });
+            return;
+        }
         if (intervalRef.current) {
             return;
         }
@@ -80,7 +85,7 @@ const ProblemPage = () => {
 
         try {
             setSubmission({ status: 'Submitting...', output: '' });
-            const res = await axios.post(`/api/submit`, payload);
+            const res = await api.post(`/api/submissions`, payload);
             const newSubmission = res.data;
             setSubmission(newSubmission);
 
@@ -150,11 +155,16 @@ const ProblemPage = () => {
             
             <button 
                 onClick={handleSubmit} 
-                disabled={submission && (submission.status === 'Pending' || submission.status === 'Running')}
+                disabled={!isAuthed || (submission && (submission.status === 'Pending' || submission.status === 'Running'))}
                 className="button"
             >
                 {submission && (submission.status === 'Pending' || submission.status === 'Running') ? 'Judging...' : 'Submit'}
             </button>
+            {!isAuthed && (
+                <p className="mt-20">
+                    Please <Link to="/login">log in</Link> to submit solutions.
+                </p>
+            )}
             
             <h3 className="mt-20">Status: {submission ? submission.status : 'Not submitted'}</h3>
             {submission && submission.output && (

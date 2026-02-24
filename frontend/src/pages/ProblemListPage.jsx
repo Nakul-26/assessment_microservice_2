@@ -1,19 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 
 function ProblemListPage() {
   const [problems, setProblems] = useState([]);
 
   useEffect(() => {
-    axios.get('/api/problems')
+    api.get('/api/problems')
       .then(response => setProblems(response.data))
       .catch(error => console.error('Error fetching problems:', error));
   }, []);
 
   const handleDelete = (_id) => {
-    axios.delete(`/api/problems/${_id}`)
+    api.delete(`/api/problems/${_id}`)
       .then(() => {
         setProblems(problems.filter(problem => problem._id !== _id));
       })

@@ -17,11 +17,12 @@ function validateSubmissionMessage(msg) {
   return true;
 }
 
-export async function submitSolution({ problemId, code, language }) {
+export async function submitSolution({ problemId, code, language, userId }) {
   const submission = await submissionsRepo.create({
     problemId,
     code,
     language,
+    userId,
     status: "Pending"
   });
 

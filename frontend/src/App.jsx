@@ -1,9 +1,11 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { BrowserRouter as Router, Route, Routes, Link } from 'react-router-dom';
 import ProblemListPage from './pages/ProblemListPage';
 import ProblemPage from './pages/ProblemPage';
 import AddProblemPage from './pages/AddProblemPage';
 import EditProblemPage from './pages/EditProblemPage';
+import LoginPage from './pages/LoginPage';
+import { setAuthToken } from './api';
 
 
 function App() {
@@ -11,12 +13,49 @@ function App() {
         console.log('App component mounted');
     }, []);
 
+    const [user, setUser] = useState(() => {
+        const raw = localStorage.getItem('user');
+        return raw ? JSON.parse(raw) : null;
+    });
+
+    useEffect(() => {
+        const syncAuth = () => {
+            const raw = localStorage.getItem('user');
+            setUser(raw ? JSON.parse(raw) : null);
+        };
+        window.addEventListener('auth-change', syncAuth);
+        window.addEventListener('storage', syncAuth);
+        return () => {
+            window.removeEventListener('auth-change', syncAuth);
+            window.removeEventListener('storage', syncAuth);
+        };
+    }, []);
+
+    const handleLogout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setAuthToken(null);
+        setUser(null);
+        window.dispatchEvent(new Event('auth-change'));
+    };
+
+    const canCreateProblem = user && (user.role === 'admin' || user.role === 'faculty');
+
     return (
         <Router>
             <div className="header">
                 <h1>Placement Assessment</h1>
                 <nav>
-                    <a href="/">All Problems</a> | <a href="/add-problem">Add Problem</a>
+                    <Link to="/">All Problems</Link>
+                    {canCreateProblem && (
+                        <span> | <Link to="/add-problem">Add Problem</Link></span>
+                    )}
+                    {!user && (
+                        <span> | <Link to="/login">Login</Link></span>
+                    )}
+                    {user && (
+                        <span> | <button className="button" onClick={handleLogout}>Logout</button></span>
+                    )}
                 </nav>
             </div>
             <div className="container">
@@ -25,6 +64,7 @@ function App() {
                     <Route path="/problems/:_id" element={<ProblemPage />} />
                     <Route path="/add-problem" element={<AddProblemPage />} />
                     <Route path="/problems/:_id/edit" element={<EditProblemPage />} />
+                    <Route path="/login" element={<LoginPage />} />
                 </Routes>
             </div>
         </Router>
