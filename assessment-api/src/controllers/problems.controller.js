@@ -11,7 +11,7 @@ export async function listProblems(req, res, next) {
 
 export async function getProblemById(req, res, next) {
   try {
-    const problem = await problemsService.getProblemById(req.params._id);
+    const problem = await problemsService.getProblemById(req.params._id, req.user || null);
     if (!problem) {
       return res.status(404).json({ msg: "Problem not found" });
     }

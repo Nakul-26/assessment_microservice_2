@@ -17,6 +17,71 @@ function validateSubmissionMessage(msg) {
   return true;
 }
 
+function canAccessSubmission(submission, { userId, role }) {
+  if (!submission || !userId) return false;
+  if (role === "admin" || role === "faculty" || role === "superadmin") return true;
+  return String(submission.userId) === String(userId);
+}
+
+function isPrivilegedRole(role) {
+  return role === "admin" || role === "faculty" || role === "superadmin";
+}
+
+function isSampleTestCase(tc = {}) {
+  if (typeof tc.isSample === "boolean") return tc.isSample;
+  if (typeof tc.isHidden === "boolean") return !tc.isHidden;
+  return true;
+}
+
+function parseOutputJSON(output) {
+  if (!output || typeof output !== "string") return null;
+  try {
+    return JSON.parse(output);
+  } catch (err) {
+    return null;
+  }
+}
+
+function sanitizeResultDetails(details = [], testCases = []) {
+  return details.map((detail, idx) => {
+    const testIndexFromPayload = Number.isInteger(detail.test) ? detail.test - 1 : idx;
+    const tc = testCases[testIndexFromPayload];
+    const hidden = tc ? !isSampleTestCase(tc) : false;
+
+    if (!hidden) {
+      return detail;
+    }
+
+    return {
+      test: detail.test,
+      ok: detail.ok
+    };
+  });
+}
+
+function sanitizeSubmissionForStudent(submission, problem) {
+  if (!submission || !problem || !Array.isArray(problem.testCases)) {
+    return submission;
+  }
+
+  const normalized = typeof submission.toObject === "function" ? submission.toObject() : { ...submission };
+  const parsedOutput = parseOutputJSON(normalized.output);
+
+  if (parsedOutput && Array.isArray(parsedOutput.details)) {
+    parsedOutput.details = sanitizeResultDetails(parsedOutput.details, problem.testCases);
+    normalized.output = JSON.stringify(parsedOutput);
+  }
+
+  if (normalized.testResult && Array.isArray(normalized.testResult.details)) {
+    normalized.testResult = {
+      ...normalized.testResult,
+      details: sanitizeResultDetails(normalized.testResult.details, problem.testCases)
+    };
+  }
+
+  return normalized;
+}
+
 export async function submitSolution({ problemId, code, language, userId }) {
   const submission = await submissionsRepo.create({
     problemId,
@@ -34,7 +99,8 @@ export async function submitSolution({ problemId, code, language, userId }) {
   const tests = problem.testCases.map((tc) => ({
     input: tc.input,
     expectedOutput: tc.expectedOutput,
-    isHidden: tc.isHidden
+    isHidden: !isSampleTestCase(tc),
+    isSample: isSampleTestCase(tc)
   }));
 
   const functionName = problem.functionDefinitions.get(language)?.name || "solution";
@@ -58,10 +124,17 @@ export async function submitSolution({ problemId, code, language, userId }) {
   return { submission };
 }
 
-export async function getSubmissionById(id) {
+export async function getSubmissionById(id, auth = {}) {
   const cacheKey = `submission:${id}`;
   const cached = await getCacheJSON(cacheKey);
   if (cached) {
+    if (!canAccessSubmission(cached, auth)) {
+      return { forbidden: true };
+    }
+    if (!isPrivilegedRole(auth.role)) {
+      const problem = await problemsRepo.findById(cached.problemId);
+      return { cached: true, submission: sanitizeSubmissionForStudent(cached, problem) };
+    }
     return { cached: true, submission: cached };
   }
 
@@ -70,9 +143,23 @@ export async function getSubmissionById(id) {
     return { notFound: true };
   }
 
+  if (!canAccessSubmission(submission, auth)) {
+    return { forbidden: true };
+  }
+
   if (submission.status === "Success" || submission.status === "Fail") {
     await setCacheJSON(cacheKey, submission, 3600);
   }
 
+  if (!isPrivilegedRole(auth.role)) {
+    const problem = await problemsRepo.findById(submission.problemId);
+    return { submission: sanitizeSubmissionForStudent(submission, problem) };
+  }
+
   return { submission };
+}
+
+export async function getMySubmissions(userId) {
+  const submissions = await submissionsRepo.findByUserId(userId);
+  return { submissions };
 }

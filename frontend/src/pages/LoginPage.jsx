@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api, { setAuthToken } from "../api";
 
 const LoginPage = () => {
@@ -56,6 +56,9 @@ const LoginPage = () => {
           Login
         </button>
       </form>
+      <p className="mt-20">
+        Need an account? <Link to="/register">Create user</Link>
+      </p>
     </div>
   );
 };

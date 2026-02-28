@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import User from "../../models/User.mjs";
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/httpError.js";
@@ -15,6 +16,13 @@ function toPublicUser(user) {
 }
 
 export async function register({ name, email, password, role, collegeId }) {
+  const normalizedCollegeId = typeof collegeId === "string" ? collegeId.trim() : collegeId;
+  if (normalizedCollegeId && !mongoose.isValidObjectId(normalizedCollegeId)) {
+    throw new HttpError(400, "Invalid collegeId", {
+      message: "collegeId must be a valid Mongo ObjectId"
+    });
+  }
+
   const existing = await User.findOne({ email: email.toLowerCase() });
   if (existing) {
     throw new HttpError(409, "Email already registered", { message: "Email already registered" });
@@ -26,7 +34,7 @@ export async function register({ name, email, password, role, collegeId }) {
     email: email.toLowerCase(),
     password: hashed,
     role,
-    collegeId
+    collegeId: normalizedCollegeId || undefined
   });
 
   const token = jwt.sign(

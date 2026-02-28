@@ -12,7 +12,7 @@ const EditProblemPage = () => {
         difficulty: 'Easy',
         tags: '',
         isPremium: false,
-        testCases: [{ input: '[]', expectedOutput: '' }],
+        testCases: [{ input: '[]', expectedOutput: '', isSample: true }],
         functionDefinitions: {
             javascript: { name: '', template: '' },
             python: { name: '', template: '' },
@@ -43,6 +43,7 @@ const EditProblemPage = () => {
                     testCases: problem.testCases.map(tc => ({
                         input: JSON.stringify(tc.input, null, 2),
                         expectedOutput: typeof tc.expectedOutput === 'object' ? JSON.stringify(tc.expectedOutput, null, 2) : String(tc.expectedOutput),
+                        isSample: typeof tc.isSample === 'boolean' ? tc.isSample : !tc.isHidden,
                     })),
                     functionDefinitions: problem.functionDefinitions || { javascript: { name: '', template: '' }, python: { name: '', template: '' }, java: { name: '', template: '' }, c: { name: '', template: '' }, csharp: { name: '', template: '' } },
                 };
@@ -62,9 +63,9 @@ const EditProblemPage = () => {
     };
 
     const handleTestCaseChange = (index, e) => {
-        const { name, value } = e.target;
+        const { name, value, type, checked } = e.target;
         const newTestCases = [...formData.testCases];
-        newTestCases[index][name] = value;
+        newTestCases[index][name] = type === 'checkbox' ? checked : value;
         setFormData({ ...formData, testCases: newTestCases });
     };
 
@@ -93,7 +94,11 @@ const EditProblemPage = () => {
     };
 
     const addTestCase = () => {
-        setFormData({ ...formData, testCases: [...formData.testCases, { input: '[]', expectedOutput: '' }] });
+        const nextIsSample = formData.testCases.length < 2;
+        setFormData({
+            ...formData,
+            testCases: [...formData.testCases, { input: '[]', expectedOutput: '', isSample: nextIsSample }]
+        });
     };
 
     const handleSubmit = async (e) => {
@@ -124,6 +129,7 @@ const EditProblemPage = () => {
                     ...tc,
                     input: JSON.parse(tc.input),
                     expectedOutput: expected,
+                    isSample: !!tc.isSample
                 };
             }),
         };
@@ -182,6 +188,15 @@ const EditProblemPage = () => {
                         <label>Test Case {i + 1}</label>
                         <textarea name="input" value={tc.input} onChange={(e) => handleTestCaseChange(i, e)} required />
                         <textarea name="expectedOutput" value={tc.expectedOutput} onChange={(e) => handleTestCaseChange(i, e)} required />
+                        <label>
+                            <input
+                                type="checkbox"
+                                name="isSample"
+                                checked={!!tc.isSample}
+                                onChange={(e) => handleTestCaseChange(i, e)}
+                            />
+                            Visible to students (sample)
+                        </label>
                     </div>
                 ))}
                 <button type="button" onClick={addTestCase} className="button">Add Test Case</button>

@@ -15,6 +15,21 @@ export function verifyToken(req, res, next) {
   }
 }
 
+export function optionalVerifyToken(req, res, next) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET);
+    req.user = decoded;
+  } catch (err) {
+    // Ignore invalid optional token and proceed as anonymous.
+  }
+
+  next();
+}
+
 export function authorizeRoles(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {

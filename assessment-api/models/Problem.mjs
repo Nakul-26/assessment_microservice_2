@@ -15,6 +15,7 @@ const ProblemSchema = new Schema({
   testCases: [{
     input: { type: [Schema.Types.Mixed], required: true },
     expectedOutput: { type: Schema.Types.Mixed, required: true },
+    isSample: { type: Boolean, default: false },
     isHidden: { type: Boolean, default: false }
   }],
 

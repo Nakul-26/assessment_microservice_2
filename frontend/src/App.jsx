@@ -5,6 +5,8 @@ import ProblemPage from './pages/ProblemPage';
 import AddProblemPage from './pages/AddProblemPage';
 import EditProblemPage from './pages/EditProblemPage';
 import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import MySubmissionsPage from './pages/MySubmissionsPage';
 import { setAuthToken } from './api';
 
 
@@ -53,6 +55,12 @@ function App() {
                     {!user && (
                         <span> | <Link to="/login">Login</Link></span>
                     )}
+                    {!user && (
+                        <span> | <Link to="/register">Register</Link></span>
+                    )}
+                    {user && (
+                        <span> | <Link to="/my-submissions">My Submissions</Link></span>
+                    )}
                     {user && (
                         <span> | <button className="button" onClick={handleLogout}>Logout</button></span>
                     )}
@@ -65,6 +73,8 @@ function App() {
                     <Route path="/add-problem" element={<AddProblemPage />} />
                     <Route path="/problems/:_id/edit" element={<EditProblemPage />} />
                     <Route path="/login" element={<LoginPage />} />
+                    <Route path="/register" element={<RegisterPage />} />
+                    <Route path="/my-submissions" element={<MySubmissionsPage />} />
                 </Routes>
             </div>
         </Router>

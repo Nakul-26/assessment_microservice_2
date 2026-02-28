@@ -24,6 +24,9 @@
             "items": {}
           },
           "expectedOutput": {},
+          "isSample": {
+            "type": "boolean"
+          },
           "isHidden": {
             "type": "boolean"
           }

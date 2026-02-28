@@ -10,7 +10,7 @@ const AddProblemPage = () => {
         difficulty: 'Easy',
         tags: '',
         isPremium: false,
-        testCases: [{ input: '[]', expectedOutput: '' }],
+        testCases: [{ input: '[]', expectedOutput: '', isSample: true }],
         functionDefinitions: {
             javascript: { name: '', template: '' },
             python: { name: '', template: '' },
@@ -33,9 +33,9 @@ const AddProblemPage = () => {
     };
 
     const handleTestCaseChange = (index, e) => {
-        const { name, value } = e.target;
+        const { name, value, type, checked } = e.target;
         const newTestCases = [...formData.testCases];
-        newTestCases[index][name] = value;
+        newTestCases[index][name] = type === 'checkbox' ? checked : value;
         setFormData({ ...formData, testCases: newTestCases });
     };
 
@@ -60,7 +60,11 @@ const AddProblemPage = () => {
     };
 
     const addTestCase = () => {
-        setFormData({ ...formData, testCases: [...formData.testCases, { input: '[]', expectedOutput: '' }] });
+        const nextIsSample = formData.testCases.length < 2;
+        setFormData({
+            ...formData,
+            testCases: [...formData.testCases, { input: '[]', expectedOutput: '', isSample: nextIsSample }]
+        });
     };
 
     const addIoParam = () => {
@@ -110,6 +114,7 @@ const AddProblemPage = () => {
                 ...tc,
                 input: parsedInput,
                 expectedOutput: parsedExpected,
+                isSample: !!tc.isSample
             });
         });
 
@@ -209,6 +214,15 @@ const AddProblemPage = () => {
                         <label>Test Case {index + 1}</label>
                         <textarea name="input" placeholder="Input (as JSON array)" value={testCase.input} onChange={(e) => handleTestCaseChange(index, e)} required />
                         <textarea name="expectedOutput" placeholder="Expected Output (JSON or scalar)" value={testCase.expectedOutput} onChange={(e) => handleTestCaseChange(index, e)} required />
+                        <label>
+                            <input
+                                type="checkbox"
+                                name="isSample"
+                                checked={!!testCase.isSample}
+                                onChange={(e) => handleTestCaseChange(index, e)}
+                            />
+                            Visible to students (sample)
+                        </label>
                     </div>
                 ))}
                 <button type="button" onClick={addTestCase} className="button">Add Test Case</button>

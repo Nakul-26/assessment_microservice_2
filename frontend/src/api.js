@@ -1,7 +1,19 @@
 import axios from "axios";
 
+function resolveBaseUrl() {
+  const raw = import.meta.env.VITE_API_URL;
+  if (!raw) return "";
+
+  // If a Docker-internal host leaks to browser config, fallback to same-origin proxy.
+  if (typeof window !== "undefined" && raw.includes("assessment-api")) {
+    return "";
+  }
+
+  return raw;
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || ""
+  baseURL: resolveBaseUrl()
 });
 
 export function setAuthToken(token) {

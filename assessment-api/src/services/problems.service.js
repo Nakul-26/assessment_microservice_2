@@ -1,6 +1,51 @@
 import * as problemsRepo from "../repositories/problems.repo.js";
 import { HttpError } from "../utils/httpError.js";
 
+function isPrivilegedRole(role) {
+  return role === "admin" || role === "faculty" || role === "superadmin";
+}
+
+function isSampleTestCase(tc = {}) {
+  if (typeof tc.isSample === "boolean") return tc.isSample;
+  if (typeof tc.isHidden === "boolean") return !tc.isHidden;
+  return true;
+}
+
+function toStoredTestCase(tc = {}) {
+  const sample = isSampleTestCase(tc);
+  return {
+    ...tc,
+    isSample: sample,
+    isHidden: !sample
+  };
+}
+
+function normalizeProblemPayload(payload = {}) {
+  if (!Array.isArray(payload.testCases)) return payload;
+  return {
+    ...payload,
+    testCases: payload.testCases.map(toStoredTestCase)
+  };
+}
+
+function sanitizeProblemForStudent(problemDoc) {
+  const problem = typeof problemDoc.toObject === "function" ? problemDoc.toObject() : { ...problemDoc };
+  const visibleCases = Array.isArray(problem.testCases)
+    ? problem.testCases
+        .filter((tc) => isSampleTestCase(tc))
+        .map((tc) => ({
+          ...tc,
+          isSample: true,
+          isHidden: false
+        }))
+    : [];
+
+  return {
+    ...problem,
+    testCases: visibleCases
+  };
+}
+
 function validateProblemPayload(payload) {
   const validationErrors = [];
   if (Array.isArray(payload.testCases)) {
@@ -53,24 +98,33 @@ export async function listProblems(query = {}) {
   return problemsRepo.findAllWithoutTests(filter, options);
 }
 
-export async function getProblemById(id) {
-  return problemsRepo.findById(id);
+export async function getProblemById(id, user = null) {
+  const problem = await problemsRepo.findById(id);
+  if (!problem) return null;
+
+  if (isPrivilegedRole(user && user.role)) {
+    return problem;
+  }
+
+  return sanitizeProblemForStudent(problem);
 }
 
 export async function createProblem(payload) {
-  const validationErrors = validateProblemPayload(payload);
+  const normalizedPayload = normalizeProblemPayload(payload);
+  const validationErrors = validateProblemPayload(normalizedPayload);
   if (validationErrors.length > 0) {
     throw new HttpError(400, "Validation failed", { msg: "Validation failed", errors: validationErrors });
   }
-  return problemsRepo.create(payload);
+  return problemsRepo.create(normalizedPayload);
 }
 
 export async function updateProblem(id, payload) {
-  const validationErrors = validateProblemPayload(payload);
+  const normalizedPayload = normalizeProblemPayload(payload);
+  const validationErrors = validateProblemPayload(normalizedPayload);
   if (validationErrors.length > 0) {
     throw new HttpError(400, "Validation failed", { msg: "Validation failed", errors: validationErrors });
   }
-  return problemsRepo.updateById(id, payload);
+  return problemsRepo.updateById(id, normalizedPayload);
 }
 
 export async function deleteProblem(id) {
