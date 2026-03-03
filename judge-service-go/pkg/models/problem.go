@@ -12,43 +12,38 @@ import (
 
 // TestCase defines the structure for a single test case.
 type TestCase struct {
-	Input          []interface{} `json:"input" bson:"input"`
-	ExpectedOutput interface{}   `json:"expectedOutput" bson:"expectedOutput"`
-	IsHidden       bool          `json:"isHidden" bson:"isHidden,omitempty"`
+	Input    []interface{} `json:"inputs" bson:"inputs"`
+	Expected interface{}   `json:"expected" bson:"expected"`
+	IsSample bool          `json:"isSample" bson:"isSample,omitempty"`
+	IsHidden bool          `json:"isHidden" bson:"isHidden,omitempty"`
 }
 
-// FunctionDefinition holds the name and template for a function in a specific language.
-type FunctionDefinition struct {
-	Name     string `json:"name" bson:"name"`
-	Template string `json:"template" bson:"template"`
-}
-
-// Problem defines the structure for a programming problem.
-type Problem struct {
-	ID                  primitive.ObjectID            `json:"_id" bson:"_id,omitempty"`
-	Title               string                        `json:"title" bson:"title"`
-	Description         string                        `json:"description" bson:"description"`
-	Difficulty          string                        `json:"difficulty" bson:"difficulty"`
-	TestCases           []TestCase                    `json:"testCases,omitempty" bson:"testCases,omitempty"`
-	TestsJSON           json.RawMessage               `json:"testsJSON,omitempty" bson:"testsJSON,omitempty"` // store raw JSON (safer)
-	FunctionDefinitions map[string]FunctionDefinition `json:"functionDefinitions,omitempty" bson:"functionDefinitions,omitempty"`
-	ExpectedIoType      ExpectedIoType                `json:"expectedIoType,omitempty" bson:"expectedIoType,omitempty"`
-	Tags                []string                      `json:"tags,omitempty" bson:"tags,omitempty"`
-	IsPremium           bool                          `json:"isPremium,omitempty" bson:"isPremium,omitempty"`
-	CreatedAt           primitive.DateTime            `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-}
-
-// InputParameter describes a single parameter for a function.
-type InputParameter struct {
+type Parameter struct {
 	Name string `json:"name" bson:"name"`
 	Type string `json:"type" bson:"type"`
 }
 
-// ExpectedIoType describes the input and output types for a problem.
-type ExpectedIoType struct {
-	FunctionName    string           `json:"functionName" bson:"functionName"`
-	InputParameters []InputParameter `json:"inputParameters" bson:"inputParameters"`
-	ReturnType      string           `json:"returnType" bson:"returnType"`
+type CompareConfig struct {
+	Mode             string  `json:"mode" bson:"mode"`
+	FloatTolerance   float64 `json:"floatTolerance" bson:"floatTolerance"`
+	OrderInsensitive bool    `json:"orderInsensitive" bson:"orderInsensitive"`
+}
+
+// Problem defines the structure for a programming problem.
+type Problem struct {
+	ID            primitive.ObjectID `json:"_id" bson:"_id,omitempty"`
+	Title         string             `json:"title" bson:"title"`
+	Description   string             `json:"description" bson:"description"`
+	Difficulty    string             `json:"difficulty" bson:"difficulty"`
+	FunctionName  string             `json:"functionName" bson:"functionName"`
+	Parameters    []Parameter        `json:"parameters,omitempty" bson:"parameters,omitempty"`
+	ReturnType    string             `json:"returnType,omitempty" bson:"returnType,omitempty"`
+	CompareConfig CompareConfig      `json:"compareConfig,omitempty" bson:"compareConfig,omitempty"`
+	TestCases     []TestCase         `json:"testCases,omitempty" bson:"testCases,omitempty"`
+	TestsJSON     json.RawMessage    `json:"testsJSON,omitempty" bson:"testsJSON,omitempty"` // store raw JSON (safer)
+	Tags          []string           `json:"tags,omitempty" bson:"tags,omitempty"`
+	IsPremium     bool               `json:"isPremium,omitempty" bson:"isPremium,omitempty"`
+	CreatedAt     primitive.DateTime `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
 }
 
 // ParseTestsJSON attempts to populate p.TestCases from p.TestsJSON if TestCases is empty.
@@ -76,14 +71,25 @@ func (p *Problem) ParseTestsJSON() error {
 		switch v := item.(type) {
 		case map[string]interface{}:
 			// object form
-			inputIntf, _ := v["input"].([]interface{})
+			inputKey := "inputs"
+			if _, ok := v[inputKey]; !ok {
+				inputKey = "input"
+			}
+			inputIntf, _ := v[inputKey].([]interface{})
+			expectedKey := "expected"
+			if _, ok := v[expectedKey]; !ok {
+				expectedKey = "expectedOutput"
+			}
 			tc := TestCase{
-				Input:          normalizeNumbers(inputIntf),
-				ExpectedOutput: normalizeValue(v["expectedOutput"]),
+				Input:    normalizeNumbers(inputIntf),
+				Expected: normalizeValue(v[expectedKey]),
 			}
 			// try to extract isHidden if present
 			if b, ok := v["isHidden"].(bool); ok {
 				tc.IsHidden = b
+			}
+			if b, ok := v["isSample"].(bool); ok {
+				tc.IsSample = b
 			}
 			cases = append(cases, tc)
 		case []interface{}:
@@ -96,8 +102,8 @@ func (p *Problem) ParseTestsJSON() error {
 				}
 				expected := normalizeValue(v[1])
 				tc := TestCase{
-					Input:          inputArr,
-					ExpectedOutput: expected,
+					Input:    inputArr,
+					Expected: expected,
 				}
 				if len(v) >= 3 {
 					if b, ok := v[2].(bool); ok {
@@ -162,10 +168,15 @@ func (p *Problem) ValidateBasic() error {
 	if p.Description == "" {
 		return errors.New("description is required")
 	}
-	// Validate ExpectedIoType and parameters
-	for _, ip := range p.ExpectedIoType.InputParameters {
-		if ip.Name == "" || ip.Type == "" {
-			return fmt.Errorf("invalid input parameter: %+v", ip)
+	if p.FunctionName == "" {
+		return errors.New("functionName is required")
+	}
+	if p.ReturnType == "" {
+		return errors.New("returnType is required")
+	}
+	for _, param := range p.Parameters {
+		if param.Name == "" || param.Type == "" {
+			return fmt.Errorf("invalid parameter: %+v", param)
 		}
 	}
 	// Parse tests if needed
@@ -176,10 +187,10 @@ func (p *Problem) ValidateBasic() error {
 	}
 
 	// Basic check: each test's input length should match expected input params (if known)
-	if len(p.ExpectedIoType.InputParameters) > 0 {
+	if len(p.Parameters) > 0 {
 		for i, tc := range p.TestCases {
-			if len(tc.Input) != len(p.ExpectedIoType.InputParameters) {
-				return fmt.Errorf("test %d: input length %d does not match expected params %d", i, len(tc.Input), len(p.ExpectedIoType.InputParameters))
+			if len(tc.Input) != len(p.Parameters) {
+				return fmt.Errorf("test %d: input length %d does not match expected params %d", i, len(tc.Input), len(p.Parameters))
 			}
 		}
 	}

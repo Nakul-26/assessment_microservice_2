@@ -11,7 +11,7 @@ function validateSubmissionMessage(msg) {
   if (Array.isArray(msg.tests)) {
     for (const t of msg.tests) {
       if (typeof t !== "object") return false;
-      if (!("input" in t) || !("expectedOutput" in t)) return false;
+      if (!("inputs" in t) || !("expected" in t)) return false;
     }
   }
   return true;
@@ -97,13 +97,13 @@ export async function submitSolution({ problemId, code, language, userId }) {
   }
 
   const tests = problem.testCases.map((tc) => ({
-    input: tc.input,
-    expectedOutput: tc.expectedOutput,
+    inputs: tc.inputs,
+    expected: tc.expected,
     isHidden: !isSampleTestCase(tc),
     isSample: isSampleTestCase(tc)
   }));
 
-  const functionName = problem.functionDefinitions.get(language)?.name || "solution";
+  const functionName = problem.functionName || "solution";
 
   const messageBody = {
     schemaVersion: "v2",
@@ -112,7 +112,8 @@ export async function submitSolution({ problemId, code, language, userId }) {
     language,
     code,
     tests: tests,
-    functionName: functionName
+    functionName: functionName,
+    compareMode: problem.compareConfig?.mode || "EXACT"
   };
 
   if (!validateSubmissionMessage(messageBody)) {

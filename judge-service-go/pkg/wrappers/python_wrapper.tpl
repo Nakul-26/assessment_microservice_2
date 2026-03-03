@@ -25,16 +25,16 @@ for builtin_name in restricted_builtins:
 def run_tests():
     test_cases_json = '''{{TESTS_JSON}}'''
     # print("RAW TESTS_JSON >>>", repr(test_cases_json))
-    tests = json.loads(test_cases_json) # inserted by wrapper generator, array of {"input": [...], "expected": ...}
+    tests = json.loads(test_cases_json) # inserted by wrapper generator, array of {"inputs": [...], "expected": ...}
     results = []
     for i, t in enumerate(tests):
         try:
-            test_input = t.get("input", {})
+            test_input = t.get("inputs", {})
             if isinstance(test_input, list):
                 out = {{FUNCTION_NAME}}(*test_input)
             else:
                 out = {{FUNCTION_NAME}}(**test_input)
-            ok = out == t.get("expectedOutput")
+            ok = out == t.get("expected")
             results.append({"test": i+1, "ok": ok, "output": out})
         except Exception as e:
             tb = traceback.format_exc()

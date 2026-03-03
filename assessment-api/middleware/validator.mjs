@@ -17,8 +17,10 @@ export function validate(schemaName) {
   const compiledSchema = ajv.compile(schema);
 
   return (req, res, next) => {
-    if (req.body.expectedIoType && req.body.expectedIoType.inputParameters) {
-      req.body.expectedIoType.inputParameters = req.body.expectedIoType.inputParameters.filter(p => p.name.trim() !== '');
+    if (Array.isArray(req.body.parameters)) {
+      req.body.parameters = req.body.parameters.filter((p = {}) => {
+        return typeof p.name === "string" && p.name.trim() && typeof p.type === "string" && p.type.trim();
+      });
     }
     if (!compiledSchema(req.body)) {
       return res.status(400).json({ errors: compiledSchema.errors });

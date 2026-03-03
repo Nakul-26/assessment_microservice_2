@@ -2,41 +2,34 @@
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
-const InputParameterSchema = new Schema({
+const ParameterSchema = new Schema({
   name: { type: String, required: true },
   type: { type: String, required: true }
-});
+}, { _id: false });
+
+const CompareConfigSchema = new Schema({
+  mode: { type: String, enum: ['EXACT', 'STRUCTURAL'], default: 'EXACT' },
+  floatTolerance: { type: Number, default: 0 },
+  orderInsensitive: { type: Boolean, default: false }
+}, { _id: false });
 
 const ProblemSchema = new Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
   difficulty: { type: String, enum: ['Easy', 'Medium', 'Hard'], required: true },
+  functionName: { type: String, required: true },
+  parameters: { type: [ParameterSchema], default: [] },
+  returnType: { type: String, required: true },
+  compareConfig: { type: CompareConfigSchema, default: () => ({}) },
 
   testCases: [{
-    input: { type: [Schema.Types.Mixed], required: true },
-    expectedOutput: { type: Schema.Types.Mixed, required: true },
+    inputs: { type: [Schema.Types.Mixed], required: true },
+    expected: { type: Schema.Types.Mixed, required: true },
     isSample: { type: Boolean, default: false },
     isHidden: { type: Boolean, default: false }
   }],
 
   testsJSON: { type: String },
-
-  // Multi-language support
-  functionDefinitions: {
-    type: Map,
-    of: new Schema({
-      name: { type: String, required: true },
-      template: { type: String, required: true }
-    }),
-    required: true
-  },
-
-  // For automatic code generation and validation
-  expectedIoType: {
-    functionName: { type: String },
-    inputParameters: [InputParameterSchema],
-    returnType: { type: String }
-  },
 
   tags: [String],
   isPremium: { type: Boolean, default: false },

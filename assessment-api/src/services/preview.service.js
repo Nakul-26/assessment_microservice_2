@@ -32,17 +32,13 @@ export async function buildPreview({ problem, language }) {
   }
 
   const tests = (problem.testCases || []).map((tc) => ({
-    input: tc.input,
-    expectedOutput: tc.expectedOutput,
+    inputs: tc.inputs,
+    expected: tc.expected,
     isHidden: !!tc.isHidden
   }));
 
   const testsJSON = JSON.stringify(tests);
-  const functionName =
-    (problem.functionDefinitions &&
-      problem.functionDefinitions[language] &&
-      problem.functionDefinitions[language].name) ||
-    "solution";
+  const functionName = problem.functionName || "solution";
   tpl = tpl.replace(/{{TESTS_JSON}}/g, testsJSON);
   tpl = tpl.replace(/{{FUNCTION_NAME}}/g, functionName);
   tpl = tpl.replace(/{{CLASS_NAME}}/g, functionName);

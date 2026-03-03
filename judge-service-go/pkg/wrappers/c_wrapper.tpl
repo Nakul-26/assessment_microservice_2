@@ -55,8 +55,8 @@ int main(void) {
             continue;
         }
 
-        struct json_object *input_obj = json_object_object_get(test_case, "input");
-        struct json_object *expected_obj = json_object_object_get(test_case, "expectedOutput");
+        struct json_object *input_obj = json_object_object_get(test_case, "inputs");
+        struct json_object *expected_obj = json_object_object_get(test_case, "expected");
 
         // We expect "input" to be a JSON array; if not, try to handle single primitive as single-element array.
         struct json_object *input_arr = NULL;

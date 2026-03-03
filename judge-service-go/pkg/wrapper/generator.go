@@ -49,7 +49,7 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 	if lang.ID == "java" {
 		ctx := map[string]interface{}{
 			"FUNCTION_NAME":        sanitizedFuncName,
-			"EXPECTED_OUTPUT_TYPE": p.ExpectedIoType.ReturnType,
+			"EXPECTED_OUTPUT_TYPE": p.ReturnType,
 			"TestCases":            p.TestCases,
 			"CLASS_NAME":           "Solution",
 		}
@@ -91,7 +91,7 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 	}
 	tpl = strings.ReplaceAll(tpl, "{{TESTS_JSON}}", string(testsJSONBytes))
 
-	tpl = strings.ReplaceAll(tpl, "{{EXPECTED_OUTPUT_TYPE}}", p.ExpectedIoType.ReturnType)
+	tpl = strings.ReplaceAll(tpl, "{{EXPECTED_OUTPUT_TYPE}}", p.ReturnType)
 	tpl = strings.ReplaceAll(tpl, "{{COMPARE_MODE}}", "") // Default to empty string
 
 	return tpl, nil
@@ -167,7 +167,7 @@ func buildJavaTestLiterals(p models.Problem) (string, string, error) {
 			}
 			testsBuf.WriteString("},\n")
 
-			switch exp := tc.ExpectedOutput.(type) {
+			switch exp := tc.Expected.(type) {
 			case float64:
 				expectedBuf.WriteString(fmt.Sprintf("    %d,\n", int64(exp)))
 			case int64:

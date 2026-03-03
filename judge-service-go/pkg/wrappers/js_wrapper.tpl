@@ -2,7 +2,7 @@ const path = require('path');
 
 // This will be replaced in Go with the raw JSON for the test array.
 // Example after replacement:
-// const tests = [{"input":[[1,2,3], 4], "expectedOutput": [0,3], "isHidden": false}, ...];
+// const tests = [{"inputs":[[1,2,3], 4], "expected": [0,3], "isHidden": false}, ...];
 const tests = {{TESTS_JSON}};
 
 async function runTests(userFunction) {
@@ -13,12 +13,12 @@ async function runTests(userFunction) {
 
     try {
       // Ensure input is always an array of arguments
-      const input = Array.isArray(t.input) ? t.input : [t.input];
+      const input = Array.isArray(t.inputs) ? t.inputs : [t.inputs];
 
       // Call the user's function (can be sync or async)
       const out = await userFunction(...input);
 
-      const ok = JSON.stringify(out) === JSON.stringify(t.expectedOutput);
+      const ok = JSON.stringify(out) === JSON.stringify(t.expected);
 
       results.push({
         test: i + 1,    // 1-based index (matches your earlier wrappers)

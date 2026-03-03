@@ -14,16 +14,45 @@
       "type": "string",
       "enum": ["Easy", "Medium", "Hard"]
     },
+    "functionName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parameters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string" }
+        },
+        "required": ["name", "type"],
+        "additionalProperties": false
+      }
+    },
+    "returnType": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compareConfig": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string", "enum": ["EXACT", "STRUCTURAL"] },
+        "floatTolerance": { "type": "number", "minimum": 0 },
+        "orderInsensitive": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "testCases": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "input": {
+          "inputs": {
             "type": "array",
             "items": {}
           },
-          "expectedOutput": {},
+          "expected": {},
           "isSample": {
             "type": "boolean"
           },
@@ -31,44 +60,12 @@
             "type": "boolean"
           }
         },
-        "required": ["input", "expectedOutput"]
+        "required": ["inputs", "expected"],
+        "additionalProperties": false
       }
     },
     "testsJSON": {
       "type": "string"
-    },
-    "functionDefinitions": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string" },
-          "template": { "type": "string" }
-        },
-        "required": ["name", "template"]
-      }
-    },
-    "expectedIoType": {
-      "type": "object",
-      "properties": {
-        "functionName": {
-          "type": "string"
-        },
-        "inputParameters": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": { "type": "string" },
-              "type": { "type": "string" }
-            },
-            "required": ["name", "type"]
-          }
-        },
-        "returnType": {
-          "type": "string"
-        }
-      }
     },
     "tags": {
       "type": "array",
@@ -84,5 +81,5 @@
       "format": "date-time"
     }
   },
-  "required": ["title", "description", "difficulty", "testCases", "functionDefinitions"]
+  "required": ["title", "description", "difficulty", "functionName", "parameters", "returnType", "testCases"]
 }

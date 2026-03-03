@@ -21,10 +21,35 @@ function toStoredTestCase(tc = {}) {
 }
 
 function normalizeProblemPayload(payload = {}) {
-  if (!Array.isArray(payload.testCases)) return payload;
+  const normalized = { ...payload };
+  if (!Array.isArray(normalized.parameters)) {
+    normalized.parameters = [];
+  } else {
+    normalized.parameters = normalized.parameters
+      .map((p = {}) => ({ name: String(p.name || "").trim(), type: String(p.type || "").trim() }))
+      .filter((p) => p.name && p.type);
+  }
+
+  normalized.compareConfig = {
+    mode: normalized.compareConfig?.mode || "EXACT",
+    floatTolerance: Number.isFinite(Number(normalized.compareConfig?.floatTolerance))
+      ? Number(normalized.compareConfig.floatTolerance)
+      : 0,
+    orderInsensitive: Boolean(normalized.compareConfig?.orderInsensitive)
+  };
+
+  if (!Array.isArray(normalized.testCases)) return normalized;
   return {
-    ...payload,
-    testCases: payload.testCases.map(toStoredTestCase)
+    ...normalized,
+    testCases: normalized.testCases.map((tc = {}) => {
+      const sample = isSampleTestCase(tc);
+      return {
+        inputs: Array.isArray(tc.inputs) ? tc.inputs : [],
+        expected: tc.expected,
+        isSample: sample,
+        isHidden: !sample
+      };
+    })
   };
 }
 
@@ -50,23 +75,55 @@ function validateProblemPayload(payload) {
   const validationErrors = [];
   if (Array.isArray(payload.testCases)) {
     payload.testCases.forEach((tc, i) => {
-      if (tc.input === undefined || tc.input === null) {
-        validationErrors.push(`testCases[${i}].input is required`);
+      if (!Array.isArray(tc.inputs)) {
+        validationErrors.push(`testCases[${i}].inputs must be an array`);
       }
-      if (tc.expectedOutput === undefined || tc.expectedOutput === null) {
-        validationErrors.push(`testCases[${i}].expectedOutput is required`);
+      if (tc.expected === undefined || tc.expected === null) {
+        validationErrors.push(`testCases[${i}].expected is required`);
+      }
+    });
+  } else {
+    validationErrors.push("testCases must be an array");
+  }
+
+  if (!payload.functionName || typeof payload.functionName !== "string") {
+    validationErrors.push("functionName is required");
+  }
+  if (!payload.returnType || typeof payload.returnType !== "string") {
+    validationErrors.push("returnType is required");
+  }
+  if (!Array.isArray(payload.parameters)) {
+    validationErrors.push("parameters must be an array");
+  } else {
+    payload.parameters.forEach((p, i) => {
+      if (!p || typeof p.name !== "string" || !p.name.trim()) {
+        validationErrors.push(`parameters[${i}].name is required`);
+      }
+      if (!p || typeof p.type !== "string" || !p.type.trim()) {
+        validationErrors.push(`parameters[${i}].type is required`);
       }
     });
   }
 
-  const fnDefs = payload.functionDefinitions || {};
-  const hasFn = Object.keys(fnDefs).some(
-    (k) => fnDefs[k] && fnDefs[k].name && fnDefs[k].template
-  );
-  if (!hasFn) {
-    validationErrors.push(
-      "At least one function definition (name and template) must be provided for a language."
-    );
+  if (payload.compareConfig) {
+    const { mode, floatTolerance } = payload.compareConfig;
+    if (mode && mode !== "EXACT" && mode !== "STRUCTURAL") {
+      validationErrors.push("compareConfig.mode must be EXACT or STRUCTURAL");
+    }
+    if (floatTolerance !== undefined && (!Number.isFinite(floatTolerance) || floatTolerance < 0)) {
+      validationErrors.push("compareConfig.floatTolerance must be a non-negative number");
+    }
+  }
+
+  if (Array.isArray(payload.parameters) && Array.isArray(payload.testCases)) {
+    const expectedArity = payload.parameters.length;
+    payload.testCases.forEach((tc, i) => {
+      if (Array.isArray(tc.inputs) && tc.inputs.length !== expectedArity) {
+        validationErrors.push(
+          `testCases[${i}].inputs length ${tc.inputs.length} does not match parameters length ${expectedArity}`
+        );
+      }
+    });
   }
 
   return validationErrors;

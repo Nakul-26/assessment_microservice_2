@@ -3,9 +3,9 @@
   "$id": "https://example.com/schemas/submission.json",
   "title": "SubmissionMessage",
   "type": "object",
-  "required": ["submissionId", "problemId", "language", "code"],
+  "required": ["submissionId", "problemId", "language", "code", "functionName"],
   "properties": {
-    "schemaVersion": { "type": "string", "const": "v1" },
+    "schemaVersion": { "type": "string", "const": "v2" },
     "submissionId": { "type": "string", "minLength": 1 },
     "problemId": { "type": "string", "minLength": 1 },
     "language": { "type": "string", "minLength": 1 },
@@ -15,11 +15,11 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["input", "expectedOutput"],
+        "required": ["inputs", "expected"],
         "properties": {
           "type": { "type": "string" },
-          "input": {},
-          "expectedOutput": {},
+          "inputs": { "type": "array" },
+          "expected": {},
           "meta": { "type": "object" },
           "isHidden": { "type": "boolean" }
         }

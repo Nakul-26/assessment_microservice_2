@@ -57,13 +57,3 @@ Once everything is running, you can access the services at the following locatio
 
 - **Frontend**: [http://localhost:5173](http://localhost:5173)
 - **API**: [http://localhost:3000](http://localhost:3000)
-
-### Seeding the Database
-
-To populate the database with some sample problems, you can run the seed script.
-
-1.  Ensure the containers are running.
-2.  In a separate terminal, execute the following command:
-    ```bash
-    docker-compose exec assessment-api npm run seed
-    ```
