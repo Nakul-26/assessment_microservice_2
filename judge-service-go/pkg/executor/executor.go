@@ -153,12 +153,6 @@ func (e *Executor) RunInContainer(ctx context.Context, containerID string, files
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
-	// Clean workspace inside the container to avoid cross-run leakage.
-	_, _, _, err := e.runExecWithTimeout(subCtx, containerID, []string{"sh", "-c", "mkdir -p /app && rm -rf /app/*"}, timeout)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to clean container workspace: %w", err)
-	}
-
 	// Upload current submission files into the container.
 	if err := e.copyFilesToContainer(containerID, workDir, files); err != nil {
 		return "", "", err

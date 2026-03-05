@@ -38,6 +38,7 @@ type Problem struct {
 	FunctionName  string             `json:"functionName" bson:"functionName"`
 	Parameters    []Parameter        `json:"parameters,omitempty" bson:"parameters,omitempty"`
 	ReturnType    string             `json:"returnType,omitempty" bson:"returnType,omitempty"`
+	TimeLimitMs   int64              `json:"timeLimitMs,omitempty" bson:"timeLimitMs,omitempty"`
 	CompareConfig CompareConfig      `json:"compareConfig,omitempty" bson:"compareConfig,omitempty"`
 	TestCases     []TestCase         `json:"testCases,omitempty" bson:"testCases,omitempty"`
 	TestsJSON     json.RawMessage    `json:"testsJSON,omitempty" bson:"testsJSON,omitempty"` // store raw JSON (safer)

@@ -25,7 +25,7 @@ type ContainerPool struct {
 	cli        *docker.Client
 	mu         sync.Mutex
 	available  map[string][]*PooledContainer // language -> idle containers
-	inUse      map[string]*PooledContainer    // containerID -> container
+	inUse      map[string]*PooledContainer   // containerID -> container
 	maxPerLang int
 }
 
@@ -108,6 +108,11 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 	hostWorkDir, err := os.MkdirTemp("/tmp", "judge-")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create temp dir for container: %w", err)
+	}
+	// Container images typically run as a non-root "judge" user. The temp dir
+	// created by MkdirTemp is 0700, which blocks bind-mounted file access.
+	if err := os.Chmod(hostWorkDir, 0777); err != nil {
+		return "", "", fmt.Errorf("failed to chmod container workdir %s: %w", hostWorkDir, err)
 	}
 
 	hostCfg := &docker.HostConfig{
