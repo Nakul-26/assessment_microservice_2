@@ -39,18 +39,14 @@ func setupPythonIntegration(t *testing.T) (*executor.Executor, *pool.ContainerPo
 		t.Fatal("failed to acquire pooled python container")
 	}
 
-	t.Cleanup(func() {
-		p.Release(pc)
-	})
-
 	return exec, p, pc, lang
 }
 
-func oneTestProblem() models.Problem {
+func twoSumProblem() models.Problem {
 	return models.Problem{
 		Title:        "Two Sum",
 		Description:  "integration test",
-		FunctionName: "two_sum",
+		FunctionName: "twoSum",
 		ReturnType:   "array",
 		TestCases: []models.TestCase{
 			{
@@ -69,7 +65,7 @@ func runCentralOnce(t *testing.T, exec *executor.Executor, pc *pool.PooledContai
 		SubmissionID: "integration-test",
 		ProblemID:    "integration-problem",
 		Language:     "python",
-		FunctionName: "two_sum",
+		FunctionName: "twoSum",
 		Code:         code,
 	}
 
@@ -83,54 +79,57 @@ func runCentralOnce(t *testing.T, exec *executor.Executor, pc *pool.PooledContai
 	if result == nil {
 		t.Fatal("nil result")
 	}
+	if result.Status != models.StatusFinished {
+		t.Fatalf("expected overall status %q, got %q", models.StatusFinished, result.Status)
+	}
 	return result
 }
 
-func TestCentralPythonIntegration_CorrectSolution(t *testing.T) {
-	exec, _, pc, lang := setupPythonIntegration(t)
-	problem := oneTestProblem()
+func TestPythonCentralIntegration_CorrectSolution(t *testing.T) {
+	exec, p, pc, lang := setupPythonIntegration(t)
+	defer p.Release(pc)
+	problem := twoSumProblem()
 	code := `
-def two_sum(nums, target):
-    seen = {}
-    for i, n in enumerate(nums):
-        want = target - n
-        if want in seen:
-            return [seen[want], i]
-        seen[n] = i
-    return []
+def twoSum(nums, target):
+    for i in range(len(nums)):
+        for j in range(i+1, len(nums)):
+            if nums[i] + nums[j] == target:
+                return [i, j]
 `
 
 	result := runCentralOnce(t, exec, pc, lang, problem, code)
 	if result.Passed != result.Total || result.Total != 1 {
-		t.Fatalf("expected pass 1/1, got %d/%d detail=%+v", result.Passed, result.Total, result.Details)
+		t.Fatalf("expected accepted-like result 1/1, got %d/%d detail=%+v", result.Passed, result.Total, result.Details)
 	}
 	if !result.Details[0].Ok {
 		t.Fatalf("expected test to pass, detail=%+v", result.Details[0])
 	}
 }
 
-func TestCentralPythonIntegration_WrongAnswer(t *testing.T) {
-	exec, _, pc, lang := setupPythonIntegration(t)
-	problem := oneTestProblem()
+func TestPythonCentralIntegration_WrongAnswer(t *testing.T) {
+	exec, p, pc, lang := setupPythonIntegration(t)
+	defer p.Release(pc)
+	problem := twoSumProblem()
 	code := `
-def two_sum(nums, target):
-    return [0, 2]
+def twoSum(nums, target):
+    return [0, 0]
 `
 
 	result := runCentralOnce(t, exec, pc, lang, problem, code)
-	if result.Passed != 0 || result.Total != 1 {
-		t.Fatalf("expected pass 0/1, got %d/%d", result.Passed, result.Total)
+	if result.Passed >= result.Total {
+		t.Fatalf("expected wrong-answer-like result with partial/zero pass, got %d/%d", result.Passed, result.Total)
 	}
 	if result.Details[0].Ok {
 		t.Fatalf("expected test to fail, detail=%+v", result.Details[0])
 	}
 }
 
-func TestCentralPythonIntegration_RuntimeError(t *testing.T) {
-	exec, _, pc, lang := setupPythonIntegration(t)
-	problem := oneTestProblem()
+func TestPythonCentralIntegration_RuntimeError(t *testing.T) {
+	exec, p, pc, lang := setupPythonIntegration(t)
+	defer p.Release(pc)
+	problem := twoSumProblem()
 	code := `
-def two_sum(nums, target):
+def twoSum(nums, target):
     return 1 / 0
 `
 
@@ -138,14 +137,18 @@ def two_sum(nums, target):
 	if result.Details[0].Error != "Runtime Error" {
 		t.Fatalf("expected Runtime Error, got %q", result.Details[0].Error)
 	}
+	if result.Details[0].Stderr != "" {
+		t.Fatalf("expected stderr hidden from client payload, got %q", result.Details[0].Stderr)
+	}
 }
 
-func TestCentralPythonIntegration_TimeLimitExceeded(t *testing.T) {
-	exec, _, pc, lang := setupPythonIntegration(t)
-	problem := oneTestProblem()
+func TestPythonCentralIntegration_TimeLimitExceeded(t *testing.T) {
+	exec, p, pc, lang := setupPythonIntegration(t)
+	defer p.Release(pc)
+	problem := twoSumProblem()
 	problem.TimeLimitMs = 100
 	code := `
-def two_sum(nums, target):
+def twoSum(nums, target):
     while True:
         pass
 `
@@ -156,11 +159,12 @@ def two_sum(nums, target):
 	}
 }
 
-func TestCentralPythonIntegration_OutputLimitExceeded(t *testing.T) {
-	exec, _, pc, lang := setupPythonIntegration(t)
-	problem := oneTestProblem()
+func TestPythonCentralIntegration_OutputLimitExceeded(t *testing.T) {
+	exec, p, pc, lang := setupPythonIntegration(t)
+	defer p.Release(pc)
+	problem := twoSumProblem()
 	code := `
-def two_sum(nums, target):
+def twoSum(nums, target):
     print("A" * 100000)
     return [0, 1]
 `
@@ -172,4 +176,41 @@ def two_sum(nums, target):
 	if !strings.Contains(result.Details[0].Stdout, "A") {
 		t.Fatalf("expected captured stdout to contain user output")
 	}
+	if len(result.Details[0].Stdout) > 64*1024 {
+		t.Fatalf("expected stdout in payload to be capped at 64KB, got %d bytes", len(result.Details[0].Stdout))
+	}
+}
+
+func TestPythonCentralIntegration_ContainerPoolReuse(t *testing.T) {
+	exec, p, pc, lang := setupPythonIntegration(t)
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			p.Release(pc)
+		}
+	})
+	problem := twoSumProblem()
+	code := `
+def twoSum(nums, target):
+    return [0, 1]
+`
+
+	_ = runCentralOnce(t, exec, pc, lang, problem, code)
+	_ = runCentralOnce(t, exec, pc, lang, problem, code)
+
+	// While held, a second acquire should fail for pool size 1.
+	if extra := p.Acquire(lang.ID); extra != nil {
+		t.Fatalf("expected no second container while one is in use, got %s", extra.ID)
+	}
+
+	p.Release(pc)
+	reacquired := p.Acquire(lang.ID)
+	if reacquired == nil {
+		t.Fatal("expected to reacquire pooled container")
+	}
+	if reacquired.ID != pc.ID {
+		t.Fatalf("expected pooled container reuse, got old=%s new=%s", pc.ID, reacquired.ID)
+	}
+	p.Release(reacquired)
+	released = true
 }

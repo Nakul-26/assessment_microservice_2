@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -23,7 +22,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"judge-service-go/pkg/comparator"
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
@@ -38,6 +36,7 @@ const (
 	defaultRedisURI         = "redis://redis:6379"
 	defaultSandboxTimeout   = 5 * time.Second
 	centralComparePythonEnv = "JUDGE_CENTRAL_COMPARE_PY"
+	centralCompareJSEnv     = "JUDGE_CENTRAL_COMPARE_JS"
 	maxTestOutputBytes      = 64 * 1024
 	maxLogOutputBytes       = 4 * 1024
 	maxTestsBytes           = 1 << 20 // 1MB
@@ -251,117 +250,22 @@ func preparePythonCentralFiles(submissionMsg models.SubmissionMessage, tempDir s
 	return []string{"wrapper.py"}, nil
 }
 
-func runSubmissionCentralPython(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, lang *languages.Language, submissionMsg models.SubmissionMessage, problem models.Problem) (*models.SubmissionResult, error) {
-	baseFiles, err := preparePythonCentralFiles(submissionMsg, pooledContainer.WorkDir)
+func prepareJSCentralFiles(submissionMsg models.SubmissionMessage, tempDir string) ([]string, error) {
+	tplPath := filepath.Join("pkg", "wrappers", "js_single_wrapper.tpl")
+	b, err := os.ReadFile(tplPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read template %s: %w", tplPath, err)
 	}
 
-	started := time.Now().UTC()
-	result := models.NewSubmissionResult()
-	result.StartedAt = &started
-	testTimeout := perTestTimeout(problem)
+	wrapperCode := string(b)
+	wrapperCode = strings.ReplaceAll(wrapperCode, "{{FUNCTION_NAME}}", submissionMsg.FunctionName)
+	wrapperCode = strings.Replace(wrapperCode, "// USER_CODE_MARKER", submissionMsg.Code, 1)
 
-	for i, tc := range problem.TestCases {
-		testStart := time.Now()
-		tr := models.TestResult{
-			Test:     i + 1,
-			Expected: tc.Expected,
-		}
-
-		payload := map[string]interface{}{
-			"inputs": tc.Input,
-		}
-		inputJSON, marshalErr := json.Marshal(payload)
-		if marshalErr != nil {
-			tr.Ok = false
-			tr.Error = fmt.Sprintf("failed to marshal test input: %v", marshalErr)
-			tr.DurationMs = time.Since(testStart).Milliseconds()
-			result.AddTestResult(tr)
-			continue
-		}
-
-		filesToCopy := append([]string{}, baseFiles...)
-		inputB64 := base64.StdEncoding.EncodeToString(inputJSON)
-		runCmd := []string{"python", "/app/wrapper.py", inputB64}
-		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
-
-		stdout, stderr, runErr := exec.RunInContainer(
-			testCtx,
-			pooledContainer.ID,
-			filesToCopy,
-			pooledContainer.WorkDir,
-			nil,
-			runCmd,
-			testTimeout,
-		)
-		cancel()
-
-		stdoutTrimmed := strings.TrimSpace(stdout)
-		stderrTrimmed := strings.TrimSpace(stderr)
-		stdoutForResult, stdoutTruncated := truncateString(stdoutTrimmed, maxTestOutputBytes)
-		stderrForLog, stderrTruncated := truncateString(stderrTrimmed, maxLogOutputBytes)
-		tr.Stdout = stdoutForResult
-
-		if runErr != nil {
-			tr.Ok = false
-			runErrText := strings.ToLower(runErr.Error())
-			if strings.Contains(runErrText, "timed out") || strings.Contains(runErrText, "deadline exceeded") {
-				tr.Error = "Time Limit Exceeded"
-			} else {
-				tr.Error = "Runtime Error"
-			}
-			log.Printf("[submission=%s test=%d] runtime error: %v", submissionMsg.SubmissionID, i+1, runErr)
-			if stderrForLog != "" {
-				log.Printf("[submission=%s test=%d] runtime stderr%s: %s", submissionMsg.SubmissionID, i+1, map[bool]string{true: " (truncated)", false: ""}[stderrTruncated], stderrForLog)
-			}
-			tr.DurationMs = time.Since(testStart).Milliseconds()
-			result.AddTestResult(tr)
-			continue
-		}
-
-		if stdoutTruncated {
-			tr.Ok = false
-			tr.Error = "Output Limit Exceeded"
-			tr.DurationMs = time.Since(testStart).Milliseconds()
-			result.AddTestResult(tr)
-			continue
-		}
-
-		out, parseErr := parseSingleTestOutput(stdoutTrimmed)
-		if parseErr != nil {
-			tr.Ok = false
-			tr.Error = "Runtime Error"
-			tr.DurationMs = time.Since(testStart).Milliseconds()
-			log.Printf("[submission=%s test=%d] invalid wrapper output: %v | stdout=%q", submissionMsg.SubmissionID, i+1, parseErr, stdoutForResult)
-			result.AddTestResult(tr)
-			continue
-		}
-
-		if out.Error != "" {
-			tr.Ok = false
-			tr.Error = "Runtime Error"
-			if out.Traceback != "" {
-				tracebackForLog, tbTruncated := truncateString(out.Traceback, maxLogOutputBytes)
-				log.Printf("[submission=%s test=%d] wrapper traceback%s: %s", submissionMsg.SubmissionID, i+1, map[bool]string{true: " (truncated)", false: ""}[tbTruncated], tracebackForLog)
-			}
-			tr.DurationMs = time.Since(testStart).Milliseconds()
-			result.AddTestResult(tr)
-			continue
-		}
-
-		tr.Output = out.Output
-		tr.Ok = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
-		tr.DurationMs = time.Since(testStart).Milliseconds()
-		result.AddTestResult(tr)
+	if err := os.WriteFile(filepath.Join(tempDir, "wrapper.js"), []byte(wrapperCode), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write wrapper.js: %w", err)
 	}
 
-	finished := time.Now().UTC()
-	result.FinishedAt = &finished
-	result.ElapsedMs = finished.Sub(started).Milliseconds()
-	result.Status = models.StatusFinished
-
-	return result, nil
+	return []string{"wrapper.js"}, nil
 }
 
 // processAndStoreResults processes the executor output and updates the database and cache.
@@ -502,6 +406,34 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		result, err := runSubmissionCentralPython(execCtx, executor, pooledContainer, lang, submissionMsg, problem)
 		if err != nil {
 			log.Printf("[submission=%s] Central Python execution setup failed: %v", submissionMsg.SubmissionID, err)
+			d.Nack(false, false)
+			return
+		}
+
+		resultBytes, err := result.ToJSON()
+		if err != nil {
+			log.Printf("[submission=%s] Failed to marshal central result: %v", submissionMsg.SubmissionID, err)
+			d.Nack(false, false)
+			return
+		}
+		processAndStoreResults(ctx, string(resultBytes), "", nil, submissionMsg, submissionsCollection, redisClient)
+
+		err = cleanWorkspace(pooledContainer.WorkDir)
+		if err != nil {
+			log.Printf("[submission=%s] Failed to cleanup container workspace: %v", submissionMsg.SubmissionID, err)
+		}
+
+		d.Ack(false)
+		return
+	}
+
+	if lang.ID == "javascript" && isTruthyEnv(os.Getenv(centralCompareJSEnv)) {
+		execCtx, cancel := context.WithTimeout(ctx, time.Duration(len(problem.TestCases)+1)*defaultSandboxTimeout)
+		defer cancel()
+
+		result, err := runSubmissionCentralJS(execCtx, executor, pooledContainer, lang, submissionMsg, problem)
+		if err != nil {
+			log.Printf("[submission=%s] Central JS execution setup failed: %v", submissionMsg.SubmissionID, err)
 			d.Nack(false, false)
 			return
 		}
