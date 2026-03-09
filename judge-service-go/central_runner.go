@@ -9,56 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"judge-service-go/pkg/central/adapters"
 	"judge-service-go/pkg/comparator"
 	"judge-service-go/pkg/executor"
-	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/pool"
 )
 
-// centralLanguageAdapter isolates language-specific preparation and command selection.
-type centralLanguageAdapter interface {
-	PrepareFiles(workDir string) ([]string, error)
-	RunCommand(inputB64 string) []string
-}
-
-type centralAdapter struct {
-	prepareFiles func(workDir string) ([]string, error)
-	runCommand   func(inputB64 string) []string
-}
-
-func (a centralAdapter) PrepareFiles(workDir string) ([]string, error) {
-	return a.prepareFiles(workDir)
-}
-
-func (a centralAdapter) RunCommand(inputB64 string) []string {
-	return a.runCommand(inputB64)
-}
-
-func newPythonCentralAdapter(submissionMsg models.SubmissionMessage) centralLanguageAdapter {
-	return centralAdapter{
-		prepareFiles: func(workDir string) ([]string, error) {
-			return preparePythonCentralFiles(submissionMsg, workDir)
-		},
-		runCommand: func(inputB64 string) []string {
-			return []string{"python", "/app/wrapper.py", inputB64}
-		},
-	}
-}
-
-func newJSCentralAdapter(submissionMsg models.SubmissionMessage) centralLanguageAdapter {
-	return centralAdapter{
-		prepareFiles: func(workDir string) ([]string, error) {
-			return prepareJSCentralFiles(submissionMsg, workDir)
-		},
-		runCommand: func(inputB64 string) []string {
-			return []string{"node", "/app/wrapper.js", inputB64}
-		},
-	}
-}
-
-func runSubmissionCentral(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionMsg models.SubmissionMessage, problem models.Problem, adapter centralLanguageAdapter) (*models.SubmissionResult, error) {
-	baseFiles, err := adapter.PrepareFiles(pooledContainer.WorkDir)
+func runSubmissionCentral(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionMsg models.SubmissionMessage, problem models.Problem, adapter adapters.LanguageAdapter) (*models.SubmissionResult, error) {
+	baseFiles, err := adapter.PrepareFiles(pooledContainer.WorkDir, submissionMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -164,12 +123,4 @@ func runSubmissionCentral(ctx context.Context, exec *executor.Executor, pooledCo
 	result.Status = models.StatusFinished
 
 	return result, nil
-}
-
-func runSubmissionCentralPython(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, _ *languages.Language, submissionMsg models.SubmissionMessage, problem models.Problem) (*models.SubmissionResult, error) {
-	return runSubmissionCentral(ctx, exec, pooledContainer, submissionMsg, problem, newPythonCentralAdapter(submissionMsg))
-}
-
-func runSubmissionCentralJS(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, _ *languages.Language, submissionMsg models.SubmissionMessage, problem models.Problem) (*models.SubmissionResult, error) {
-	return runSubmissionCentral(ctx, exec, pooledContainer, submissionMsg, problem, newJSCentralAdapter(submissionMsg))
 }

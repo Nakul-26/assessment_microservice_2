@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -22,10 +21,12 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"judge-service-go/pkg/central/adapters"
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/pool"
+	"judge-service-go/pkg/workspace"
 	"judge-service-go/pkg/wrapper"
 )
 
@@ -188,10 +189,10 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 		submissionFileName := "submission.js"
 		wrapperFileName := "wrapper.js"
 		submissionCode := submissionMsg.Code + "\nmodule.exports = { " + submissionMsg.FunctionName + " };"
-		if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(submissionCode), 0644); err != nil {
+		if err := workspace.WriteFile(tempDir, submissionFileName, []byte(submissionCode), 0644); err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(tempDir, wrapperFileName), []byte(wrapperCode), 0644); err != nil {
+		if err := workspace.WriteFile(tempDir, wrapperFileName, []byte(wrapperCode), 0644); err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to write wrapper file: %w", err)
 		}
 		filesToCopy = []string{submissionFileName, wrapperFileName}
@@ -202,27 +203,27 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 		switch lang.ID {
 		case "java":
 			solutionFileName := "Solution.java"
-			if err := os.WriteFile(filepath.Join(tempDir, solutionFileName), []byte(submissionMsg.Code), 0644); err != nil {
+			if err := workspace.WriteFile(tempDir, solutionFileName, []byte(submissionMsg.Code), 0644); err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to write solution file: %w", err)
 			}
 			submissionFileName := "GeneratedTester.java"
-			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(wrapperCode), 0644); err != nil {
+			if err := workspace.WriteFile(tempDir, submissionFileName, []byte(wrapperCode), 0644); err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to write combined submission file: %w", err)
 			}
 			filesToCopy = []string{solutionFileName, submissionFileName}
 		case "python":
 			submissionFileName := "wrapper.py"
 			solutionFileName := "solution.py"
-			if err := os.WriteFile(filepath.Join(tempDir, solutionFileName), []byte(submissionMsg.Code), 0644); err != nil {
+			if err := workspace.WriteFile(tempDir, solutionFileName, []byte(submissionMsg.Code), 0644); err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to write solution file: %w", err)
 			}
-			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+			if err := workspace.WriteFile(tempDir, submissionFileName, []byte(finalCode), 0644); err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to write combined submission file: %w", err)
 			}
 			filesToCopy = []string{submissionFileName, solutionFileName}
 		default: // C, CSharp, etc.
 			submissionFileName := "main" + lang.FileExt
-			if err := os.WriteFile(filepath.Join(tempDir, submissionFileName), []byte(finalCode), 0644); err != nil {
+			if err := workspace.WriteFile(tempDir, submissionFileName, []byte(finalCode), 0644); err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to write combined submission file: %w", err)
 			}
 			filesToCopy = []string{submissionFileName}
@@ -230,42 +231,6 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 	}
 
 	return filesToCopy, compileCmd, runCmd, nil
-}
-
-func preparePythonCentralFiles(submissionMsg models.SubmissionMessage, tempDir string) ([]string, error) {
-	tplPath := filepath.Join("pkg", "wrappers", "python_single_wrapper.tpl")
-	b, err := os.ReadFile(tplPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read template %s: %w", tplPath, err)
-	}
-
-	wrapperCode := string(b)
-	wrapperCode = strings.ReplaceAll(wrapperCode, "{{FUNCTION_NAME}}", submissionMsg.FunctionName)
-	wrapperCode = strings.Replace(wrapperCode, "# USER_CODE_MARKER", submissionMsg.Code, 1)
-
-	if err := os.WriteFile(filepath.Join(tempDir, "wrapper.py"), []byte(wrapperCode), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write wrapper.py: %w", err)
-	}
-
-	return []string{"wrapper.py"}, nil
-}
-
-func prepareJSCentralFiles(submissionMsg models.SubmissionMessage, tempDir string) ([]string, error) {
-	tplPath := filepath.Join("pkg", "wrappers", "js_single_wrapper.tpl")
-	b, err := os.ReadFile(tplPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read template %s: %w", tplPath, err)
-	}
-
-	wrapperCode := string(b)
-	wrapperCode = strings.ReplaceAll(wrapperCode, "{{FUNCTION_NAME}}", submissionMsg.FunctionName)
-	wrapperCode = strings.Replace(wrapperCode, "// USER_CODE_MARKER", submissionMsg.Code, 1)
-
-	if err := os.WriteFile(filepath.Join(tempDir, "wrapper.js"), []byte(wrapperCode), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write wrapper.js: %w", err)
-	}
-
-	return []string{"wrapper.js"}, nil
 }
 
 // processAndStoreResults processes the executor output and updates the database and cache.
@@ -399,41 +364,13 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 	}
 	defer containerPool.Release(pooledContainer)
 
-	if lang.ID == "python" && isTruthyEnv(os.Getenv(centralComparePythonEnv)) {
+	if adapter, ok := adapters.GetAdapter(lang.ID); ok && isCentralCompareEnabled(lang.ID) {
 		execCtx, cancel := context.WithTimeout(ctx, time.Duration(len(problem.TestCases)+1)*defaultSandboxTimeout)
 		defer cancel()
 
-		result, err := runSubmissionCentralPython(execCtx, executor, pooledContainer, lang, submissionMsg, problem)
+		result, err := runSubmissionCentral(execCtx, executor, pooledContainer, submissionMsg, problem, adapter)
 		if err != nil {
-			log.Printf("[submission=%s] Central Python execution setup failed: %v", submissionMsg.SubmissionID, err)
-			d.Nack(false, false)
-			return
-		}
-
-		resultBytes, err := result.ToJSON()
-		if err != nil {
-			log.Printf("[submission=%s] Failed to marshal central result: %v", submissionMsg.SubmissionID, err)
-			d.Nack(false, false)
-			return
-		}
-		processAndStoreResults(ctx, string(resultBytes), "", nil, submissionMsg, submissionsCollection, redisClient)
-
-		err = cleanWorkspace(pooledContainer.WorkDir)
-		if err != nil {
-			log.Printf("[submission=%s] Failed to cleanup container workspace: %v", submissionMsg.SubmissionID, err)
-		}
-
-		d.Ack(false)
-		return
-	}
-
-	if lang.ID == "javascript" && isTruthyEnv(os.Getenv(centralCompareJSEnv)) {
-		execCtx, cancel := context.WithTimeout(ctx, time.Duration(len(problem.TestCases)+1)*defaultSandboxTimeout)
-		defer cancel()
-
-		result, err := runSubmissionCentralJS(execCtx, executor, pooledContainer, lang, submissionMsg, problem)
-		if err != nil {
-			log.Printf("[submission=%s] Central JS execution setup failed: %v", submissionMsg.SubmissionID, err)
+			log.Printf("[submission=%s] Central %s execution setup failed: %v", submissionMsg.SubmissionID, adapter.Name(), err)
 			d.Nack(false, false)
 			return
 		}
@@ -489,6 +426,17 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 	d.Ack(false)
 }
 
+func isCentralCompareEnabled(language string) bool {
+	switch language {
+	case "python":
+		return isTruthyEnv(os.Getenv(centralComparePythonEnv))
+	case "javascript":
+		return isTruthyEnv(os.Getenv(centralCompareJSEnv))
+	default:
+		return false
+	}
+}
+
 func cleanWorkspace(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
@@ -500,7 +448,11 @@ func cleanWorkspace(dir string) error {
 		return err
 	}
 	for _, name := range names {
-		err = os.RemoveAll(filepath.Join(dir, name))
+		entryPath, pathErr := workspace.SafeJoin(dir, name)
+		if pathErr != nil {
+			return pathErr
+		}
+		err = os.RemoveAll(entryPath)
 		if err != nil {
 			return err
 		}

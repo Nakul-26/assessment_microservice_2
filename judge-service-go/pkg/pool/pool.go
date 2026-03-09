@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -28,6 +29,8 @@ type ContainerPool struct {
 	inUse      map[string]*PooledContainer   // containerID -> container
 	maxPerLang int
 }
+
+const workspaceRootDir = "/tmp/judge-workspaces"
 
 // NewPool creates a new container pool.
 func NewPool(cli *docker.Client, maxPerLang int) *ContainerPool {
@@ -102,10 +105,16 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 		containerUser = "" // let image default to its default user
 	}
 
-	pidsLimit := int64(1024)
+	pidsLimit := int64(128)
+	memoryBytes := int64(256 * 1024 * 1024)
+	memorySwap := memoryBytes
+	noNewPrivileges := "no-new-privileges:true"
 
 	// Create a temporary directory on the host for this container
-	hostWorkDir, err := os.MkdirTemp("/tmp", "judge-")
+	if err := os.MkdirAll(workspaceRootDir, 0755); err != nil {
+		return "", "", fmt.Errorf("failed to create workspace root %s: %w", workspaceRootDir, err)
+	}
+	hostWorkDir, err := os.MkdirTemp(workspaceRootDir, "judge-")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create temp dir for container: %w", err)
 	}
@@ -114,14 +123,21 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 	if err := os.Chmod(hostWorkDir, 0777); err != nil {
 		return "", "", fmt.Errorf("failed to chmod container workdir %s: %w", hostWorkDir, err)
 	}
+	workspaceBind := fmt.Sprintf("%s:/app", hostWorkDir)
 
 	hostCfg := &docker.HostConfig{
 		NetworkMode:    "none",
-		ReadonlyRootfs: false, // Set to false to allow writing files
-		Memory:         256 * 1024 * 1024,
+		ReadonlyRootfs: true,
+		SecurityOpt:    []string{noNewPrivileges},
+		CapDrop:        []string{"ALL"},
+		Memory:         memoryBytes,
+		MemorySwap:     memorySwap,
 		CPUQuota:       50000,
 		PidsLimit:      &pidsLimit,
-		Binds:          []string{fmt.Sprintf("%s:/app", hostWorkDir)},
+		Binds:          []string{workspaceBind},
+		Tmpfs: map[string]string{
+			"/tmp": "rw,noexec,nosuid,nodev,size=64m",
+		},
 	}
 
 	containerOptions := docker.CreateContainerOptions{
@@ -151,7 +167,7 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 		return "", "", fmt.Errorf("failed to start container: %w", err)
 	}
 
-	log.Printf("Started container %s for language %s with workdir %s", container.ID, lang, hostWorkDir)
+	log.Printf("Started container %s for language %s with workdir %s", container.ID, lang, filepath.Clean(hostWorkDir))
 
 	return container.ID, hostWorkDir, nil
 }

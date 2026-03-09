@@ -6,11 +6,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
+
+	"judge-service-go/pkg/workspace"
 )
 
 // Executor holds the Docker client
@@ -103,16 +103,19 @@ func (e *Executor) copyFilesToContainer(containerID string, workDir string, file
 		return nil
 	}
 
+	if err := workspace.ValidateNoExternalSymlinks(workDir); err != nil {
+		return err
+	}
+
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	for _, name := range files {
-		path := filepath.Join(workDir, name)
-		info, err := os.Stat(path)
+		path, err := workspace.SafeJoin(workDir, name)
 		if err != nil {
 			_ = tw.Close()
-			return fmt.Errorf("failed to stat %s: %w", path, err)
+			return fmt.Errorf("invalid workspace path %s: %w", name, err)
 		}
-		data, err := os.ReadFile(path)
+		data, info, err := workspace.ReadRegularFile(workDir, name)
 		if err != nil {
 			_ = tw.Close()
 			return fmt.Errorf("failed to read %s: %w", path, err)

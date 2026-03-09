@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"judge-service-go/pkg/central/adapters"
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
@@ -72,9 +73,14 @@ func runCentralOnce(t *testing.T, exec *executor.Executor, pc *pool.PooledContai
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	result, err := runSubmissionCentralPython(ctx, exec, pc, lang, msg, problem)
+	adapter, ok := adapters.GetAdapter(lang.ID)
+	if !ok {
+		t.Fatalf("adapter not found for language %q", lang.ID)
+	}
+
+	result, err := runSubmissionCentral(ctx, exec, pc, msg, problem, adapter)
 	if err != nil {
-		t.Fatalf("runSubmissionCentralPython failed: %v", err)
+		t.Fatalf("runSubmissionCentral failed: %v", err)
 	}
 	if result == nil {
 		t.Fatal("nil result")
