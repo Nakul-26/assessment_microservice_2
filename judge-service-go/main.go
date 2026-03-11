@@ -383,16 +383,23 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		}
 		processAndStoreResults(ctx, string(resultBytes), "", nil, submissionMsg, submissionsCollection, redisClient)
 
-		err = cleanWorkspace(pooledContainer.WorkDir)
-		if err != nil {
-			log.Printf("[submission=%s] Failed to cleanup container workspace: %v", submissionMsg.SubmissionID, err)
-		}
-
 		d.Ack(false)
 		return
 	}
 
-	filesToCopy, compileCmd, runCmd, err := prepareSubmissionFiles(submissionMsg, problem, lang, pooledContainer.WorkDir)
+	submissionWorkspace, err := workspace.NewSubmissionWorkspace(pooledContainer.WorkDir, submissionMsg.SubmissionID)
+	if err != nil {
+		log.Printf("[submission=%s] Failed to create submission workspace: %v", submissionMsg.SubmissionID, err)
+		d.Nack(false, true)
+		return
+	}
+	defer func() {
+		if cleanupErr := workspace.CleanupSubmissionWorkspace(submissionWorkspace.HostPath); cleanupErr != nil {
+			log.Printf("[submission=%s] Failed to cleanup submission workspace %s: %v", submissionMsg.SubmissionID, submissionWorkspace.HostPath, cleanupErr)
+		}
+	}()
+
+	filesToCopy, compileCmd, runCmd, err := prepareSubmissionFiles(submissionMsg, problem, lang, submissionWorkspace.HostPath)
 	if err != nil {
 		log.Printf("[submission=%s] Failed to prepare submission files: %v", submissionMsg.SubmissionID, err)
 		d.Nack(false, false)
@@ -407,7 +414,8 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 		execCtx,
 		pooledContainer.ID,
 		filesToCopy,
-		pooledContainer.WorkDir,
+		submissionWorkspace.HostPath,
+		submissionWorkspace.ContainerPath,
 		compileCmd,
 		runCmd,
 		defaultSandboxTimeout,
@@ -415,13 +423,6 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 	log.Printf("Execution finished for submission %s. Stdout: %s, Stderr: %s, Error: %v", submissionMsg.SubmissionID, stdout, stderr, execErr)
 
 	processAndStoreResults(ctx, stdout, stderr, execErr, submissionMsg, submissionsCollection, redisClient)
-
-	// Cleanup the workspace for the next submission
-	// This should be improved to be more robust
-	err = cleanWorkspace(pooledContainer.WorkDir)
-	if err != nil {
-		log.Printf("[submission=%s] Failed to cleanup container workspace: %v", submissionMsg.SubmissionID, err)
-	}
 
 	d.Ack(false)
 }
@@ -435,29 +436,6 @@ func isCentralCompareEnabled(language string) bool {
 	default:
 		return false
 	}
-}
-
-func cleanWorkspace(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	names, err := d.Readdirnames(-1)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		entryPath, pathErr := workspace.SafeJoin(dir, name)
-		if pathErr != nil {
-			return pathErr
-		}
-		err = os.RemoveAll(entryPath)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func main() {
@@ -488,6 +466,12 @@ func main() {
 	// Initialize Container Pool
 	containerPool := pool.NewPool(executor.Client(), defaultPoolSizePerLang)
 	log.Println("Warming up container pool...")
+	workspace.StartSweeper(
+		context.Background(),
+		workspace.RootDir,
+		5*time.Minute,
+		time.Hour,
+	)
 	var wg sync.WaitGroup
 	for _, lang := range languages.GetSupportedLanguages() {
 		wg.Add(1)

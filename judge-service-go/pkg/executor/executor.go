@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
+	"sync"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -38,12 +40,13 @@ func (e *Executor) Client() *docker.Client {
 }
 
 // runExecWithTimeout handles the full lifecycle of creating, running, and waiting for an exec instance.
-func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, cmd []string, timeout time.Duration) (string, string, int, error) {
+func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, workDir string, cmd []string, timeout time.Duration) (string, string, int, error) {
 	var stdoutBuf, stderrBuf bytes.Buffer
 
 	execOpts := docker.CreateExecOptions{
 		Container:    containerID,
 		Cmd:          cmd,
+		WorkingDir:   workDir,
 		AttachStdout: true,
 		AttachStderr: true,
 		Context:      ctx,
@@ -57,19 +60,26 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 	childCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	startExecOptions := docker.StartExecOptions{
+		OutputStream: &stdoutBuf,
+		ErrorStream:  &stderrBuf,
+		Context:      childCtx,
+	}
+	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
+	if err != nil {
+		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to start exec: %w", err)
+	}
+	var closeOnce sync.Once
+	closeExec := func() {
+		closeOnce.Do(func() {
+			_ = closeWaiter.Close()
+		})
+	}
+	defer closeExec()
+
 	done := make(chan error, 1)
 	go func() {
-		startExecOptions := docker.StartExecOptions{
-			OutputStream: &stdoutBuf,
-			ErrorStream:  &stderrBuf,
-			Context:      childCtx,
-		}
-		// StartExec will return when the attached streams close or context canceled.
-		if err := e.cli.StartExec(execObj.ID, startExecOptions); err != nil {
-			done <- fmt.Errorf("failed to start exec: %w", err)
-			return
-		}
-		done <- nil
+		done <- closeWaiter.Wait()
 	}()
 
 	select {
@@ -79,6 +89,12 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 		}
 	case <-childCtx.Done():
 		// timed out or cancelled
+		closeExec()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			log.Printf("[container=%s] exec waiter did not exit promptly after cancellation: %v", containerID, cmd)
+		}
 		if childCtx.Err() == context.DeadlineExceeded {
 			log.Printf("[container=%s] exec timed out after %v: %v", containerID, timeout, cmd)
 			return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("execution timed out after %v", timeout)
@@ -86,6 +102,12 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 		return stdoutBuf.String(), stderrBuf.String(), -1, childCtx.Err()
 	case <-ctx.Done():
 		// caller cancelled
+		closeExec()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			log.Printf("[container=%s] exec waiter did not exit promptly after caller cancellation: %v", containerID, cmd)
+		}
 		return stdoutBuf.String(), stderrBuf.String(), -1, ctx.Err()
 	}
 
@@ -98,24 +120,24 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, c
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
 }
 
-func (e *Executor) copyFilesToContainer(containerID string, workDir string, files []string) error {
+func (e *Executor) copyFilesToContainer(containerID string, hostWorkDir string, containerWorkDir string, files []string) error {
 	if len(files) == 0 {
 		return nil
 	}
 
-	if err := workspace.ValidateNoExternalSymlinks(workDir); err != nil {
+	if err := workspace.ValidateNoExternalSymlinks(hostWorkDir); err != nil {
 		return err
 	}
 
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	for _, name := range files {
-		path, err := workspace.SafeJoin(workDir, name)
+		path, err := workspace.SafeJoin(hostWorkDir, name)
 		if err != nil {
 			_ = tw.Close()
 			return fmt.Errorf("invalid workspace path %s: %w", name, err)
 		}
-		data, info, err := workspace.ReadRegularFile(workDir, name)
+		data, info, err := workspace.ReadRegularFile(hostWorkDir, name)
 		if err != nil {
 			_ = tw.Close()
 			return fmt.Errorf("failed to read %s: %w", path, err)
@@ -141,7 +163,7 @@ func (e *Executor) copyFilesToContainer(containerID string, workDir string, file
 
 	opts := docker.UploadToContainerOptions{
 		InputStream: &buf,
-		Path:        "/app",
+		Path:        containerWorkDir,
 	}
 	if err := e.cli.UploadToContainer(containerID, opts); err != nil {
 		return fmt.Errorf("failed to upload files to container: %w", err)
@@ -149,21 +171,36 @@ func (e *Executor) copyFilesToContainer(containerID string, workDir string, file
 	return nil
 }
 
+func rewriteCommandForWorkspace(cmd []string, containerWorkDir string) []string {
+	rewritten := make([]string, len(cmd))
+	for i, part := range cmd {
+		switch {
+		case part == "/app":
+			rewritten[i] = containerWorkDir
+		case strings.HasPrefix(part, "/app/"):
+			rewritten[i] = containerWorkDir + strings.TrimPrefix(part, "/app")
+		default:
+			rewritten[i] = part
+		}
+	}
+	return rewritten
+}
+
 // RunInContainer executes user code in a given Docker container
-func (e *Executor) RunInContainer(ctx context.Context, containerID string, files []string, workDir string, compileCmd []string, runCmd []string, timeout time.Duration) (string, string, error) {
+func (e *Executor) RunInContainer(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, timeout time.Duration) (string, string, error) {
 	// Overall submission timeout derived from provided timeout (multiply by factor) or environment.
 	submissionTimeout := timeout * 3
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
 	// Upload current submission files into the container.
-	if err := e.copyFilesToContainer(containerID, workDir, files); err != nil {
+	if err := e.copyFilesToContainer(containerID, hostWorkDir, containerWorkDir, files); err != nil {
 		return "", "", err
 	}
 
 	// Compile step (if present)
 	if len(compileCmd) > 0 {
-		compileStdout, compileStderr, exitCode, err := e.runExecWithTimeout(subCtx, containerID, compileCmd, timeout)
+		compileStdout, compileStderr, exitCode, err := e.runExecWithTimeout(subCtx, containerID, containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
 		if err != nil {
 			return compileStdout, compileStderr, fmt.Errorf("compilation command failed: %w", err)
 		}
@@ -173,7 +210,7 @@ func (e *Executor) RunInContainer(ctx context.Context, containerID string, files
 	}
 
 	// Run step
-	runStdout, runStderr, exitCode, err := e.runExecWithTimeout(subCtx, containerID, runCmd, timeout)
+	runStdout, runStderr, exitCode, err := e.runExecWithTimeout(subCtx, containerID, containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), timeout)
 	if err != nil {
 		return runStdout, runStderr, fmt.Errorf("execution command failed: %w", err)
 	}

@@ -220,3 +220,42 @@ def twoSum(nums, target):
 	p.Release(reacquired)
 	released = true
 }
+
+func TestPythonCentralIntegration_BatchedCorrectSolution(t *testing.T) {
+	t.Setenv("JUDGE_BATCH_THRESHOLD_PY", "2")
+
+	exec, p, pc, lang := setupPythonIntegration(t)
+	defer p.Release(pc)
+
+	problem := models.Problem{
+		Title:        "Two Sum",
+		Description:  "batched integration test",
+		FunctionName: "twoSum",
+		ReturnType:   "array",
+		TestCases: []models.TestCase{
+			{
+				Input:    []interface{}{[]interface{}{float64(2), float64(7), float64(11), float64(15)}, float64(9)},
+				Expected: []interface{}{int64(0), int64(1)},
+			},
+			{
+				Input:    []interface{}{[]interface{}{float64(3), float64(2), float64(4)}, float64(6)},
+				Expected: []interface{}{int64(1), int64(2)},
+			},
+		},
+		CompareConfig: models.CompareConfig{Mode: "EXACT"},
+	}
+
+	code := `
+def twoSum(nums, target):
+    seen = {}
+    for i, n in enumerate(nums):
+        if target - n in seen:
+            return [seen[target - n], i]
+        seen[n] = i
+`
+
+	result := runCentralOnce(t, exec, pc, lang, problem, code)
+	if result.Passed != result.Total || result.Total != 2 {
+		t.Fatalf("expected 2/2 batched result, got %d/%d detail=%+v", result.Passed, result.Total, result.Details)
+	}
+}

@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -18,8 +20,8 @@ import (
 
 const (
 	stressPoolSize       = 4
-	stressSubmissionRuns = 24
-	stressTestCases      = 10
+	defaultStressRuns    = 24
+	defaultStressTests   = 10
 	stressAcquireTimeout = 60 * time.Second
 	stressRunTimeout     = 45 * time.Second
 )
@@ -38,6 +40,8 @@ func runCentralRunnerStress(t *testing.T, languageID string, functionName string
 	t.Helper()
 
 	exec, p, lang, adapter := setupCentralStress(t, languageID)
+	stressSubmissionRuns := getenvInt("JUDGE_STRESS_SUBMISSIONS", defaultStressRuns)
+	stressTestCases := getenvInt("JUDGE_STRESS_TESTS", defaultStressTests)
 	problem := makeStressProblem(functionName, stressTestCases)
 
 	errCh := make(chan error, stressSubmissionRuns)
@@ -51,7 +55,7 @@ func runCentralRunnerStress(t *testing.T, languageID string, functionName string
 			defer wg.Done()
 			<-start
 
-			runErr := runOneStressSubmission(exec, p, lang, adapter, problem, languageID, functionName, code, idx)
+			runErr := runOneStressSubmission(exec, p, lang, adapter, problem, stressTestCases, languageID, functionName, code, idx)
 			if runErr != nil {
 				errCh <- runErr
 			}
@@ -65,6 +69,18 @@ func runCentralRunnerStress(t *testing.T, languageID string, functionName string
 	for err := range errCh {
 		t.Error(err)
 	}
+}
+
+func getenvInt(name string, fallback int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func setupCentralStress(t *testing.T, languageID string) (*executor.Executor, *pool.ContainerPool, *languages.Language, adapters.LanguageAdapter) {
@@ -96,7 +112,7 @@ func setupCentralStress(t *testing.T, languageID string) (*executor.Executor, *p
 	return exec, p, lang, adapter
 }
 
-func runOneStressSubmission(exec *executor.Executor, p *pool.ContainerPool, lang *languages.Language, adapter adapters.LanguageAdapter, problem models.Problem, languageID string, functionName string, code string, idx int) error {
+func runOneStressSubmission(exec *executor.Executor, p *pool.ContainerPool, lang *languages.Language, adapter adapters.LanguageAdapter, problem models.Problem, expectedTests int, languageID string, functionName string, code string, idx int) error {
 	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), stressAcquireTimeout)
 	defer cancelAcquire()
 
@@ -128,8 +144,8 @@ func runOneStressSubmission(exec *executor.Executor, p *pool.ContainerPool, lang
 	if result.Status != models.StatusFinished {
 		return fmt.Errorf("[%s submission=%d] unexpected status %q", languageID, idx, result.Status)
 	}
-	if result.Total != stressTestCases {
-		return fmt.Errorf("[%s submission=%d] expected %d tests, got %d", languageID, idx, stressTestCases, result.Total)
+	if result.Total != expectedTests {
+		return fmt.Errorf("[%s submission=%d] expected %d tests, got %d", languageID, idx, expectedTests, result.Total)
 	}
 	if result.Passed != result.Total {
 		return fmt.Errorf("[%s submission=%d] expected all tests to pass, got %d/%d", languageID, idx, result.Passed, result.Total)
@@ -139,10 +155,6 @@ func runOneStressSubmission(exec *executor.Executor, p *pool.ContainerPool, lang
 		if !detail.Ok {
 			return fmt.Errorf("[%s submission=%d] test %d failed unexpectedly: error=%q output=%v", languageID, idx, detail.Test, detail.Error, detail.Output)
 		}
-	}
-
-	if err := cleanWorkspace(pc.WorkDir); err != nil {
-		return fmt.Errorf("[%s submission=%d] cleanup failed: %w", languageID, idx, err)
 	}
 
 	return nil

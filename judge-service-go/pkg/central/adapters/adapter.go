@@ -9,6 +9,12 @@ type LanguageAdapter interface {
 	RunCommand(inputB64 string) []string
 }
 
+type BatchLanguageAdapter interface {
+	LanguageAdapter
+	PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage) ([]string, error)
+	BatchRunCommand(testsB64 string) []string
+}
+
 var AdapterRegistry = map[string]LanguageAdapter{
 	"python":     PythonAdapter{},
 	"javascript": JavaScriptAdapter{},

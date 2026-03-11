@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	docker "github.com/fsouza/go-dockerclient"
+
+	"judge-service-go/pkg/workspace"
 )
 
 // PooledContainer represents a container in the pool.
@@ -29,8 +31,6 @@ type ContainerPool struct {
 	inUse      map[string]*PooledContainer   // containerID -> container
 	maxPerLang int
 }
-
-const workspaceRootDir = "/tmp/judge-workspaces"
 
 // NewPool creates a new container pool.
 func NewPool(cli *docker.Client, maxPerLang int) *ContainerPool {
@@ -111,10 +111,10 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 	noNewPrivileges := "no-new-privileges:true"
 
 	// Create a temporary directory on the host for this container
-	if err := os.MkdirAll(workspaceRootDir, 0755); err != nil {
-		return "", "", fmt.Errorf("failed to create workspace root %s: %w", workspaceRootDir, err)
+	if err := os.MkdirAll(workspace.RootDir, 0755); err != nil {
+		return "", "", fmt.Errorf("failed to create workspace root %s: %w", workspace.RootDir, err)
 	}
-	hostWorkDir, err := os.MkdirTemp(workspaceRootDir, "judge-")
+	hostWorkDir, err := os.MkdirTemp(workspace.RootDir, "judge-")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create temp dir for container: %w", err)
 	}
