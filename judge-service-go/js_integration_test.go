@@ -114,6 +114,9 @@ function twoSum(nums, target) {
 	if !result.Details[0].Ok {
 		t.Fatalf("expected test to pass, detail=%+v", result.Details[0])
 	}
+	if result.Details[0].TimeMs < 0 {
+		t.Fatalf("expected non-negative timeMs, detail=%+v", result.Details[0])
+	}
 }
 
 func TestJSCentralIntegration_WrongAnswer(t *testing.T) {
@@ -226,4 +229,51 @@ function twoSum(nums, target) {
 	}
 	p.Release(reacquired)
 	released = true
+}
+
+func TestJSCentralIntegration_BatchedCorrectSolution(t *testing.T) {
+	t.Setenv("JUDGE_BATCH_THRESHOLD_JS", "2")
+
+	exec, p, pc, lang := setupJSIntegration(t)
+	defer p.Release(pc)
+
+	problem := models.Problem{
+		Title:        "Two Sum",
+		Description:  "batched integration test",
+		FunctionName: "twoSum",
+		ReturnType:   "array",
+		TestCases: []models.TestCase{
+			{
+				Input:    []interface{}{[]interface{}{float64(2), float64(7), float64(11), float64(15)}, float64(9)},
+				Expected: []interface{}{int64(0), int64(1)},
+			},
+			{
+				Input:    []interface{}{[]interface{}{float64(3), float64(2), float64(4)}, float64(6)},
+				Expected: []interface{}{int64(1), int64(2)},
+			},
+		},
+		CompareConfig: models.CompareConfig{Mode: "EXACT"},
+	}
+
+	code := `
+function twoSum(nums, target) {
+  const seen = new Map();
+  for (let i = 0; i < nums.length; i++) {
+    if (seen.has(target - nums[i])) {
+      return [seen.get(target - nums[i]), i];
+    }
+    seen.set(nums[i], i);
+  }
+}
+`
+
+	result := runCentralJSOnce(t, exec, pc, lang, problem, code)
+	if result.Passed != result.Total || result.Total != 2 {
+		t.Fatalf("expected 2/2 batched result, got %d/%d detail=%+v", result.Passed, result.Total, result.Details)
+	}
+	for _, detail := range result.Details {
+		if detail.TimeMs < 0 {
+			t.Fatalf("expected non-negative timeMs, detail=%+v", detail)
+		}
+	}
 }

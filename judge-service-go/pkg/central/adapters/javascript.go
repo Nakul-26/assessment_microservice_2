@@ -18,6 +18,15 @@ func (JavaScriptAdapter) Name() string {
 
 func (JavaScriptAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionMessage) ([]string, error) {
 	tplPath := filepath.Join("pkg", "wrappers", "js_single_wrapper.tpl")
+	return prepareJavaScriptWrapper(workDir, submissionMsg, tplPath)
+}
+
+func (JavaScriptAdapter) PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage) ([]string, error) {
+	tplPath := filepath.Join("pkg", "wrappers", "js_batch_wrapper.tpl")
+	return prepareJavaScriptWrapper(workDir, submissionMsg, tplPath)
+}
+
+func prepareJavaScriptWrapper(workDir string, submissionMsg models.SubmissionMessage, tplPath string) ([]string, error) {
 	b, err := os.ReadFile(tplPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read template %s: %w", tplPath, err)
@@ -36,4 +45,8 @@ func (JavaScriptAdapter) PrepareFiles(workDir string, submissionMsg models.Submi
 
 func (JavaScriptAdapter) RunCommand(inputB64 string) []string {
 	return []string{"node", "/app/wrapper.js", inputB64}
+}
+
+func (JavaScriptAdapter) BatchRunCommand(testsB64 string) []string {
+	return []string{"node", "/app/wrapper.js", testsB64}
 }

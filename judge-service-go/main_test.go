@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -67,7 +68,7 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 	}
 
 	stdout := "{\"test\":1,\"output\":3}\n{\"test\":2,\"error\":\"boom\"}\n"
-	processed, err := appendBatchedResults(result, stdout, problem)
+	processed, err := appendBatchedResults(result, strings.NewReader(stdout), problem)
 	if err != nil {
 		t.Fatalf("appendBatchedResults failed: %v", err)
 	}
@@ -79,6 +80,9 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 	}
 	if result.Details[1].Error != "Runtime Error" {
 		t.Fatalf("expected runtime error for second test, got %+v", result.Details[1])
+	}
+	if result.Details[0].TimeMs < 0 || result.Details[1].TimeMs < 0 {
+		t.Fatalf("expected non-negative timeMs for batched tests, got %+v", result.Details)
 	}
 }
 
@@ -100,5 +104,15 @@ func TestAppendMissingBatchedResultsMarksRemainingFailed(t *testing.T) {
 	}
 	if result.Details[1].Error != "Runtime Error" || result.Details[2].Error != "Runtime Error" {
 		t.Fatalf("expected remaining tests marked failed, got %+v", result.Details)
+	}
+}
+
+func TestTestResultJSONIncludesTimeMsWhenZero(t *testing.T) {
+	payload, err := json.Marshal(models.TestResult{Test: 1, Ok: true, TimeMs: 0})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if !strings.Contains(string(payload), "\"timeMs\":0") {
+		t.Fatalf("expected timeMs in json payload, got %s", payload)
 	}
 }

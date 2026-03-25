@@ -23,7 +23,10 @@ import (
 	"judge-service-go/pkg/workspace"
 )
 
-const defaultPythonBatchThreshold = 20
+const (
+	defaultPythonBatchThreshold     = 20
+	defaultJavaScriptBatchThreshold = 20
+)
 
 type batchedTestExecOutput struct {
 	Test      int         `json:"test"`
@@ -80,7 +83,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		if marshalErr != nil {
 			tr.Ok = false
 			tr.Error = fmt.Sprintf("failed to marshal test input: %v", marshalErr)
-			tr.DurationMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = time.Since(testStart).Milliseconds()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -118,7 +121,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 			if stderrForLog != "" {
 				log.Printf("[submission=%s test=%d] runtime stderr%s: %s", submissionMsg.SubmissionID, i+1, map[bool]string{true: " (truncated)", false: ""}[stderrTruncated], stderrForLog)
 			}
-			tr.DurationMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = time.Since(testStart).Milliseconds()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -126,7 +129,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		if stdoutTruncated {
 			tr.Ok = false
 			tr.Error = "Output Limit Exceeded"
-			tr.DurationMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = time.Since(testStart).Milliseconds()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -135,7 +138,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		if parseErr != nil {
 			tr.Ok = false
 			tr.Error = "Runtime Error"
-			tr.DurationMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = time.Since(testStart).Milliseconds()
 			log.Printf("[submission=%s test=%d] invalid wrapper output: %v | stdout=%q", submissionMsg.SubmissionID, i+1, parseErr, stdoutForResult)
 			result.AddTestResult(tr)
 			continue
@@ -148,14 +151,14 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 				tracebackForLog, tbTruncated := truncateString(out.Traceback, maxLogOutputBytes)
 				log.Printf("[submission=%s test=%d] wrapper traceback%s: %s", submissionMsg.SubmissionID, i+1, map[bool]string{true: " (truncated)", false: ""}[tbTruncated], tracebackForLog)
 			}
-			tr.DurationMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = time.Since(testStart).Milliseconds()
 			result.AddTestResult(tr)
 			continue
 		}
 
 		tr.Output = out.Output
 		tr.Ok = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
-		tr.DurationMs = time.Since(testStart).Milliseconds()
+		tr.TimeMs = time.Since(testStart).Milliseconds()
 		result.AddTestResult(tr)
 	}
 
@@ -190,7 +193,7 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	runCtx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
 
-	stdout, stderr, runErr := exec.RunInContainer(
+	stream, err := exec.RunInContainerStream(
 		runCtx,
 		pooledContainer.ID,
 		append([]string{}, baseFiles...),
@@ -200,14 +203,38 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 		adapter.BatchRunCommand(base64.StdEncoding.EncodeToString(testsJSON)),
 		runTimeout,
 	)
+	if err != nil {
+		return nil, err
+	}
 
-	stderrTrimmed := strings.TrimSpace(stderr)
+	var stderrBuf bytes.Buffer
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		_, _ = io.Copy(&stderrBuf, stream.Stderr)
+		_ = stream.Stderr.Close()
+	}()
+
+	processed, parseErr := appendBatchedResults(result, stream.Stdout, problem)
+	_ = stream.Stdout.Close()
+
+	exitCode, waitErr := stream.Wait()
+	<-stderrDone
+
+	var runErr error
+	switch {
+	case waitErr != nil:
+		runErr = fmt.Errorf("execution command failed: %w", waitErr)
+	case exitCode != 0:
+		runErr = fmt.Errorf("execution failed with exit code %d", exitCode)
+	}
+
+	stderrTrimmed := strings.TrimSpace(stderrBuf.String())
 	if stderrTrimmed != "" {
 		stderrForLog, stderrTruncated := truncateString(stderrTrimmed, maxLogOutputBytes)
 		log.Printf("[submission=%s] batched stderr%s: %s", submissionMsg.SubmissionID, map[bool]string{true: " (truncated)", false: ""}[stderrTruncated], stderrForLog)
 	}
 
-	processed, parseErr := appendBatchedResults(result, stdout, problem)
 	remainingReason := ""
 	switch {
 	case errors.Is(parseErr, errBatchedOutputLimitExceeded):
@@ -242,8 +269,8 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	return result, nil
 }
 
-func appendBatchedResults(result *models.SubmissionResult, stdout string, problem models.Problem) (int, error) {
-	reader := bufio.NewReader(strings.NewReader(stdout))
+func appendBatchedResults(result *models.SubmissionResult, stdout io.Reader, problem models.Problem) (int, error) {
+	reader := bufio.NewReader(stdout)
 	processed := 0
 
 	for {
@@ -271,6 +298,7 @@ func appendBatchedResults(result *models.SubmissionResult, stdout string, proble
 			return processed, fmt.Errorf("batched wrapper returned invalid test index %d", out.Test)
 		}
 		tc := problem.TestCases[out.Test-1]
+		testStart := time.Now()
 		tr := models.TestResult{
 			Test:     out.Test,
 			Expected: tc.Expected,
@@ -282,6 +310,7 @@ func appendBatchedResults(result *models.SubmissionResult, stdout string, proble
 		} else {
 			tr.Ok = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
 		}
+		tr.TimeMs = time.Since(testStart).Milliseconds()
 		result.AddTestResult(tr)
 		processed++
 	}
@@ -323,14 +352,24 @@ func readBoundedLine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
 }
 
 func shouldUseBatchedExecution(language string, testCount int) bool {
-	if language != "python" {
-		return false
-	}
-	threshold := defaultPythonBatchThreshold
-	if raw := strings.TrimSpace(os.Getenv("JUDGE_BATCH_THRESHOLD_PY")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			threshold = parsed
+	threshold := 0
+	switch language {
+	case "python":
+		threshold = defaultPythonBatchThreshold
+		if raw := strings.TrimSpace(os.Getenv("JUDGE_BATCH_THRESHOLD_PY")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				threshold = parsed
+			}
 		}
+	case "javascript":
+		threshold = defaultJavaScriptBatchThreshold
+		if raw := strings.TrimSpace(os.Getenv("JUDGE_BATCH_THRESHOLD_JS")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				threshold = parsed
+			}
+		}
+	default:
+		return false
 	}
 	return testCount >= threshold
 }

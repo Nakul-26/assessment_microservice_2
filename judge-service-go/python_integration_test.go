@@ -110,6 +110,9 @@ def twoSum(nums, target):
 	if !result.Details[0].Ok {
 		t.Fatalf("expected test to pass, detail=%+v", result.Details[0])
 	}
+	if result.Details[0].TimeMs < 0 {
+		t.Fatalf("expected non-negative timeMs, detail=%+v", result.Details[0])
+	}
 }
 
 func TestPythonCentralIntegration_WrongAnswer(t *testing.T) {
@@ -257,5 +260,10 @@ def twoSum(nums, target):
 	result := runCentralOnce(t, exec, pc, lang, problem, code)
 	if result.Passed != result.Total || result.Total != 2 {
 		t.Fatalf("expected 2/2 batched result, got %d/%d detail=%+v", result.Passed, result.Total, result.Details)
+	}
+	for _, detail := range result.Details {
+		if detail.TimeMs < 0 {
+			t.Fatalf("expected non-negative timeMs, detail=%+v", detail)
+		}
 	}
 }
