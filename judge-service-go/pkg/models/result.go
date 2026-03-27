@@ -24,24 +24,28 @@ type TestResult struct {
 
 // SubmissionResult represents the overall result of a submission.
 type SubmissionResult struct {
-	Status     string       `json:"status"`              // finished / error / success / fail
-	Passed     int          `json:"passed"`              // number of tests passed
-	Total      int          `json:"total"`               // total tests executed
-	Details    []TestResult `json:"details,omitempty"`   // per-test details
-	Stdout     string       `json:"stdout,omitempty"`    // aggregated stdout (if any)
-	Stderr     string       `json:"stderr,omitempty"`    // aggregated stderr (if any)
-	StartedAt  *time.Time   `json:"startedAt,omitempty"` // optional timestamps
-	FinishedAt *time.Time   `json:"finishedAt,omitempty"`
-	ElapsedMs  int64        `json:"elapsedMs,omitempty"` // total elapsed time for submission
+	Status      string       `json:"status"`              // finished / error / success / fail
+	Passed      int          `json:"passed"`              // number of tests passed
+	PassedCount int          `json:"passedCount"`         // alias for UI-facing pass count
+	Total       int          `json:"total"`               // total tests executed
+	TotalCount  int          `json:"totalCount"`          // alias for UI-facing total count
+	Details     []TestResult `json:"details,omitempty"`   // per-test details
+	Stdout      string       `json:"stdout,omitempty"`    // aggregated stdout (if any)
+	Stderr      string       `json:"stderr,omitempty"`    // aggregated stderr (if any)
+	StartedAt   *time.Time   `json:"startedAt,omitempty"` // optional timestamps
+	FinishedAt  *time.Time   `json:"finishedAt,omitempty"`
+	ElapsedMs   int64        `json:"elapsedMs,omitempty"` // total elapsed time for submission
 }
 
 // NewSubmissionResult creates a new, empty SubmissionResult with a default status.
 func NewSubmissionResult() *SubmissionResult {
 	return &SubmissionResult{
-		Status:  StatusFinished,
-		Passed:  0,
-		Total:   0,
-		Details: make([]TestResult, 0),
+		Status:      StatusFinished,
+		Passed:      0,
+		PassedCount: 0,
+		Total:       0,
+		TotalCount:  0,
+		Details:     make([]TestResult, 0),
 	}
 }
 
@@ -50,12 +54,50 @@ func NewSubmissionResult() *SubmissionResult {
 func (sr *SubmissionResult) AddTestResult(tr TestResult) {
 	sr.Details = append(sr.Details, tr)
 	sr.Total++
+	sr.TotalCount = sr.Total
 	if tr.Ok {
 		sr.Passed++
+	}
+	sr.PassedCount = sr.Passed
+}
+
+// NormalizeCounts keeps legacy and UI-facing count aliases in sync.
+func (sr *SubmissionResult) NormalizeCounts() {
+	if sr == nil {
+		return
+	}
+
+	switch {
+	case sr.PassedCount == 0 && sr.Passed != 0:
+		sr.PassedCount = sr.Passed
+	case sr.Passed == 0 && sr.PassedCount != 0:
+		sr.Passed = sr.PassedCount
+	}
+
+	switch {
+	case sr.TotalCount == 0 && sr.Total != 0:
+		sr.TotalCount = sr.Total
+	case sr.Total == 0 && sr.TotalCount != 0:
+		sr.Total = sr.TotalCount
 	}
 }
 
 // ToJSON returns the JSON encoding (useful for logging or returning to caller).
 func (sr *SubmissionResult) ToJSON() ([]byte, error) {
+	sr.NormalizeCounts()
 	return json.Marshal(sr)
+}
+
+// UnmarshalJSON backfills count aliases from either field naming scheme.
+func (sr *SubmissionResult) UnmarshalJSON(data []byte) error {
+	type submissionResultAlias SubmissionResult
+
+	var aux submissionResultAlias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	*sr = SubmissionResult(aux)
+	sr.NormalizeCounts()
+	return nil
 }

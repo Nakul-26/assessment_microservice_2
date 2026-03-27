@@ -78,6 +78,9 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 	if result.Passed != 1 || result.Total != 2 {
 		t.Fatalf("unexpected totals: passed=%d total=%d", result.Passed, result.Total)
 	}
+	if result.PassedCount != 1 || result.TotalCount != 2 {
+		t.Fatalf("unexpected count aliases: passedCount=%d totalCount=%d", result.PassedCount, result.TotalCount)
+	}
 	if result.Details[1].Error != "Runtime Error" {
 		t.Fatalf("expected runtime error for second test, got %+v", result.Details[1])
 	}
@@ -114,5 +117,42 @@ func TestTestResultJSONIncludesTimeMsWhenZero(t *testing.T) {
 	}
 	if !strings.Contains(string(payload), "\"timeMs\":0") {
 		t.Fatalf("expected timeMs in json payload, got %s", payload)
+	}
+}
+
+func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
+	result := models.NewSubmissionResult()
+	result.AddTestResult(models.TestResult{Test: 1, Ok: true})
+	result.AddTestResult(models.TestResult{Test: 2, Ok: false})
+
+	payload, err := result.ToJSON()
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	jsonStr := string(payload)
+	if !strings.Contains(jsonStr, "\"passedCount\":1") {
+		t.Fatalf("expected passedCount in json payload, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, "\"totalCount\":2") {
+		t.Fatalf("expected totalCount in json payload, got %s", jsonStr)
+	}
+}
+
+func TestSubmissionResultUnmarshalBackfillsCountAliases(t *testing.T) {
+	var result models.SubmissionResult
+	if err := json.Unmarshal([]byte(`{"status":"finished","passed":2,"total":3}`), &result); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if result.PassedCount != 2 || result.TotalCount != 3 {
+		t.Fatalf("expected count aliases from legacy fields, got passedCount=%d totalCount=%d", result.PassedCount, result.TotalCount)
+	}
+
+	var aliasOnly models.SubmissionResult
+	if err := json.Unmarshal([]byte(`{"status":"finished","passedCount":4,"totalCount":5}`), &aliasOnly); err != nil {
+		t.Fatalf("unmarshal alias-only failed: %v", err)
+	}
+	if aliasOnly.Passed != 4 || aliasOnly.Total != 5 {
+		t.Fatalf("expected legacy fields backfilled from aliases, got passed=%d total=%d", aliasOnly.Passed, aliasOnly.Total)
 	}
 }
