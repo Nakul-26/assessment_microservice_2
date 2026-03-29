@@ -84,6 +84,9 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 	if result.Details[1].Error != "Runtime Error" {
 		t.Fatalf("expected runtime error for second test, got %+v", result.Details[1])
 	}
+	if result.Status != models.SubmissionStatusRuntimeError {
+		t.Fatalf("expected overall status %q, got %q", models.SubmissionStatusRuntimeError, result.Status)
+	}
 	if result.Details[0].TimeMs < 0 || result.Details[1].TimeMs < 0 {
 		t.Fatalf("expected non-negative timeMs for batched tests, got %+v", result.Details)
 	}
@@ -136,6 +139,62 @@ func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
 	}
 	if !strings.Contains(jsonStr, "\"totalCount\":2") {
 		t.Fatalf("expected totalCount in json payload, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, "\"status\":\"Wrong Answer\"") {
+		t.Fatalf("expected Wrong Answer status in json payload, got %s", jsonStr)
+	}
+}
+
+func TestSubmissionResultUpdateStatusPriority(t *testing.T) {
+	tests := []struct {
+		name    string
+		details []models.TestResult
+		want    string
+	}{
+		{
+			name: "accepted",
+			details: []models.TestResult{
+				{Test: 1, Ok: true},
+				{Test: 2, Ok: true},
+			},
+			want: models.SubmissionStatusAccepted,
+		},
+		{
+			name: "wrong answer",
+			details: []models.TestResult{
+				{Test: 1, Ok: true},
+				{Test: 2, Ok: false},
+			},
+			want: models.SubmissionStatusWrongAnswer,
+		},
+		{
+			name: "runtime error overrides wrong answer",
+			details: []models.TestResult{
+				{Test: 1, Ok: false},
+				{Test: 2, Ok: false, Error: models.SubmissionStatusRuntimeError},
+			},
+			want: models.SubmissionStatusRuntimeError,
+		},
+		{
+			name: "timeout overrides runtime error",
+			details: []models.TestResult{
+				{Test: 1, Ok: false, Error: models.SubmissionStatusRuntimeError},
+				{Test: 2, Ok: false, Error: models.SubmissionStatusTimeLimitExceeded},
+			},
+			want: models.SubmissionStatusTimeLimitExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := models.NewSubmissionResult()
+			for _, detail := range tt.details {
+				result.AddTestResult(detail)
+			}
+			if result.Status != tt.want {
+				t.Fatalf("expected status %q, got %q", tt.want, result.Status)
+			}
+		})
 	}
 }
 

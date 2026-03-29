@@ -19,13 +19,13 @@ const (
 
 // Submission represents a user's submission entry stored in Mongo.
 type Submission struct {
-	ID         primitive.ObjectID `json:"_id" bson:"_id,omitempty"`
-	ProblemID  primitive.ObjectID `json:"problemId" bson:"problemId"`
-	UserID     primitive.ObjectID `json:"userId,omitempty" bson:"userId,omitempty"`
-	Language   string             `json:"language" bson:"language"`
-	Code       string             `json:"code,omitempty" bson:"code,omitempty"`        // consider size limits
-	Status     string             `json:"status" bson:"status"`                       // use status constants
-	Output     string             `json:"output,omitempty" bson:"output,omitempty"`   // aggregated compiler/runtime output
+	ID        primitive.ObjectID `json:"_id" bson:"_id,omitempty"`
+	ProblemID primitive.ObjectID `json:"problemId" bson:"problemId"`
+	UserID    primitive.ObjectID `json:"userId,omitempty" bson:"userId,omitempty"`
+	Language  string             `json:"language" bson:"language"`
+	Code      string             `json:"code,omitempty" bson:"code,omitempty"`     // consider size limits
+	Status    string             `json:"status" bson:"status"`                     // use status constants
+	Output    string             `json:"output,omitempty" bson:"output,omitempty"` // aggregated compiler/runtime output
 	// Prefer a concrete type for test results to avoid type-assert overhead:
 	TestResult *SubmissionResult `json:"testResult,omitempty" bson:"testResult,omitempty"`
 	// If you want to store raw JSON instead, use:
@@ -63,17 +63,17 @@ func (s *Submission) AttachResult(result *SubmissionResult, rawOutput string) {
 	s.UpdatedAt = time.Now().UTC()
 
 	if result != nil {
-		// derive a status from result fields
-		if result.Passed == result.Total && result.Total > 0 {
+		result.NormalizeCounts()
+
+		switch result.Status {
+		case SubmissionStatusAccepted:
 			s.Status = StatusSuccess
-		} else {
-			// if any tests failed, mark Fail; wrapper may set "error"/"finished" etc.
-			// Use more nuanced logic if wrapper returns "error" status.
-			if result.Status == StatusError {
-				s.Status = StatusError
-			} else {
-				s.Status = StatusFail
-			}
+		case SubmissionStatusWrongAnswer:
+			s.Status = StatusFail
+		case SubmissionStatusRuntimeError, SubmissionStatusTimeLimitExceeded:
+			s.Status = StatusError
+		default:
+			s.Status = StatusError
 		}
 	}
 }

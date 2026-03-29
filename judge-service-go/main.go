@@ -243,20 +243,14 @@ func processAndStoreResults(ctx context.Context, stdout, stderr string, execErr 
 	if stdout != "" {
 		if err := json.Unmarshal([]byte(stdout), &result); err == nil {
 			submissionTestResult = &result
-			s := strings.ToLower(result.Status)
-			switch s {
-			case models.StatusFinished:
-				if result.Passed == result.Total {
-					submissionStatus = models.StatusSuccess
-				} else {
-					submissionStatus = models.StatusFail
-				}
-			case "error":
-				submissionStatus = models.StatusError
-			case "fail":
-				submissionStatus = models.StatusFail
-			case "success":
+			result.NormalizeCounts()
+			switch result.Status {
+			case models.SubmissionStatusAccepted:
 				submissionStatus = models.StatusSuccess
+			case models.SubmissionStatusWrongAnswer:
+				submissionStatus = models.StatusFail
+			case models.SubmissionStatusRuntimeError, models.SubmissionStatusTimeLimitExceeded:
+				submissionStatus = models.StatusError
 			default:
 				submissionStatus = models.StatusError
 			}

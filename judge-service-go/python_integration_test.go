@@ -85,9 +85,6 @@ func runCentralOnce(t *testing.T, exec *executor.Executor, pc *pool.PooledContai
 	if result == nil {
 		t.Fatal("nil result")
 	}
-	if result.Status != models.StatusFinished {
-		t.Fatalf("expected overall status %q, got %q", models.StatusFinished, result.Status)
-	}
 	return result
 }
 
@@ -106,6 +103,9 @@ def twoSum(nums, target):
 	result := runCentralOnce(t, exec, pc, lang, problem, code)
 	if result.Passed != result.Total || result.Total != 1 {
 		t.Fatalf("expected accepted-like result 1/1, got %d/%d detail=%+v", result.Passed, result.Total, result.Details)
+	}
+	if result.Status != models.SubmissionStatusAccepted {
+		t.Fatalf("expected status %q, got %q", models.SubmissionStatusAccepted, result.Status)
 	}
 	if !result.Details[0].Ok {
 		t.Fatalf("expected test to pass, detail=%+v", result.Details[0])
@@ -128,6 +128,9 @@ def twoSum(nums, target):
 	if result.Passed >= result.Total {
 		t.Fatalf("expected wrong-answer-like result with partial/zero pass, got %d/%d", result.Passed, result.Total)
 	}
+	if result.Status != models.SubmissionStatusWrongAnswer {
+		t.Fatalf("expected status %q, got %q", models.SubmissionStatusWrongAnswer, result.Status)
+	}
 	if result.Details[0].Ok {
 		t.Fatalf("expected test to fail, detail=%+v", result.Details[0])
 	}
@@ -145,6 +148,9 @@ def twoSum(nums, target):
 	result := runCentralOnce(t, exec, pc, lang, problem, code)
 	if result.Details[0].Error != "Runtime Error" {
 		t.Fatalf("expected Runtime Error, got %q", result.Details[0].Error)
+	}
+	if result.Status != models.SubmissionStatusRuntimeError {
+		t.Fatalf("expected status %q, got %q", models.SubmissionStatusRuntimeError, result.Status)
 	}
 	if result.Details[0].Stderr != "" {
 		t.Fatalf("expected stderr hidden from client payload, got %q", result.Details[0].Stderr)
@@ -166,6 +172,9 @@ def twoSum(nums, target):
 	if result.Details[0].Error != "Time Limit Exceeded" {
 		t.Fatalf("expected Time Limit Exceeded, got %q detail=%+v", result.Details[0].Error, result.Details[0])
 	}
+	if result.Status != models.SubmissionStatusTimeLimitExceeded {
+		t.Fatalf("expected status %q, got %q", models.SubmissionStatusTimeLimitExceeded, result.Status)
+	}
 }
 
 func TestPythonCentralIntegration_OutputLimitExceeded(t *testing.T) {
@@ -181,6 +190,9 @@ def twoSum(nums, target):
 	result := runCentralOnce(t, exec, pc, lang, problem, code)
 	if result.Details[0].Error != "Output Limit Exceeded" {
 		t.Fatalf("expected Output Limit Exceeded, got %q detail=%+v", result.Details[0].Error, result.Details[0])
+	}
+	if result.Status != models.SubmissionStatusWrongAnswer {
+		t.Fatalf("expected status %q, got %q", models.SubmissionStatusWrongAnswer, result.Status)
 	}
 	if !strings.Contains(result.Details[0].Stdout, "A") {
 		t.Fatalf("expected captured stdout to contain user output")
@@ -260,6 +272,9 @@ def twoSum(nums, target):
 	result := runCentralOnce(t, exec, pc, lang, problem, code)
 	if result.Passed != result.Total || result.Total != 2 {
 		t.Fatalf("expected 2/2 batched result, got %d/%d detail=%+v", result.Passed, result.Total, result.Details)
+	}
+	if result.Status != models.SubmissionStatusAccepted {
+		t.Fatalf("expected status %q, got %q", models.SubmissionStatusAccepted, result.Status)
 	}
 	for _, detail := range result.Details {
 		if detail.TimeMs < 0 {

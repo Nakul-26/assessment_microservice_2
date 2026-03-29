@@ -141,7 +141,7 @@ func runOneStressSubmission(exec *executor.Executor, p *pool.ContainerPool, lang
 	if result == nil {
 		return fmt.Errorf("[%s submission=%d] nil result", languageID, idx)
 	}
-	if result.Status != models.StatusFinished {
+	if result.Status != models.SubmissionStatusAccepted {
 		return fmt.Errorf("[%s submission=%d] unexpected status %q", languageID, idx, result.Status)
 	}
 	if result.Total != expectedTests {

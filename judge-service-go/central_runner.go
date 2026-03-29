@@ -165,7 +165,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 	finished := time.Now().UTC()
 	result.FinishedAt = &finished
 	result.ElapsedMs = finished.Sub(*result.StartedAt).Milliseconds()
-	result.Status = models.StatusFinished
+	result.UpdateStatus()
 
 	return result, nil
 }
@@ -264,7 +264,7 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	finished := time.Now().UTC()
 	result.FinishedAt = &finished
 	result.ElapsedMs = finished.Sub(*result.StartedAt).Milliseconds()
-	result.Status = models.StatusFinished
+	result.UpdateStatus()
 
 	return result, nil
 }

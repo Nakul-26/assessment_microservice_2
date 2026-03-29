@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+const (
+	SubmissionStatusAccepted          = "Accepted"
+	SubmissionStatusWrongAnswer       = "Wrong Answer"
+	SubmissionStatusRuntimeError      = "Runtime Error"
+	SubmissionStatusTimeLimitExceeded = "Time Limit Exceeded"
+)
+
 // TestResult represents the result of a single test case.
 type TestResult struct {
 	Test      int         `json:"test"`                // test index (0-based)
@@ -24,7 +31,7 @@ type TestResult struct {
 
 // SubmissionResult represents the overall result of a submission.
 type SubmissionResult struct {
-	Status      string       `json:"status"`              // finished / error / success / fail
+	Status      string       `json:"status"`              // Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
 	Passed      int          `json:"passed"`              // number of tests passed
 	PassedCount int          `json:"passedCount"`         // alias for UI-facing pass count
 	Total       int          `json:"total"`               // total tests executed
@@ -40,7 +47,7 @@ type SubmissionResult struct {
 // NewSubmissionResult creates a new, empty SubmissionResult with a default status.
 func NewSubmissionResult() *SubmissionResult {
 	return &SubmissionResult{
-		Status:      StatusFinished,
+		Status:      SubmissionStatusAccepted,
 		Passed:      0,
 		PassedCount: 0,
 		Total:       0,
@@ -59,6 +66,7 @@ func (sr *SubmissionResult) AddTestResult(tr TestResult) {
 		sr.Passed++
 	}
 	sr.PassedCount = sr.Passed
+	sr.UpdateStatus()
 }
 
 // NormalizeCounts keeps legacy and UI-facing count aliases in sync.
@@ -80,6 +88,37 @@ func (sr *SubmissionResult) NormalizeCounts() {
 	case sr.Total == 0 && sr.TotalCount != 0:
 		sr.Total = sr.TotalCount
 	}
+
+	sr.UpdateStatus()
+}
+
+// UpdateStatus derives the overall user-facing verdict from per-test results.
+func (sr *SubmissionResult) UpdateStatus() {
+	if sr == nil {
+		return
+	}
+
+	hasRuntimeError := false
+	for _, detail := range sr.Details {
+		switch detail.Error {
+		case SubmissionStatusTimeLimitExceeded:
+			sr.Status = SubmissionStatusTimeLimitExceeded
+			return
+		case SubmissionStatusRuntimeError:
+			hasRuntimeError = true
+		}
+	}
+
+	if hasRuntimeError {
+		sr.Status = SubmissionStatusRuntimeError
+		return
+	}
+	if sr.PassedCount == sr.TotalCount {
+		sr.Status = SubmissionStatusAccepted
+		return
+	}
+
+	sr.Status = SubmissionStatusWrongAnswer
 }
 
 // ToJSON returns the JSON encoding (useful for logging or returning to caller).
