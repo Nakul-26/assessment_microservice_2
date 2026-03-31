@@ -31,28 +31,30 @@ type TestResult struct {
 
 // SubmissionResult represents the overall result of a submission.
 type SubmissionResult struct {
-	Status      string       `json:"status"`              // Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
-	Passed      int          `json:"passed"`              // number of tests passed
-	PassedCount int          `json:"passedCount"`         // alias for UI-facing pass count
-	Total       int          `json:"total"`               // total tests executed
-	TotalCount  int          `json:"totalCount"`          // alias for UI-facing total count
-	Details     []TestResult `json:"details,omitempty"`   // per-test details
-	Stdout      string       `json:"stdout,omitempty"`    // aggregated stdout (if any)
-	Stderr      string       `json:"stderr,omitempty"`    // aggregated stderr (if any)
-	StartedAt   *time.Time   `json:"startedAt,omitempty"` // optional timestamps
-	FinishedAt  *time.Time   `json:"finishedAt,omitempty"`
-	ElapsedMs   int64        `json:"elapsedMs,omitempty"` // total elapsed time for submission
+	Status          string       `json:"status"`              // Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
+	Passed          int          `json:"passed"`              // number of tests passed
+	PassedCount     int          `json:"passedCount"`         // alias for UI-facing pass count
+	Total           int          `json:"total"`               // total tests executed
+	TotalCount      int          `json:"totalCount"`          // alias for UI-facing total count
+	FirstFailedTest int          `json:"firstFailedTest"`     // 1-based index of first failed test, or -1 if all passed
+	Details         []TestResult `json:"details,omitempty"`   // per-test details
+	Stdout          string       `json:"stdout,omitempty"`    // aggregated stdout (if any)
+	Stderr          string       `json:"stderr,omitempty"`    // aggregated stderr (if any)
+	StartedAt       *time.Time   `json:"startedAt,omitempty"` // optional timestamps
+	FinishedAt      *time.Time   `json:"finishedAt,omitempty"`
+	ElapsedMs       int64        `json:"elapsedMs,omitempty"` // total elapsed time for submission
 }
 
 // NewSubmissionResult creates a new, empty SubmissionResult with a default status.
 func NewSubmissionResult() *SubmissionResult {
 	return &SubmissionResult{
-		Status:      SubmissionStatusAccepted,
-		Passed:      0,
-		PassedCount: 0,
-		Total:       0,
-		TotalCount:  0,
-		Details:     make([]TestResult, 0),
+		Status:          SubmissionStatusAccepted,
+		Passed:          0,
+		PassedCount:     0,
+		Total:           0,
+		TotalCount:      0,
+		FirstFailedTest: -1,
+		Details:         make([]TestResult, 0),
 	}
 }
 
@@ -66,6 +68,9 @@ func (sr *SubmissionResult) AddTestResult(tr TestResult) {
 		sr.Passed++
 	}
 	sr.PassedCount = sr.Passed
+	if !tr.Ok && sr.FirstFailedTest == -1 {
+		sr.FirstFailedTest = tr.Test
+	}
 	sr.UpdateStatus()
 }
 
@@ -87,6 +92,19 @@ func (sr *SubmissionResult) NormalizeCounts() {
 		sr.TotalCount = sr.Total
 	case sr.Total == 0 && sr.TotalCount != 0:
 		sr.Total = sr.TotalCount
+	}
+
+	sr.FirstFailedTest = -1
+	for i, detail := range sr.Details {
+		if detail.Ok {
+			continue
+		}
+		if detail.Test > 0 {
+			sr.FirstFailedTest = detail.Test
+		} else {
+			sr.FirstFailedTest = i + 1
+		}
+		break
 	}
 
 	sr.UpdateStatus()

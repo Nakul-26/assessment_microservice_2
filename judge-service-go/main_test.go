@@ -81,6 +81,9 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 	if result.PassedCount != 1 || result.TotalCount != 2 {
 		t.Fatalf("unexpected count aliases: passedCount=%d totalCount=%d", result.PassedCount, result.TotalCount)
 	}
+	if result.FirstFailedTest != 2 {
+		t.Fatalf("expected first failed test 2, got %d", result.FirstFailedTest)
+	}
 	if result.Details[1].Error != "Runtime Error" {
 		t.Fatalf("expected runtime error for second test, got %+v", result.Details[1])
 	}
@@ -111,6 +114,9 @@ func TestAppendMissingBatchedResultsMarksRemainingFailed(t *testing.T) {
 	if result.Details[1].Error != "Runtime Error" || result.Details[2].Error != "Runtime Error" {
 		t.Fatalf("expected remaining tests marked failed, got %+v", result.Details)
 	}
+	if result.FirstFailedTest != 2 {
+		t.Fatalf("expected first failed test 2, got %d", result.FirstFailedTest)
+	}
 }
 
 func TestTestResultJSONIncludesTimeMsWhenZero(t *testing.T) {
@@ -140,6 +146,9 @@ func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
 	if !strings.Contains(jsonStr, "\"totalCount\":2") {
 		t.Fatalf("expected totalCount in json payload, got %s", jsonStr)
 	}
+	if !strings.Contains(jsonStr, "\"firstFailedTest\":2") {
+		t.Fatalf("expected firstFailedTest in json payload, got %s", jsonStr)
+	}
 	if !strings.Contains(jsonStr, "\"status\":\"Wrong Answer\"") {
 		t.Fatalf("expected Wrong Answer status in json payload, got %s", jsonStr)
 	}
@@ -147,9 +156,10 @@ func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
 
 func TestSubmissionResultUpdateStatusPriority(t *testing.T) {
 	tests := []struct {
-		name    string
-		details []models.TestResult
-		want    string
+		name            string
+		details         []models.TestResult
+		want            string
+		wantFirstFailed int
 	}{
 		{
 			name: "accepted",
@@ -157,7 +167,8 @@ func TestSubmissionResultUpdateStatusPriority(t *testing.T) {
 				{Test: 1, Ok: true},
 				{Test: 2, Ok: true},
 			},
-			want: models.SubmissionStatusAccepted,
+			want:            models.SubmissionStatusAccepted,
+			wantFirstFailed: -1,
 		},
 		{
 			name: "wrong answer",
@@ -165,7 +176,8 @@ func TestSubmissionResultUpdateStatusPriority(t *testing.T) {
 				{Test: 1, Ok: true},
 				{Test: 2, Ok: false},
 			},
-			want: models.SubmissionStatusWrongAnswer,
+			want:            models.SubmissionStatusWrongAnswer,
+			wantFirstFailed: 2,
 		},
 		{
 			name: "runtime error overrides wrong answer",
@@ -173,7 +185,8 @@ func TestSubmissionResultUpdateStatusPriority(t *testing.T) {
 				{Test: 1, Ok: false},
 				{Test: 2, Ok: false, Error: models.SubmissionStatusRuntimeError},
 			},
-			want: models.SubmissionStatusRuntimeError,
+			want:            models.SubmissionStatusRuntimeError,
+			wantFirstFailed: 1,
 		},
 		{
 			name: "timeout overrides runtime error",
@@ -181,7 +194,8 @@ func TestSubmissionResultUpdateStatusPriority(t *testing.T) {
 				{Test: 1, Ok: false, Error: models.SubmissionStatusRuntimeError},
 				{Test: 2, Ok: false, Error: models.SubmissionStatusTimeLimitExceeded},
 			},
-			want: models.SubmissionStatusTimeLimitExceeded,
+			want:            models.SubmissionStatusTimeLimitExceeded,
+			wantFirstFailed: 1,
 		},
 	}
 
@@ -193,6 +207,9 @@ func TestSubmissionResultUpdateStatusPriority(t *testing.T) {
 			}
 			if result.Status != tt.want {
 				t.Fatalf("expected status %q, got %q", tt.want, result.Status)
+			}
+			if result.FirstFailedTest != tt.wantFirstFailed {
+				t.Fatalf("expected firstFailedTest %d, got %d", tt.wantFirstFailed, result.FirstFailedTest)
 			}
 		})
 	}
@@ -206,6 +223,9 @@ func TestSubmissionResultUnmarshalBackfillsCountAliases(t *testing.T) {
 	if result.PassedCount != 2 || result.TotalCount != 3 {
 		t.Fatalf("expected count aliases from legacy fields, got passedCount=%d totalCount=%d", result.PassedCount, result.TotalCount)
 	}
+	if result.FirstFailedTest != -1 {
+		t.Fatalf("expected firstFailedTest default -1 for no details, got %d", result.FirstFailedTest)
+	}
 
 	var aliasOnly models.SubmissionResult
 	if err := json.Unmarshal([]byte(`{"status":"finished","passedCount":4,"totalCount":5}`), &aliasOnly); err != nil {
@@ -213,5 +233,25 @@ func TestSubmissionResultUnmarshalBackfillsCountAliases(t *testing.T) {
 	}
 	if aliasOnly.Passed != 4 || aliasOnly.Total != 5 {
 		t.Fatalf("expected legacy fields backfilled from aliases, got passed=%d total=%d", aliasOnly.Passed, aliasOnly.Total)
+	}
+	if aliasOnly.FirstFailedTest != -1 {
+		t.Fatalf("expected firstFailedTest default -1 for alias-only payload, got %d", aliasOnly.FirstFailedTest)
+	}
+}
+
+func TestSubmissionResultNormalizeCountsDerivesFirstFailedFromDetails(t *testing.T) {
+	result := models.SubmissionResult{
+		Status: models.SubmissionStatusAccepted,
+		Details: []models.TestResult{
+			{Ok: true},
+			{Ok: false},
+			{Test: 3, Ok: false},
+		},
+	}
+
+	result.NormalizeCounts()
+
+	if result.FirstFailedTest != 2 {
+		t.Fatalf("expected first failed fallback index 2, got %d", result.FirstFailedTest)
 	}
 }
