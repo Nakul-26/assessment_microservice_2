@@ -36,6 +36,7 @@ type SubmissionResult struct {
 	PassedCount     int          `json:"passedCount"`         // alias for UI-facing pass count
 	Total           int          `json:"total"`               // total tests executed
 	TotalCount      int          `json:"totalCount"`          // alias for UI-facing total count
+	MaxTimeMs       int64        `json:"maxTimeMs"`           // slowest per-test execution time in milliseconds
 	FirstFailedTest int          `json:"firstFailedTest"`     // 1-based index of first failed test, or -1 if all passed
 	Details         []TestResult `json:"details,omitempty"`   // per-test details
 	Stdout          string       `json:"stdout,omitempty"`    // aggregated stdout (if any)
@@ -64,6 +65,9 @@ func (sr *SubmissionResult) AddTestResult(tr TestResult) {
 	sr.Details = append(sr.Details, tr)
 	sr.Total++
 	sr.TotalCount = sr.Total
+	if tr.TimeMs > sr.MaxTimeMs {
+		sr.MaxTimeMs = tr.TimeMs
+	}
 	if tr.Ok {
 		sr.Passed++
 	}
@@ -94,8 +98,12 @@ func (sr *SubmissionResult) NormalizeCounts() {
 		sr.Total = sr.TotalCount
 	}
 
+	sr.MaxTimeMs = 0
 	sr.FirstFailedTest = -1
 	for i, detail := range sr.Details {
+		if detail.TimeMs > sr.MaxTimeMs {
+			sr.MaxTimeMs = detail.TimeMs
+		}
 		if detail.Ok {
 			continue
 		}

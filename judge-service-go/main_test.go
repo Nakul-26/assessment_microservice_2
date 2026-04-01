@@ -93,6 +93,9 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 	if result.Details[0].TimeMs < 0 || result.Details[1].TimeMs < 0 {
 		t.Fatalf("expected non-negative timeMs for batched tests, got %+v", result.Details)
 	}
+	if result.MaxTimeMs < 0 {
+		t.Fatalf("expected non-negative maxTimeMs for batched tests, got %d", result.MaxTimeMs)
+	}
 }
 
 func TestAppendMissingBatchedResultsMarksRemainingFailed(t *testing.T) {
@@ -131,8 +134,8 @@ func TestTestResultJSONIncludesTimeMsWhenZero(t *testing.T) {
 
 func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
 	result := models.NewSubmissionResult()
-	result.AddTestResult(models.TestResult{Test: 1, Ok: true})
-	result.AddTestResult(models.TestResult{Test: 2, Ok: false})
+	result.AddTestResult(models.TestResult{Test: 1, Ok: true, TimeMs: 7})
+	result.AddTestResult(models.TestResult{Test: 2, Ok: false, TimeMs: 12})
 
 	payload, err := result.ToJSON()
 	if err != nil {
@@ -151,6 +154,9 @@ func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
 	}
 	if !strings.Contains(jsonStr, "\"status\":\"Wrong Answer\"") {
 		t.Fatalf("expected Wrong Answer status in json payload, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, "\"maxTimeMs\":12") {
+		t.Fatalf("expected maxTimeMs in json payload, got %s", jsonStr)
 	}
 }
 
@@ -243,9 +249,9 @@ func TestSubmissionResultNormalizeCountsDerivesFirstFailedFromDetails(t *testing
 	result := models.SubmissionResult{
 		Status: models.SubmissionStatusAccepted,
 		Details: []models.TestResult{
-			{Ok: true},
-			{Ok: false},
-			{Test: 3, Ok: false},
+			{Ok: true, TimeMs: 4},
+			{Ok: false, TimeMs: 9},
+			{Test: 3, Ok: false, TimeMs: 7},
 		},
 	}
 
@@ -253,5 +259,8 @@ func TestSubmissionResultNormalizeCountsDerivesFirstFailedFromDetails(t *testing
 
 	if result.FirstFailedTest != 2 {
 		t.Fatalf("expected first failed fallback index 2, got %d", result.FirstFailedTest)
+	}
+	if result.MaxTimeMs != 9 {
+		t.Fatalf("expected maxTimeMs 9, got %d", result.MaxTimeMs)
 	}
 }
