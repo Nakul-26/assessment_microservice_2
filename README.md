@@ -57,3 +57,9 @@ Once everything is running, you can access the services at the following locatio
 
 - **Frontend**: [http://localhost:5173](http://localhost:5173)
 - **API**: [http://localhost:3000](http://localhost:3000)
+
+
+# for clean up:
+- docker system prune -a --volumes -f
+- docker builder prune -a -f
+- docker rm -f $(docker ps -aq)

@@ -111,8 +111,11 @@ function twoSum(nums, target) {
 	if result.Status != models.SubmissionStatusAccepted {
 		t.Fatalf("expected status %q, got %q", models.SubmissionStatusAccepted, result.Status)
 	}
-	if !result.Details[0].Ok {
+	if !result.Details[0].Passed || !result.Details[0].Ok {
 		t.Fatalf("expected test to pass, detail=%+v", result.Details[0])
+	}
+	if result.Details[0].ErrorType != "" {
+		t.Fatalf("expected empty errorType for passing test, detail=%+v", result.Details[0])
 	}
 	if result.Details[0].TimeMs < 0 {
 		t.Fatalf("expected non-negative timeMs, detail=%+v", result.Details[0])
@@ -136,8 +139,11 @@ function twoSum(nums, target) {
 	if result.Status != models.SubmissionStatusWrongAnswer {
 		t.Fatalf("expected status %q, got %q", models.SubmissionStatusWrongAnswer, result.Status)
 	}
-	if result.Details[0].Ok {
+	if result.Details[0].Passed || result.Details[0].Ok {
 		t.Fatalf("expected test to fail, detail=%+v", result.Details[0])
+	}
+	if result.Details[0].ErrorType != models.ErrorTypeWrongAnswer {
+		t.Fatalf("expected wrong_answer errorType, detail=%+v", result.Details[0])
 	}
 }
 
@@ -154,6 +160,9 @@ function twoSum(nums, target) {
 	result := runCentralJSOnce(t, exec, pc, lang, problem, code)
 	if result.Details[0].Error != "Runtime Error" {
 		t.Fatalf("expected Runtime Error, got %q", result.Details[0].Error)
+	}
+	if result.Details[0].ErrorType != models.ErrorTypeRuntime {
+		t.Fatalf("expected runtime errorType, detail=%+v", result.Details[0])
 	}
 	if result.Status != models.SubmissionStatusRuntimeError {
 		t.Fatalf("expected status %q, got %q", models.SubmissionStatusRuntimeError, result.Status)
@@ -178,6 +187,9 @@ function twoSum(nums, target) {
 	if result.Details[0].Error != "Time Limit Exceeded" {
 		t.Fatalf("expected Time Limit Exceeded, got %q detail=%+v", result.Details[0].Error, result.Details[0])
 	}
+	if result.Details[0].ErrorType != models.ErrorTypeTimeout {
+		t.Fatalf("expected timeout errorType, detail=%+v", result.Details[0])
+	}
 	if result.Status != models.SubmissionStatusTimeLimitExceeded {
 		t.Fatalf("expected status %q, got %q", models.SubmissionStatusTimeLimitExceeded, result.Status)
 	}
@@ -197,6 +209,9 @@ function twoSum(nums, target) {
 	result := runCentralJSOnce(t, exec, pc, lang, problem, code)
 	if result.Details[0].Error != "Output Limit Exceeded" {
 		t.Fatalf("expected Output Limit Exceeded, got %q detail=%+v", result.Details[0].Error, result.Details[0])
+	}
+	if result.Details[0].ErrorType != models.ErrorTypeWrongAnswer {
+		t.Fatalf("expected wrong_answer errorType, detail=%+v", result.Details[0])
 	}
 	if result.Status != models.SubmissionStatusWrongAnswer {
 		t.Fatalf("expected status %q, got %q", models.SubmissionStatusWrongAnswer, result.Status)

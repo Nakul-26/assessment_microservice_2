@@ -87,6 +87,15 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 	if result.Details[1].Error != "Runtime Error" {
 		t.Fatalf("expected runtime error for second test, got %+v", result.Details[1])
 	}
+	if result.Details[0].Passed != result.Details[0].Ok || result.Details[1].Passed != result.Details[1].Ok {
+		t.Fatalf("expected passed/ok aliases kept in sync, got %+v", result.Details)
+	}
+	if result.Details[0].ErrorType != "" {
+		t.Fatalf("expected empty errorType for passing test, got %+v", result.Details[0])
+	}
+	if result.Details[1].ErrorType != models.ErrorTypeRuntime {
+		t.Fatalf("expected runtime errorType for second test, got %+v", result.Details[1])
+	}
 	if result.Status != models.SubmissionStatusRuntimeError {
 		t.Fatalf("expected overall status %q, got %q", models.SubmissionStatusRuntimeError, result.Status)
 	}
@@ -117,18 +126,75 @@ func TestAppendMissingBatchedResultsMarksRemainingFailed(t *testing.T) {
 	if result.Details[1].Error != "Runtime Error" || result.Details[2].Error != "Runtime Error" {
 		t.Fatalf("expected remaining tests marked failed, got %+v", result.Details)
 	}
+	if result.Details[1].ErrorType != models.ErrorTypeRuntime || result.Details[2].ErrorType != models.ErrorTypeRuntime {
+		t.Fatalf("expected remaining tests marked runtime errorType, got %+v", result.Details)
+	}
 	if result.FirstFailedTest != 2 {
 		t.Fatalf("expected first failed test 2, got %d", result.FirstFailedTest)
 	}
 }
 
 func TestTestResultJSONIncludesTimeMsWhenZero(t *testing.T) {
-	payload, err := json.Marshal(models.TestResult{Test: 1, Ok: true, TimeMs: 0})
+	tr := models.TestResult{Test: 1, Passed: true, Ok: true, TimeMs: 0}
+	tr.Normalize()
+	payload, err := json.Marshal(tr)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
 	if !strings.Contains(string(payload), "\"timeMs\":0") {
 		t.Fatalf("expected timeMs in json payload, got %s", payload)
+	}
+	if !strings.Contains(string(payload), "\"passed\":true") {
+		t.Fatalf("expected passed in json payload, got %s", payload)
+	}
+	if strings.Contains(string(payload), "\"errorType\"") {
+		t.Fatalf("expected passed test payload to omit errorType, got %s", payload)
+	}
+}
+
+func TestTestResultNormalizeBackfillsErrorType(t *testing.T) {
+	tests := []struct {
+		name          string
+		tr            models.TestResult
+		wantPassed    bool
+		wantErrorType string
+	}{
+		{
+			name:          "passed test clears error type",
+			tr:            models.TestResult{Ok: true, Error: models.SubmissionStatusRuntimeError},
+			wantPassed:    true,
+			wantErrorType: "",
+		},
+		{
+			name:          "runtime from legacy error",
+			tr:            models.TestResult{Error: models.SubmissionStatusRuntimeError},
+			wantPassed:    false,
+			wantErrorType: models.ErrorTypeRuntime,
+		},
+		{
+			name:          "timeout from legacy error",
+			tr:            models.TestResult{Error: models.SubmissionStatusTimeLimitExceeded},
+			wantPassed:    false,
+			wantErrorType: models.ErrorTypeTimeout,
+		},
+		{
+			name:          "wrong answer default",
+			tr:            models.TestResult{},
+			wantPassed:    false,
+			wantErrorType: models.ErrorTypeWrongAnswer,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.tr.Normalize()
+			if tt.tr.Passed != tt.wantPassed || tt.tr.Ok != tt.wantPassed {
+				t.Fatalf("expected passed/ok=%v, got %+v", tt.wantPassed, tt.tr)
+			}
+			if tt.tr.ErrorType != tt.wantErrorType {
+				t.Fatalf("expected errorType %q, got %+v", tt.wantErrorType, tt.tr)
+			}
+		})
 	}
 }
 

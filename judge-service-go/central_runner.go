@@ -81,7 +81,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		payload := map[string]interface{}{"inputs": tc.Input}
 		inputJSON, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
-			tr.Ok = false
+			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
 			tr.Error = fmt.Sprintf("failed to marshal test input: %v", marshalErr)
 			tr.TimeMs = time.Since(testStart).Milliseconds()
 			result.AddTestResult(tr)
@@ -110,12 +110,11 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		tr.Stdout = stdoutForResult
 
 		if runErr != nil {
-			tr.Ok = false
 			runErrText := strings.ToLower(runErr.Error())
 			if strings.Contains(runErrText, "timed out") || strings.Contains(runErrText, "deadline exceeded") {
-				tr.Error = "Time Limit Exceeded"
+				markTestFailed(&tr, models.SubmissionStatusTimeLimitExceeded)
 			} else {
-				tr.Error = "Runtime Error"
+				markTestFailed(&tr, models.SubmissionStatusRuntimeError)
 			}
 			log.Printf("[submission=%s test=%d] runtime error: %v", submissionMsg.SubmissionID, i+1, runErr)
 			if stderrForLog != "" {
@@ -127,7 +126,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		}
 
 		if stdoutTruncated {
-			tr.Ok = false
+			markTestFailed(&tr, models.SubmissionStatusWrongAnswer)
 			tr.Error = "Output Limit Exceeded"
 			tr.TimeMs = time.Since(testStart).Milliseconds()
 			result.AddTestResult(tr)
@@ -136,8 +135,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 
 		out, parseErr := parseSingleTestOutput(stdoutTrimmed)
 		if parseErr != nil {
-			tr.Ok = false
-			tr.Error = "Runtime Error"
+			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
 			tr.TimeMs = time.Since(testStart).Milliseconds()
 			log.Printf("[submission=%s test=%d] invalid wrapper output: %v | stdout=%q", submissionMsg.SubmissionID, i+1, parseErr, stdoutForResult)
 			result.AddTestResult(tr)
@@ -145,8 +143,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		}
 
 		if out.Error != "" {
-			tr.Ok = false
-			tr.Error = "Runtime Error"
+			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
 			if out.Traceback != "" {
 				tracebackForLog, tbTruncated := truncateString(out.Traceback, maxLogOutputBytes)
 				log.Printf("[submission=%s test=%d] wrapper traceback%s: %s", submissionMsg.SubmissionID, i+1, map[bool]string{true: " (truncated)", false: ""}[tbTruncated], tracebackForLog)
@@ -157,7 +154,11 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		}
 
 		tr.Output = out.Output
-		tr.Ok = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
+		tr.Passed = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
+		tr.Ok = tr.Passed
+		if !tr.Passed {
+			tr.ErrorType = models.ErrorTypeWrongAnswer
+		}
 		tr.TimeMs = time.Since(testStart).Milliseconds()
 		result.AddTestResult(tr)
 	}
@@ -305,10 +306,13 @@ func appendBatchedResults(result *models.SubmissionResult, stdout io.Reader, pro
 			Output:   out.Output,
 		}
 		if out.Error != "" {
-			tr.Ok = false
-			tr.Error = "Runtime Error"
+			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
 		} else {
-			tr.Ok = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
+			tr.Passed = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
+			tr.Ok = tr.Passed
+			if !tr.Passed {
+				tr.ErrorType = models.ErrorTypeWrongAnswer
+			}
 		}
 		tr.TimeMs = time.Since(testStart).Milliseconds()
 		result.AddTestResult(tr)
@@ -318,12 +322,27 @@ func appendBatchedResults(result *models.SubmissionResult, stdout io.Reader, pro
 
 func appendMissingBatchedResults(result *models.SubmissionResult, problem models.Problem, processed int, reason string) {
 	for i := processed; i < len(problem.TestCases); i++ {
-		result.AddTestResult(models.TestResult{
+		tr := models.TestResult{
 			Test:     i + 1,
 			Expected: problem.TestCases[i].Expected,
-			Ok:       false,
-			Error:    reason,
-		})
+		}
+		markTestFailed(&tr, reason)
+		result.AddTestResult(tr)
+	}
+}
+
+func markTestFailed(tr *models.TestResult, reason string) {
+	tr.Passed = false
+	tr.Ok = false
+	switch reason {
+	case models.SubmissionStatusTimeLimitExceeded:
+		tr.Error = models.SubmissionStatusTimeLimitExceeded
+		tr.ErrorType = models.ErrorTypeTimeout
+	case models.SubmissionStatusRuntimeError:
+		tr.Error = models.SubmissionStatusRuntimeError
+		tr.ErrorType = models.ErrorTypeRuntime
+	default:
+		tr.ErrorType = models.ErrorTypeWrongAnswer
 	}
 }
 

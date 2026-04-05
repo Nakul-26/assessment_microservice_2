@@ -10,15 +10,20 @@ const (
 	SubmissionStatusWrongAnswer       = "Wrong Answer"
 	SubmissionStatusRuntimeError      = "Runtime Error"
 	SubmissionStatusTimeLimitExceeded = "Time Limit Exceeded"
+	ErrorTypeTimeout                  = "timeout"
+	ErrorTypeRuntime                  = "runtime"
+	ErrorTypeWrongAnswer              = "wrong_answer"
 )
 
 // TestResult represents the result of a single test case.
 type TestResult struct {
 	Test      int         `json:"test"`                // test index (0-based)
-	Ok        bool        `json:"ok"`                  // whether test passed
+	Passed    bool        `json:"passed"`              // whether test passed
+	Ok        bool        `json:"ok,omitempty"`        // legacy alias for whether test passed
 	Output    interface{} `json:"output,omitempty"`    // actual output returned by user code
 	Expected  interface{} `json:"expected,omitempty"`  // expected output (useful for UI diffs)
 	Error     string      `json:"error,omitempty"`     // short error message, if any
+	ErrorType string      `json:"errorType,omitempty"` // timeout / runtime / wrong_answer
 	Stack     string      `json:"stack,omitempty"`     // optional stack trace (for languages that produce it)
 	Traceback string      `json:"traceback,omitempty"` // python-style traceback or similar
 	Stdout    string      `json:"stdout,omitempty"`    // captured stdout for this test
@@ -62,17 +67,18 @@ func NewSubmissionResult() *SubmissionResult {
 // AddTestResult appends a TestResult and updates Passed/Total counters.
 // Use this to avoid off-by-one issues when building results.
 func (sr *SubmissionResult) AddTestResult(tr TestResult) {
+	tr.Normalize()
 	sr.Details = append(sr.Details, tr)
 	sr.Total++
 	sr.TotalCount = sr.Total
 	if tr.TimeMs > sr.MaxTimeMs {
 		sr.MaxTimeMs = tr.TimeMs
 	}
-	if tr.Ok {
+	if tr.Passed {
 		sr.Passed++
 	}
 	sr.PassedCount = sr.Passed
-	if !tr.Ok && sr.FirstFailedTest == -1 {
+	if !tr.Passed && sr.FirstFailedTest == -1 {
 		sr.FirstFailedTest = tr.Test
 	}
 	sr.UpdateStatus()
@@ -101,10 +107,12 @@ func (sr *SubmissionResult) NormalizeCounts() {
 	sr.MaxTimeMs = 0
 	sr.FirstFailedTest = -1
 	for i, detail := range sr.Details {
+		detail.Normalize()
+		sr.Details[i] = detail
 		if detail.TimeMs > sr.MaxTimeMs {
 			sr.MaxTimeMs = detail.TimeMs
 		}
-		if detail.Ok {
+		if detail.Passed {
 			continue
 		}
 		if detail.Test > 0 {
@@ -126,11 +134,11 @@ func (sr *SubmissionResult) UpdateStatus() {
 
 	hasRuntimeError := false
 	for _, detail := range sr.Details {
-		switch detail.Error {
-		case SubmissionStatusTimeLimitExceeded:
+		switch detail.ErrorType {
+		case ErrorTypeTimeout:
 			sr.Status = SubmissionStatusTimeLimitExceeded
 			return
-		case SubmissionStatusRuntimeError:
+		case ErrorTypeRuntime:
 			hasRuntimeError = true
 		}
 	}
@@ -165,4 +173,36 @@ func (sr *SubmissionResult) UnmarshalJSON(data []byte) error {
 	*sr = SubmissionResult(aux)
 	sr.NormalizeCounts()
 	return nil
+}
+
+// Normalize keeps result aliases and derived fields in sync.
+func (tr *TestResult) Normalize() {
+	if tr == nil {
+		return
+	}
+
+	switch {
+	case tr.Passed && !tr.Ok:
+		tr.Ok = true
+	case tr.Ok && !tr.Passed:
+		tr.Passed = true
+	}
+
+	if tr.Passed {
+		tr.ErrorType = ""
+		return
+	}
+
+	if tr.ErrorType != "" {
+		return
+	}
+
+	switch tr.Error {
+	case SubmissionStatusTimeLimitExceeded:
+		tr.ErrorType = ErrorTypeTimeout
+	case SubmissionStatusRuntimeError:
+		tr.ErrorType = ErrorTypeRuntime
+	default:
+		tr.ErrorType = ErrorTypeWrongAnswer
+	}
 }
