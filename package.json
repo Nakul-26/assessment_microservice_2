@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test:submission": "node scripts/test_submission.js"
+  },
   "dependencies": {
     "amqplib": "^0.10.9",
     "mongoose": "^8.19.1"

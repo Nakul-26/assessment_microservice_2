@@ -10,6 +10,10 @@ const (
 	SubmissionStatusWrongAnswer       = "Wrong Answer"
 	SubmissionStatusRuntimeError      = "Runtime Error"
 	SubmissionStatusTimeLimitExceeded = "Time Limit Exceeded"
+	ExecutionPathCentral              = "central"
+	ExecutionPathLegacy               = "legacy"
+	InternalErrorJudge                = "judge_error"
+	InternalErrorWrapper              = "wrapper_error"
 	ErrorTypeTimeout                  = "timeout"
 	ErrorTypeRuntime                  = "runtime"
 	ErrorTypeWrongAnswer              = "wrong_answer"
@@ -36,7 +40,9 @@ type TestResult struct {
 
 // SubmissionResult represents the overall result of a submission.
 type SubmissionResult struct {
-	Status          string       `json:"status"`              // Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
+	Status          string       `json:"status"` // Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
+	ExecutionPath   string       `json:"executionPath,omitempty"`
+	InternalError   string       `json:"internalError,omitempty"`
 	Passed          int          `json:"passed"`              // number of tests passed
 	PassedCount     int          `json:"passedCount"`         // alias for UI-facing pass count
 	Total           int          `json:"total"`               // total tests executed
@@ -55,6 +61,8 @@ type SubmissionResult struct {
 func NewSubmissionResult() *SubmissionResult {
 	return &SubmissionResult{
 		Status:          SubmissionStatusAccepted,
+		ExecutionPath:   "",
+		InternalError:   "",
 		Passed:          0,
 		PassedCount:     0,
 		Total:           0,

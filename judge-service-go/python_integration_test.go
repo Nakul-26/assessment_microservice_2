@@ -107,6 +107,12 @@ def twoSum(nums, target):
 	if result.Status != models.SubmissionStatusAccepted {
 		t.Fatalf("expected status %q, got %q", models.SubmissionStatusAccepted, result.Status)
 	}
+	if result.ExecutionPath != models.ExecutionPathCentral {
+		t.Fatalf("expected central executionPath, got %+v", result)
+	}
+	if result.InternalError != "" {
+		t.Fatalf("expected empty internalError for user-success path, got %+v", result)
+	}
 	if !result.Details[0].Passed || !result.Details[0].Ok {
 		t.Fatalf("expected test to pass, detail=%+v", result.Details[0])
 	}

@@ -9,6 +9,11 @@ type LanguageAdapter interface {
 	RunCommand(inputB64 string) []string
 }
 
+type CompilingLanguageAdapter interface {
+	LanguageAdapter
+	CompileCommand() []string
+}
+
 type BatchLanguageAdapter interface {
 	LanguageAdapter
 	PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage) ([]string, error)
@@ -18,6 +23,7 @@ type BatchLanguageAdapter interface {
 var AdapterRegistry = map[string]LanguageAdapter{
 	"python":     PythonAdapter{},
 	"javascript": JavaScriptAdapter{},
+	"java":       JavaAdapter{},
 }
 
 func GetAdapter(language string) (LanguageAdapter, bool) {

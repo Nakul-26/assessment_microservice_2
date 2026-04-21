@@ -375,6 +375,26 @@ func (e *Executor) RunInContainer(ctx context.Context, containerID string, files
 	return runStdout, runStderr, nil
 }
 
+func (e *Executor) CompileInContainer(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, timeout time.Duration) (string, string, error) {
+	submissionTimeout := timeout * 3
+	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
+	defer cancel()
+
+	if err := e.copyFilesToContainer(containerID, hostWorkDir, containerWorkDir, files); err != nil {
+		return "", "", err
+	}
+
+	compileStdout, compileStderr, exitCode, err := e.runExecWithTimeout(subCtx, containerID, containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
+	if err != nil {
+		return compileStdout, compileStderr, fmt.Errorf("compilation command failed: %w", err)
+	}
+	if exitCode != 0 {
+		return compileStdout, compileStderr, fmt.Errorf("compilation failed with exit code %d", exitCode)
+	}
+
+	return compileStdout, compileStderr, nil
+}
+
 func (e *Executor) RunInContainerStream(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, timeout time.Duration) (*ExecStream, error) {
 	submissionTimeout := timeout * 3
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)

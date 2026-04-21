@@ -38,6 +38,7 @@ const (
 	defaultSandboxTimeout   = 5 * time.Second
 	centralComparePythonEnv = "JUDGE_CENTRAL_COMPARE_PY"
 	centralCompareJSEnv     = "JUDGE_CENTRAL_COMPARE_JS"
+	centralCompareJavaEnv   = "JUDGE_CENTRAL_COMPARE_JAVA"
 	maxTestOutputBytes      = 64 * 1024
 	maxLogOutputBytes       = 4 * 1024
 	maxTestsBytes           = 1 << 20 // 1MB
@@ -234,7 +235,31 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 }
 
 // processAndStoreResults processes the executor output and updates the database and cache.
-func processAndStoreResults(ctx context.Context, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, redisClient *redis.Client) {
+func fallbackResultForExecutionFailure(executionPath string, execErr error, stdout string) *models.SubmissionResult {
+	result := models.NewSubmissionResult()
+	result.ExecutionPath = executionPath
+	result.Status = models.SubmissionStatusRuntimeError
+
+	if stdout != "" {
+		result.InternalError = models.InternalErrorJudge
+		return result
+	}
+
+	if execErr != nil {
+		errText := strings.ToLower(execErr.Error())
+		if strings.Contains(errText, "compilation failed") || strings.Contains(errText, "compilation command failed") {
+			return result
+		}
+		if strings.Contains(errText, "timed out") || strings.Contains(errText, "deadline exceeded") {
+			return result
+		}
+	}
+
+	result.InternalError = models.InternalErrorWrapper
+	return result
+}
+
+func processAndStoreResults(ctx context.Context, executionPath string, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, redisClient *redis.Client) {
 	var result models.SubmissionResult
 	submissionStatus := models.StatusError
 	submissionOutput := stderr
@@ -243,6 +268,7 @@ func processAndStoreResults(ctx context.Context, stdout, stderr string, execErr 
 	if stdout != "" {
 		if err := json.Unmarshal([]byte(stdout), &result); err == nil {
 			submissionTestResult = &result
+			submissionTestResult.ExecutionPath = executionPath
 			result.NormalizeCounts()
 			switch result.Status {
 			case models.SubmissionStatusAccepted:
@@ -257,12 +283,14 @@ func processAndStoreResults(ctx context.Context, stdout, stderr string, execErr 
 			submissionOutput = stdout
 		} else {
 			log.Printf("[submission=%s] Error unmarshalling stdout to result: %v, Stdout: %s", submissionMsg.SubmissionID, err, stdout)
+			submissionTestResult = fallbackResultForExecutionFailure(executionPath, execErr, stdout)
 			submissionOutput = fmt.Sprintf("Invalid judge output: %v\nStdout: %s", err, stdout)
 			if execErr != nil {
 				submissionOutput += fmt.Sprintf("\nExecution Error: %v\nStderr: %s", execErr, stderr)
 			}
 		}
 	} else if execErr != nil {
+		submissionTestResult = fallbackResultForExecutionFailure(executionPath, execErr, stdout)
 		submissionOutput = fmt.Sprintf("Execution Error: %v\nStderr: %s", execErr, stderr)
 	}
 
@@ -375,7 +403,7 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 			d.Nack(false, false)
 			return
 		}
-		processAndStoreResults(ctx, string(resultBytes), "", nil, submissionMsg, submissionsCollection, redisClient)
+		processAndStoreResults(ctx, models.ExecutionPathCentral, string(resultBytes), "", nil, submissionMsg, submissionsCollection, redisClient)
 
 		d.Ack(false)
 		return
@@ -416,7 +444,7 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 	)
 	log.Printf("Execution finished for submission %s. Stdout: %s, Stderr: %s, Error: %v", submissionMsg.SubmissionID, stdout, stderr, execErr)
 
-	processAndStoreResults(ctx, stdout, stderr, execErr, submissionMsg, submissionsCollection, redisClient)
+	processAndStoreResults(ctx, models.ExecutionPathLegacy, stdout, stderr, execErr, submissionMsg, submissionsCollection, redisClient)
 
 	d.Ack(false)
 }
@@ -424,9 +452,17 @@ func processSubmission(d amqp.Delivery, problemsCollection *mongo.Collection, su
 func isCentralCompareEnabled(language string) bool {
 	switch language {
 	case "python":
-		return isTruthyEnv(os.Getenv(centralComparePythonEnv))
+		if raw, ok := os.LookupEnv(centralComparePythonEnv); ok {
+			return isTruthyEnv(raw)
+		}
+		return true
 	case "javascript":
-		return isTruthyEnv(os.Getenv(centralCompareJSEnv))
+		if raw, ok := os.LookupEnv(centralCompareJSEnv); ok {
+			return isTruthyEnv(raw)
+		}
+		return true
+	case "java":
+		return isTruthyEnv(os.Getenv(centralCompareJavaEnv))
 	default:
 		return false
 	}

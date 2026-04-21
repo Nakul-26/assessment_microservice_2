@@ -26,6 +26,7 @@ import (
 const (
 	defaultPythonBatchThreshold     = 20
 	defaultJavaScriptBatchThreshold = 20
+	defaultJavaBatchThreshold       = 20
 )
 
 type batchedTestExecOutput struct {
@@ -61,7 +62,44 @@ func startedResult(problem models.Problem) *models.SubmissionResult {
 	started := time.Now().UTC()
 	result := models.NewSubmissionResult()
 	result.StartedAt = &started
+	result.ExecutionPath = models.ExecutionPathCentral
 	return result
+}
+
+func finalizeExecutionFailure(result *models.SubmissionResult, execErr error) *models.SubmissionResult {
+	failure := fallbackResultForExecutionFailure(models.ExecutionPathCentral, execErr, "")
+	result.Status = failure.Status
+	result.InternalError = failure.InternalError
+	result.Stderr = execErr.Error()
+	finished := time.Now().UTC()
+	result.FinishedAt = &finished
+	result.ElapsedMs = finished.Sub(*result.StartedAt).Milliseconds()
+	return result
+}
+
+func compileCentralSubmission(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionWorkspace *workspace.SubmissionWorkspace, adapter adapters.LanguageAdapter, files []string) error {
+	compilingAdapter, ok := adapter.(adapters.CompilingLanguageAdapter)
+	if !ok {
+		return nil
+	}
+
+	_, stderr, err := exec.CompileInContainer(
+		ctx,
+		pooledContainer.ID,
+		files,
+		submissionWorkspace.HostPath,
+		submissionWorkspace.ContainerPath,
+		compilingAdapter.CompileCommand(),
+		defaultSandboxTimeout,
+	)
+	if err != nil {
+		if strings.TrimSpace(stderr) != "" {
+			return fmt.Errorf("%w | stderr=%s", err, strings.TrimSpace(stderr))
+		}
+		return err
+	}
+
+	return nil
 }
 
 func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionMsg models.SubmissionMessage, problem models.Problem, adapter adapters.LanguageAdapter, submissionWorkspace *workspace.SubmissionWorkspace, result *models.SubmissionResult) (*models.SubmissionResult, error) {
@@ -69,6 +107,9 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 	baseFiles, err := adapter.PrepareFiles(submissionWorkspace.HostPath, submissionMsg)
 	if err != nil {
 		return nil, err
+	}
+	if err := compileCentralSubmission(ctx, exec, pooledContainer, submissionWorkspace, adapter, baseFiles); err != nil {
+		return finalizeExecutionFailure(result, err), nil
 	}
 
 	for i, tc := range problem.TestCases {
@@ -89,6 +130,9 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		}
 
 		filesToCopy := append([]string{}, baseFiles...)
+		if _, ok := adapter.(adapters.CompilingLanguageAdapter); ok {
+			filesToCopy = nil
+		}
 		inputB64 := base64.StdEncoding.EncodeToString(inputJSON)
 		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
 		stdout, stderr, runErr := exec.RunInContainer(
@@ -115,6 +159,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 				markTestFailed(&tr, models.SubmissionStatusTimeLimitExceeded)
 			} else {
 				markTestFailed(&tr, models.SubmissionStatusRuntimeError)
+				result.InternalError = models.InternalErrorWrapper
 			}
 			log.Printf("[submission=%s test=%d] runtime error: %v", submissionMsg.SubmissionID, i+1, runErr)
 			if stderrForLog != "" {
@@ -136,6 +181,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		out, parseErr := parseSingleTestOutput(stdoutTrimmed)
 		if parseErr != nil {
 			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
+			result.InternalError = models.InternalErrorJudge
 			tr.TimeMs = time.Since(testStart).Milliseconds()
 			log.Printf("[submission=%s test=%d] invalid wrapper output: %v | stdout=%q", submissionMsg.SubmissionID, i+1, parseErr, stdoutForResult)
 			result.AddTestResult(tr)
@@ -176,6 +222,9 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	if err != nil {
 		return nil, err
 	}
+	if err := compileCentralSubmission(ctx, exec, pooledContainer, submissionWorkspace, adapter, baseFiles); err != nil {
+		return finalizeExecutionFailure(result, err), nil
+	}
 
 	testsPayload := make([]map[string]interface{}, 0, len(problem.TestCases))
 	for _, tc := range problem.TestCases {
@@ -197,7 +246,12 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	stream, err := exec.RunInContainerStream(
 		runCtx,
 		pooledContainer.ID,
-		append([]string{}, baseFiles...),
+		func() []string {
+			if _, ok := adapter.(adapters.CompilingLanguageAdapter); ok {
+				return nil
+			}
+			return append([]string{}, baseFiles...)
+		}(),
 		submissionWorkspace.HostPath,
 		submissionWorkspace.ContainerPath,
 		nil,
@@ -246,11 +300,14 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 			remainingReason = "Time Limit Exceeded"
 		} else {
 			remainingReason = "Runtime Error"
+			result.InternalError = models.InternalErrorWrapper
 		}
 	case parseErr != nil:
 		remainingReason = "Runtime Error"
+		result.InternalError = models.InternalErrorJudge
 	case processed < len(problem.TestCases):
 		remainingReason = "Runtime Error"
+		result.InternalError = models.InternalErrorWrapper
 	}
 	if parseErr != nil {
 		log.Printf("[submission=%s] batched output parse error after %d tests: %v", submissionMsg.SubmissionID, processed, parseErr)
@@ -383,6 +440,13 @@ func shouldUseBatchedExecution(language string, testCount int) bool {
 	case "javascript":
 		threshold = defaultJavaScriptBatchThreshold
 		if raw := strings.TrimSpace(os.Getenv("JUDGE_BATCH_THRESHOLD_JS")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				threshold = parsed
+			}
+		}
+	case "java":
+		threshold = defaultJavaBatchThreshold
+		if raw := strings.TrimSpace(os.Getenv("JUDGE_BATCH_THRESHOLD_JAVA")); raw != "" {
 			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 				threshold = parsed
 			}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,140 @@ func TestPerTestTimeout_DefaultAndProblemValue(t *testing.T) {
 	if got := perTestTimeout(problem); got != 1500*time.Millisecond {
 		t.Fatalf("expected 1500ms timeout, got %v", got)
 	}
+}
+
+func TestStartedResultMarksCentralExecutionPath(t *testing.T) {
+	result := startedResult(models.Problem{})
+	if result.ExecutionPath != models.ExecutionPathCentral {
+		t.Fatalf("expected executionPath %q, got %+v", models.ExecutionPathCentral, result)
+	}
+	if result.InternalError != "" {
+		t.Fatalf("expected empty internalError, got %+v", result)
+	}
+	if result.StartedAt == nil {
+		t.Fatalf("expected startedAt to be set")
+	}
+}
+
+func TestFallbackResultForExecutionFailureClassification(t *testing.T) {
+	tests := []struct {
+		name         string
+		execErr      error
+		stdout       string
+		wantInternal string
+	}{
+		{
+			name:         "invalid judge output becomes judge error",
+			stdout:       "not-json",
+			wantInternal: models.InternalErrorJudge,
+		},
+		{
+			name:         "non-timeout exec error becomes wrapper error",
+			execErr:      errors.New("execution failed with exit code 2"),
+			wantInternal: models.InternalErrorWrapper,
+		},
+		{
+			name:         "timeout exec error is not internal",
+			execErr:      errors.New("execution timed out after 5s"),
+			wantInternal: "",
+		},
+		{
+			name:         "compilation failure is not internal",
+			execErr:      errors.New("compilation failed with exit code 1"),
+			wantInternal: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := fallbackResultForExecutionFailure(models.ExecutionPathLegacy, tt.execErr, tt.stdout)
+			if result.ExecutionPath != models.ExecutionPathLegacy {
+				t.Fatalf("expected legacy executionPath, got %+v", result)
+			}
+			if result.Status != models.SubmissionStatusRuntimeError {
+				t.Fatalf("expected runtime error status, got %+v", result)
+			}
+			if result.InternalError != tt.wantInternal {
+				t.Fatalf("expected internalError %q, got %+v", tt.wantInternal, result)
+			}
+		})
+	}
+}
+
+func TestIsCentralCompareEnabled_DefaultsAndOverrides(t *testing.T) {
+	t.Run("python defaults enabled", func(t *testing.T) {
+		restoreEnv(t, centralComparePythonEnv)
+		if err := os.Unsetenv(centralComparePythonEnv); err != nil {
+			t.Fatalf("unsetenv failed: %v", err)
+		}
+		if !isCentralCompareEnabled("python") {
+			t.Fatalf("expected python central compare enabled by default")
+		}
+	})
+
+	t.Run("javascript defaults enabled", func(t *testing.T) {
+		restoreEnv(t, centralCompareJSEnv)
+		if err := os.Unsetenv(centralCompareJSEnv); err != nil {
+			t.Fatalf("unsetenv failed: %v", err)
+		}
+		if !isCentralCompareEnabled("javascript") {
+			t.Fatalf("expected javascript central compare enabled by default")
+		}
+	})
+
+	t.Run("python explicit false disables", func(t *testing.T) {
+		t.Setenv(centralComparePythonEnv, "false")
+		if isCentralCompareEnabled("python") {
+			t.Fatalf("expected python central compare disabled when env=false")
+		}
+	})
+
+	t.Run("javascript explicit true enables", func(t *testing.T) {
+		t.Setenv(centralCompareJSEnv, "true")
+		if !isCentralCompareEnabled("javascript") {
+			t.Fatalf("expected javascript central compare enabled when env=true")
+		}
+	})
+
+	t.Run("unsupported language stays legacy", func(t *testing.T) {
+		if isCentralCompareEnabled("java") {
+			t.Fatalf("expected java to remain on legacy path")
+		}
+		if isCentralCompareEnabled("c") {
+			t.Fatalf("expected c to remain on legacy path")
+		}
+	})
+
+	t.Run("java explicit true enables", func(t *testing.T) {
+		t.Setenv(centralCompareJavaEnv, "true")
+		if !isCentralCompareEnabled("java") {
+			t.Fatalf("expected java central compare enabled when env=true")
+		}
+	})
+
+	t.Run("java explicit false disables", func(t *testing.T) {
+		t.Setenv(centralCompareJavaEnv, "false")
+		if isCentralCompareEnabled("java") {
+			t.Fatalf("expected java central compare disabled when env=false")
+		}
+	})
+}
+
+func restoreEnv(t *testing.T, key string) {
+	t.Helper()
+
+	value, ok := os.LookupEnv(key)
+	t.Cleanup(func() {
+		var err error
+		if ok {
+			err = os.Setenv(key, value)
+		} else {
+			err = os.Unsetenv(key)
+		}
+		if err != nil {
+			t.Fatalf("failed to restore env %s: %v", key, err)
+		}
+	})
 }
 
 func TestReadBoundedLineRejectsOversizedLine(t *testing.T) {
@@ -200,6 +335,8 @@ func TestTestResultNormalizeBackfillsErrorType(t *testing.T) {
 
 func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
 	result := models.NewSubmissionResult()
+	result.ExecutionPath = models.ExecutionPathCentral
+	result.InternalError = models.InternalErrorJudge
 	result.AddTestResult(models.TestResult{Test: 1, Ok: true, TimeMs: 7})
 	result.AddTestResult(models.TestResult{Test: 2, Ok: false, TimeMs: 12})
 
@@ -223,6 +360,12 @@ func TestSubmissionResultJSONIncludesCountAliases(t *testing.T) {
 	}
 	if !strings.Contains(jsonStr, "\"maxTimeMs\":12") {
 		t.Fatalf("expected maxTimeMs in json payload, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, "\"executionPath\":\"central\"") {
+		t.Fatalf("expected executionPath in json payload, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, "\"internalError\":\"judge_error\"") {
+		t.Fatalf("expected internalError in json payload, got %s", jsonStr)
 	}
 }
 
