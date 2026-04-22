@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "test:submission": "node scripts/test_submission.js"
+    "test:submission": "node scripts/test_submission.js",
+    "seed:problems": "docker compose exec -T assessment-api node scripts/seed_problems_api.mjs"
   },
   "dependencies": {
     "amqplib": "^0.10.9",

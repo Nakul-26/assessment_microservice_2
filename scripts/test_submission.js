@@ -1,11 +1,21 @@
 const crypto = require("crypto");
 
-const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000/api";
+const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:3000/api";
 const HARNESS_EMAIL = process.env.HARNESS_EMAIL || "judge-harness@example.com";
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || "HarnessPass123!";
 const HARNESS_NAME = process.env.HARNESS_NAME || "Judge Harness";
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 1000);
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS || 30000);
+const READY_MAX_RETRIES = Number(process.env.HARNESS_READY_RETRIES || 20);
+const READY_RETRY_DELAY_MS = Number(process.env.HARNESS_READY_DELAY_MS || 1000);
+const JUDGE_READY_ATTEMPTS = Number(process.env.HARNESS_JUDGE_READY_ATTEMPTS || 10);
+const JUDGE_READY_TIMEOUT_MS = Number(process.env.HARNESS_JUDGE_READY_TIMEOUT_MS || 10000);
+const JUDGE_READY_LANGUAGE = process.env.HARNESS_JUDGE_READY_LANGUAGE || "python";
+const STRICT_MODE = process.env.HARNESS_STRICT !== "false";
+const LANGUAGES = (process.env.HARNESS_LANGUAGES || "python,javascript,java")
+  .split(",")
+  .map((language) => language.trim().toLowerCase())
+  .filter(Boolean);
 
 const TEST_PROBLEM_TITLE = "Harness: Two Sum";
 
@@ -42,40 +52,145 @@ const CASES = [
   {
     name: "Correct",
     expectedVerdict: "Accepted",
-    code: [
-      "def twoSum(nums, target):",
-      "    for i in range(len(nums)):",
-      "        for j in range(i + 1, len(nums)):",
-      "            if nums[i] + nums[j] == target:",
-      "                return [i, j]"
-    ].join("\n")
+    getCode: getCorrectCode
   },
   {
     name: "Wrong Answer",
     expectedVerdict: "Wrong Answer",
-    code: [
-      "def twoSum(nums, target):",
-      "    return [0, 0]"
-    ].join("\n")
+    getCode: getWrongCode
   },
   {
     name: "Runtime Error",
     expectedVerdict: "Runtime Error",
-    code: [
-      "def twoSum(nums, target):",
-      "    return 1 / 0"
-    ].join("\n")
+    getCode: getRuntimeCode
   },
   {
     name: "Time Limit Exceeded",
     expectedVerdict: "Time Limit Exceeded",
-    code: [
-      "def twoSum(nums, target):",
-      "    while True:",
-      "        pass"
-    ].join("\n")
+    getCode: getTimeoutCode
   }
 ];
+
+function getCorrectCode(language) {
+  switch (language) {
+    case "python":
+      return [
+        "def twoSum(nums, target):",
+        "    for i in range(len(nums)):",
+        "        for j in range(i + 1, len(nums)):",
+        "            if nums[i] + nums[j] == target:",
+        "                return [i, j]"
+      ].join("\n");
+    case "javascript":
+      return [
+        "function twoSum(nums, target) {",
+        "  for (let i = 0; i < nums.length; i++) {",
+        "    for (let j = i + 1; j < nums.length; j++) {",
+        "      if (nums[i] + nums[j] === target) {",
+        "        return [i, j];",
+        "      }",
+        "    }",
+        "  }",
+        "}"
+      ].join("\n");
+    case "java":
+      return [
+        "class Solution {",
+        "  public int[] twoSum(int[] nums, int target) {",
+        "    for (int i = 0; i < nums.length; i++) {",
+        "      for (int j = i + 1; j < nums.length; j++) {",
+        "        if (nums[i] + nums[j] == target) {",
+        "          return new int[] { i, j };",
+        "        }",
+        "      }",
+        "    }",
+        "    return new int[] {};",
+        "  }",
+        "}"
+      ].join("\n");
+    default:
+      throw new Error(`Unsupported language for harness case generation: ${language}`);
+  }
+}
+
+function getWrongCode(language) {
+  switch (language) {
+    case "python":
+      return [
+        "def twoSum(nums, target):",
+        "    return [0, 0]"
+      ].join("\n");
+    case "javascript":
+      return [
+        "function twoSum(nums, target) {",
+        "  return [0, 0];",
+        "}"
+      ].join("\n");
+    case "java":
+      return [
+        "class Solution {",
+        "  public int[] twoSum(int[] nums, int target) {",
+        "    return new int[] { 0, 0 };",
+        "  }",
+        "}"
+      ].join("\n");
+    default:
+      throw new Error(`Unsupported language for harness case generation: ${language}`);
+  }
+}
+
+function getRuntimeCode(language) {
+  switch (language) {
+    case "python":
+      return [
+        "def twoSum(nums, target):",
+        "    return 1 / 0"
+      ].join("\n");
+    case "javascript":
+      return [
+        "function twoSum(nums, target) {",
+        "  throw new Error(\"boom\");",
+        "}"
+      ].join("\n");
+    case "java":
+      return [
+        "class Solution {",
+        "  public int[] twoSum(int[] nums, int target) {",
+        "    throw new RuntimeException(\"boom\");",
+        "  }",
+        "}"
+      ].join("\n");
+    default:
+      throw new Error(`Unsupported language for harness case generation: ${language}`);
+  }
+}
+
+function getTimeoutCode(language) {
+  switch (language) {
+    case "python":
+      return [
+        "def twoSum(nums, target):",
+        "    while True:",
+        "        pass"
+      ].join("\n");
+    case "javascript":
+      return [
+        "function twoSum(nums, target) {",
+        "  while (true) {}",
+        "}"
+      ].join("\n");
+    case "java":
+      return [
+        "class Solution {",
+        "  public int[] twoSum(int[] nums, int target) {",
+        "    while (true) {}",
+        "  }",
+        "}"
+      ].join("\n");
+    default:
+      throw new Error(`Unsupported language for harness case generation: ${language}`);
+  }
+}
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, options);
@@ -98,6 +213,30 @@ async function request(path, options = {}) {
   }
 
   return body;
+}
+
+async function waitForAPI() {
+  for (let attempt = 1; attempt <= READY_MAX_RETRIES; attempt += 1) {
+    try {
+      await request("/problems");
+      console.log("API ready.");
+      return;
+    } catch (err) {
+      const finalAttempt = attempt === READY_MAX_RETRIES;
+      const status = err.status ? ` status=${err.status}` : "";
+      console.log(
+        `Waiting for API (${attempt}/${READY_MAX_RETRIES})...${status}`
+      );
+
+      if (finalAttempt) {
+        throw new Error(
+          `API not ready after ${READY_MAX_RETRIES} attempts. If this persists, check: docker ps`
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, READY_RETRY_DELAY_MS));
+    }
+  }
 }
 
 function authHeaders(token) {
@@ -165,13 +304,13 @@ async function upsertProblem(token) {
   return created.problem;
 }
 
-async function submitSolution(token, problemId, code) {
+async function submitSolution(token, problemId, language, code) {
   return request("/submissions", {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({
       problemId,
-      language: "python",
+      language,
       code
     })
   });
@@ -216,6 +355,24 @@ async function pollSubmission(token, submissionId) {
   throw new Error(`Polling timed out after ${POLL_TIMEOUT_MS}ms for submission ${submissionId}`);
 }
 
+async function pollSubmissionUntilReady(token, submissionId, timeoutMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const submission = await request(`/submissions/${submissionId}`, {
+      headers: authHeaders(token)
+    });
+
+    if (isTerminalStatus(submission.status)) {
+      return submission;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+
+  return null;
+}
+
 function summarizeSubmission(submission) {
   const testResult = submission.testResult || {};
   return {
@@ -229,7 +386,7 @@ function summarizeSubmission(submission) {
   };
 }
 
-function printCaseResult(testCase, summary, ok) {
+function printCaseResult(language, testCase, summary, ok) {
   const icon = ok ? "PASS" : "FAIL";
   const counts =
     summary.passed !== null && summary.total !== null
@@ -238,25 +395,27 @@ function printCaseResult(testCase, summary, ok) {
   const path = summary.executionPath ? ` path=${summary.executionPath}` : "";
   const internal = summary.internalError ? ` internal=${summary.internalError}` : "";
   console.log(
-    `[${icon}] ${testCase.name}: expected=${testCase.expectedVerdict} actual=${summary.verdict}${counts}${path}${internal}`
+    `[${icon}] ${language} ${testCase.name}: expected=${testCase.expectedVerdict} actual=${summary.verdict}${counts}${path}${internal}`
   );
 }
 
-async function runCase(token, problemId, testCase) {
-  const created = await submitSolution(token, problemId, testCase.code);
+async function runCase(token, problemId, language, testCase) {
+  const created = await submitSolution(token, problemId, language, testCase.getCode(language));
   const submissionId = created && created._id;
 
   if (!submissionId) {
-    throw new Error(`Submission response missing _id for case "${testCase.name}"`);
+    throw new Error(`Submission response missing _id for case "${language}:${testCase.name}"`);
   }
 
   const completed = await pollSubmission(token, submissionId);
   const summary = summarizeSubmission(completed);
   const ok = summary.verdict === testCase.expectedVerdict;
 
-  printCaseResult(testCase, summary, ok);
+  printCaseResult(language, testCase, summary, ok);
   return {
     ok,
+    language,
+    caseName: testCase.name,
     submissionId,
     summary,
     output: completed.output || "",
@@ -264,8 +423,46 @@ async function runCase(token, problemId, testCase) {
   };
 }
 
+async function waitForJudgeReady(token, problemId) {
+  console.log(`Waiting for judge readiness via ${JUDGE_READY_LANGUAGE} warm-up submission...`);
+
+  const warmupCode = getCorrectCode(JUDGE_READY_LANGUAGE);
+
+  for (let attempt = 1; attempt <= JUDGE_READY_ATTEMPTS; attempt += 1) {
+    const created = await submitSolution(token, problemId, JUDGE_READY_LANGUAGE, warmupCode);
+    const submissionId = created && created._id;
+
+    if (!submissionId) {
+      throw new Error(`Judge warm-up response missing _id on attempt ${attempt}`);
+    }
+
+    const completed = await pollSubmissionUntilReady(token, submissionId, JUDGE_READY_TIMEOUT_MS);
+    if (completed) {
+      const summary = summarizeSubmission(completed);
+      console.log(
+        `Judge ready on attempt ${attempt}: verdict=${summary.verdict} status=${summary.submissionStatus}`
+      );
+      return;
+    }
+
+    console.log(`Judge not ready yet (${attempt}/${JUDGE_READY_ATTEMPTS})...`);
+  }
+
+  throw new Error(
+    `Judge not processing submissions after ${JUDGE_READY_ATTEMPTS} attempts. Check judge logs and RabbitMQ connectivity.`
+  );
+}
+
 async function main() {
   console.log(`Using API: ${API_BASE_URL}`);
+  console.log(`Languages: ${LANGUAGES.join(", ")}`);
+  console.log(`Strict mode: ${STRICT_MODE ? "on" : "off"}`);
+  console.log(`Readiness wait: ${READY_MAX_RETRIES} retries, ${READY_RETRY_DELAY_MS}ms delay`);
+  console.log(
+    `Judge readiness: ${JUDGE_READY_ATTEMPTS} attempts, ${JUDGE_READY_TIMEOUT_MS}ms timeout, language=${JUDGE_READY_LANGUAGE}`
+  );
+
+  await waitForAPI();
 
   const auth = await registerOrLogin();
   const token = auth && auth.token;
@@ -280,15 +477,28 @@ async function main() {
 
   console.log(`Problem ready: ${problem.title} (${problem._id})`);
 
+  await waitForJudgeReady(token, problem._id);
+
   const runId = crypto.randomBytes(4).toString("hex");
   console.log(`Harness run: ${runId}`);
 
   const results = [];
-  for (const testCase of CASES) {
-    results.push(await runCase(token, problem._id, testCase));
+  for (const language of LANGUAGES) {
+    console.log("");
+    console.log(`=== ${language.toUpperCase()} ===`);
+    for (const testCase of CASES) {
+      results.push(await runCase(token, problem._id, language, testCase));
+    }
   }
 
   const failures = results.filter((result) => !result.ok);
+  const passed = results.length - failures.length;
+
+  console.log("");
+  console.log(`Total: ${results.length}`);
+  console.log(`Passed: ${passed}`);
+  console.log(`Failed: ${failures.length}`);
+
   if (failures.length > 0) {
     console.error("");
     console.error("Failures:");
@@ -301,7 +511,12 @@ async function main() {
         console.error(JSON.stringify(failure.details, null, 2));
       }
     }
-    process.exitCode = 1;
+
+    if (STRICT_MODE) {
+      console.error("");
+      console.error("Harness failed in strict mode.");
+      process.exitCode = 1;
+    }
     return;
   }
 

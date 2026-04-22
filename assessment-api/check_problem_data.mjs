@@ -20,7 +20,8 @@ async function checkProblemData() {
         console.log('Problem found:');
         console.log('  title:', problem.title);
         console.log('  functionName:', problem.functionName);
-        console.log('  functionName.java:', problem.functionName.java);
+        console.log('  parameters:', problem.parameters);
+        console.log('  returnType:', problem.returnType);
         console.log('  testCases:', problem.testCases);
 
     } catch (err) {

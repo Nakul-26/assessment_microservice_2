@@ -59,7 +59,7 @@ services:
       - ./judge-service-go:/usr/src/app/judge-service-go:ro
       - /usr/src/app/node_modules
     environment:
-      - MONGO_URI=mongodb://mongo:27017/assessment_db
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/assessment_db}
       - PORT=3000
       - REDIS_URI=redis://redis:6379
       - RABBITMQ_URI=amqp://user:password@rabbitmq:5672
@@ -87,7 +87,7 @@ services:
       - ./judge-service-go:/src
       - /var/run/docker.sock:/var/run/docker.sock # Needed for Docker-in-Docker functionality
     environment:
-      - MONGO_URI=mongodb://mongo:27017/assessment_db
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/assessment_db}
       - RABBITMQ_URL=amqp://user:password@rabbitmq:5672
       - REDIS_URI=redis://redis:6379
     depends_on:

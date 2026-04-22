@@ -46,20 +46,43 @@ The entire project is containerized and can be run easily using Docker Compose.
     cd assessment_microservice_2
     ```
 
-2.  Build and start all the services:
+2.  Optional: if you want persistent cloud-backed data instead of the local Docker Mongo volume, create a root `.env` file with your Atlas connection string:
+    ```bash
+    MONGO_URI=mongodb+srv://<username>:<password>@<cluster>/<dbname>?retryWrites=true&w=majority
+    ```
+
+    The API and judge services will use `MONGO_URI` from `.env`. If it is not set, they fall back to the local `mongo` container.
+
+3.  Build and start all the services:
     ```bash
     docker-compose up --build
     ```
 
-This command will build the Docker images for each service and start the necessary containers for the application and its infrastructure (MongoDB, RabbitMQ, Redis).
+This command will build the Docker images for each service and start the necessary containers for the application and its infrastructure. If `MONGO_URI` is set to Atlas, the local `mongo` container may still start, but application data will be stored in Atlas instead of the local Docker volume.
+
+4.  Seed some starter problems:
+    ```bash
+    npm run seed:problems
+    ```
+
+    This runs the seeding script inside the running `assessment-api` container, so it uses the same network and environment as the API service itself.
 
 Once everything is running, you can access the services at the following locations:
 
 - **Frontend**: [http://localhost:5173](http://localhost:5173)
 - **API**: [http://localhost:3000](http://localhost:3000)
 
+You can verify seeded problems with:
+
+```bash
+curl http://localhost:3000/api/problems
+```
+
 
 # for clean up:
-- docker system prune -a --volumes -f
-- docker builder prune -a -f
-- docker rm -f $(docker ps -aq)
+
+'''
+docker system prune -a --volumes -f
+docker builder prune -a -f
+docker rm -f $(docker ps -aq)
+'''
