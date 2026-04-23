@@ -3,7 +3,7 @@ import addFormats from 'ajv-formats';
 import fs from 'fs';
 import path from 'path';
 
-const ajv = new Ajv();
+const ajv = new Ajv({ allErrors: true });
 addFormats(ajv);
 
 function loadSchema(schemaName) {
@@ -17,11 +17,6 @@ export function validate(schemaName) {
   const compiledSchema = ajv.compile(schema);
 
   return (req, res, next) => {
-    if (Array.isArray(req.body.parameters)) {
-      req.body.parameters = req.body.parameters.filter((p = {}) => {
-        return typeof p.name === "string" && p.name.trim() && typeof p.type === "string" && p.type.trim();
-      });
-    }
     if (!compiledSchema(req.body)) {
       return res.status(400).json({ errors: compiledSchema.errors });
     }

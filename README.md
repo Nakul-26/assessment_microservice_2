@@ -78,6 +78,24 @@ You can verify seeded problems with:
 curl http://localhost:3000/api/problems
 ```
 
+## Submission Harness
+
+The submission harness lives at `scripts/test_submission.js`.
+
+If you are running the app on your own machine and the API is exposed on port 3000:
+
+```bash
+npm run test:submission
+```
+
+If Docker is running in a different environment from the shell where you invoke the harness, `localhost` may not resolve to the API container. In that case, run the harness inside the Compose network:
+
+```bash
+npm run test:submission:docker
+```
+
+That command uses the `harness` Compose service and targets `http://assessment-api:3000/api`.
+
 
 # for clean up:
 

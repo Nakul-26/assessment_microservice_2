@@ -169,6 +169,20 @@ services:
     networks:
       - assessment-net
 
+  harness:
+    image: node:20-alpine
+    container_name: codespace_submission_harness
+    working_dir: /app
+    command: ["npm", "run", "test:submission"]
+    volumes:
+      - .:/app
+    environment:
+      - API_BASE_URL=http://assessment-api:3000/api
+    depends_on:
+      - assessment-api
+    networks:
+      - assessment-net
+
 volumes:
   redis_data:
   rabbitmq_data:

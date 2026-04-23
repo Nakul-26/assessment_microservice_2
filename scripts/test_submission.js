@@ -215,23 +215,56 @@ async function request(path, options = {}) {
   return body;
 }
 
+function getNetworkErrorCode(err) {
+  if (err && err.cause && typeof err.cause === "object" && "code" in err.cause) {
+    return err.cause.code;
+  }
+
+  return "";
+}
+
+function buildAPIReadinessError(lastError) {
+  const code = getNetworkErrorCode(lastError);
+  const parts = [
+    `API not ready after ${READY_MAX_RETRIES} attempts.`,
+    `Base URL: ${API_BASE_URL}.`
+  ];
+
+  if (code) {
+    parts.push(`Last network error: ${code}.`);
+  }
+
+  parts.push(
+    "If Docker is running outside this workspace, localhost here will not reach it."
+  );
+  parts.push(
+    "Run `npm run test:submission:docker` to execute inside the Docker Compose network, or set API_BASE_URL to a reachable host."
+  );
+  parts.push("You can also verify connectivity with: curl http://localhost:3000/api/problems");
+
+  return parts.join(" ");
+}
+
 async function waitForAPI() {
+  let lastError = null;
+
   for (let attempt = 1; attempt <= READY_MAX_RETRIES; attempt += 1) {
     try {
       await request("/problems");
       console.log("API ready.");
       return;
     } catch (err) {
+      lastError = err;
       const finalAttempt = attempt === READY_MAX_RETRIES;
       const status = err.status ? ` status=${err.status}` : "";
+      const code = getNetworkErrorCode(err);
+      const network = code ? ` code=${code}` : "";
       console.log(
-        `Waiting for API (${attempt}/${READY_MAX_RETRIES})...${status}`
+        `Waiting for API (${attempt}/${READY_MAX_RETRIES})...${status}${network}`
       );
 
       if (finalAttempt) {
-        throw new Error(
-          `API not ready after ${READY_MAX_RETRIES} attempts. If this persists, check: docker ps`
-        );
+        throw new Error(buildAPIReadinessError(lastError));
       }
 
       await new Promise((resolve) => setTimeout(resolve, READY_RETRY_DELAY_MS));

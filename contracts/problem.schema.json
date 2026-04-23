@@ -3,12 +3,15 @@
   "title": "Problem",
   "description": "A programming problem",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "title": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "description": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "difficulty": {
       "type": "string",
@@ -16,15 +19,17 @@
     },
     "functionName": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
     },
     "parameters": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "properties": {
-          "name": { "type": "string" },
-          "type": { "type": "string" }
+          "name": { "type": "string", "minLength": 1 },
+          "type": { "type": "string", "minLength": 1 }
         },
         "required": ["name", "type"],
         "additionalProperties": false
@@ -45,6 +50,7 @@
     },
     "testCases": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "properties": {

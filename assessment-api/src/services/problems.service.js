@@ -22,12 +22,26 @@ function toStoredTestCase(tc = {}) {
 
 function normalizeProblemPayload(payload = {}) {
   const normalized = { ...payload };
-  if (!Array.isArray(normalized.parameters)) {
-    normalized.parameters = [];
-  } else {
+  if (typeof normalized.title === "string") {
+    normalized.title = normalized.title.trim();
+  }
+  if (typeof normalized.description === "string") {
+    normalized.description = normalized.description.trim();
+  }
+  if (typeof normalized.functionName === "string") {
+    normalized.functionName = normalized.functionName.trim();
+  }
+  if (typeof normalized.returnType === "string") {
+    normalized.returnType = normalized.returnType.trim();
+  }
+
+  if (Array.isArray(normalized.parameters)) {
     normalized.parameters = normalized.parameters
-      .map((p = {}) => ({ name: String(p.name || "").trim(), type: String(p.type || "").trim() }))
-      .filter((p) => p.name && p.type);
+      .map((p = {}) => ({
+        ...p,
+        name: typeof p.name === "string" ? p.name.trim() : p.name,
+        type: typeof p.type === "string" ? p.type.trim() : p.type
+      }));
   }
 
   normalized.compareConfig = {
@@ -44,7 +58,7 @@ function normalizeProblemPayload(payload = {}) {
     testCases: normalized.testCases.map((tc = {}) => {
       const sample = isSampleTestCase(tc);
       return {
-        inputs: Array.isArray(tc.inputs) ? tc.inputs : [],
+        inputs: tc.inputs,
         expected: tc.expected,
         isSample: sample,
         isHidden: !sample
@@ -73,7 +87,24 @@ function sanitizeProblemForStudent(problemDoc) {
 
 function validateProblemPayload(payload) {
   const validationErrors = [];
+
+  if (!payload.title || typeof payload.title !== "string" || !payload.title.trim()) {
+    validationErrors.push("title is required");
+  }
+  if (!payload.description || typeof payload.description !== "string" || !payload.description.trim()) {
+    validationErrors.push("description is required");
+  }
+  if (!payload.difficulty || typeof payload.difficulty !== "string") {
+    validationErrors.push("difficulty is required");
+  } else if (!["Easy", "Medium", "Hard"].includes(payload.difficulty)) {
+    validationErrors.push("difficulty must be Easy, Medium, or Hard");
+  }
+
   if (Array.isArray(payload.testCases)) {
+    if (payload.testCases.length === 0) {
+      validationErrors.push("testCases must contain at least one test case");
+    }
+
     payload.testCases.forEach((tc, i) => {
       if (!Array.isArray(tc.inputs)) {
         validationErrors.push(`testCases[${i}].inputs must be an array`);
@@ -88,6 +119,8 @@ function validateProblemPayload(payload) {
 
   if (!payload.functionName || typeof payload.functionName !== "string") {
     validationErrors.push("functionName is required");
+  } else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(payload.functionName.trim())) {
+    validationErrors.push("functionName must be a valid identifier");
   }
   if (!payload.returnType || typeof payload.returnType !== "string") {
     validationErrors.push("returnType is required");
@@ -95,6 +128,10 @@ function validateProblemPayload(payload) {
   if (!Array.isArray(payload.parameters)) {
     validationErrors.push("parameters must be an array");
   } else {
+    if (payload.parameters.length === 0) {
+      validationErrors.push("parameters must contain at least one parameter");
+    }
+
     payload.parameters.forEach((p, i) => {
       if (!p || typeof p.name !== "string" || !p.name.trim()) {
         validationErrors.push(`parameters[${i}].name is required`);
