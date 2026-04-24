@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
+import { buildProblemPayload, collectErrorMessages } from '../utils/problemForm';
 
 const EditProblemPage = () => {
   const { _id } = useParams();
@@ -23,8 +24,12 @@ const EditProblemPage = () => {
     testCases: [{ inputs: '[]', expected: '', isSample: true }]
   });
 
-  const [message, setMessage] = useState('');
-  const [clientErrors, setClientErrors] = useState([]);
+  const [apiError, setApiError] = useState('');
+  const [apiErrors, setApiErrors] = useState([]);
+  const [formErrors, setFormErrors] = useState({});
+
+  const fieldError = (key) => formErrors[key];
+  const fieldClassName = (key) => fieldError(key) ? 'input-error' : '';
 
   useEffect(() => {
     const fetchProblem = async () => {
@@ -52,7 +57,7 @@ const EditProblemPage = () => {
 
         setFormData(transformedData);
       } catch (err) {
-        setMessage('Error fetching problem for edit.');
+        setApiError('Error fetching problem for edit.');
       }
     };
     fetchProblem();
@@ -102,98 +107,55 @@ const EditProblemPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setMessage('');
-    setClientErrors([]);
+    setApiError('');
+    setApiErrors([]);
 
-    const errs = [];
-    if (!formData.title.trim()) errs.push('Title is required');
-    if (!formData.description.trim()) errs.push('Description is required');
-    if (!formData.functionName.trim()) errs.push('Function name is required');
-    if (!formData.returnType.trim()) errs.push('Return type is required');
-
-    const params = formData.parameters
-      .map((p) => ({ name: String(p.name || '').trim(), type: String(p.type || '').trim() }))
-      .filter((p) => p.name && p.type);
-
-    if (params.length === 0) errs.push('At least one parameter is required');
-
-    const parsedCases = formData.testCases.map((tc, i) => {
-      let parsedInputs = [];
-      let parsedExpected = tc.expected;
-      try {
-        parsedInputs = JSON.parse(tc.inputs);
-      } catch {
-        errs.push(`Test case ${i + 1}: inputs must be valid JSON array`);
-      }
-      if (!Array.isArray(parsedInputs)) {
-        errs.push(`Test case ${i + 1}: inputs must be a JSON array`);
-      }
-      if (Array.isArray(parsedInputs) && parsedInputs.length !== params.length) {
-        errs.push(`Test case ${i + 1}: inputs count must match parameters count (${params.length})`);
-      }
-
-      try {
-        parsedExpected = JSON.parse(tc.expected);
-      } catch {
-        parsedExpected = tc.expected;
-      }
-
-      return {
-        inputs: Array.isArray(parsedInputs) ? parsedInputs : [],
-        expected: parsedExpected,
-        isSample: !!tc.isSample
-      };
-    });
-
-    if (errs.length > 0) {
-      setClientErrors(errs);
+    const { errors, payload } = buildProblemPayload(formData);
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
       return;
     }
-
-    const payload = {
-      title: formData.title,
-      description: formData.description,
-      difficulty: formData.difficulty,
-      functionName: formData.functionName.trim(),
-      parameters: params,
-      returnType: formData.returnType.trim(),
-      compareConfig: {
-        mode: formData.compareConfig.mode,
-        floatTolerance: Number(formData.compareConfig.floatTolerance) || 0,
-        orderInsensitive: !!formData.compareConfig.orderInsensitive
-      },
-      testCases: parsedCases,
-      tags: formData.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-      isPremium: !!formData.isPremium
-    };
+    setFormErrors({});
 
     try {
       await api.put(`/api/problems/${_id}`, payload);
       navigate(`/problems/${_id}`);
     } catch (err) {
-      setMessage('Error updating problem: ' + (err.response?.data?.message || String(err)));
+      const data = err.response?.data;
+      setApiError(data?.error || 'Failed to update problem');
+      setApiErrors(Array.isArray(data?.errors) ? data.errors : []);
     }
   };
 
   return (
     <div className="container">
       <h2>Edit Problem</h2>
-      {clientErrors.length > 0 && (
-        <div className="problem-card" style={{ background: '#ffecec', color: '#dc3545' }}>
+      {collectErrorMessages(formErrors).length > 0 && (
+        <div className="error-box">
           <strong>Fix the following:</strong>
-          <ul>{clientErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>
+          <ul>{collectErrorMessages(formErrors).map((error, index) => <li key={index}>{error}</li>)}</ul>
         </div>
       )}
-      {message && <p>{message}</p>}
+      {apiError && (
+        <div className="error-box">
+          <strong>Unable to update problem.</strong>
+          <div>{apiError}</div>
+          {apiErrors.length > 0 && (
+            <ul>{apiErrors.map((error, index) => <li key={index}>{error}</li>)}</ul>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label>Title:</label>
-          <input type="text" name="title" value={formData.title} onChange={handleChange} required />
+          <input type="text" name="title" value={formData.title} onChange={handleChange} className={fieldClassName('title')} required />
+          {fieldError('title') && <div className="error-text">{fieldError('title')}</div>}
         </div>
         <div className="form-group">
           <label>Description:</label>
-          <textarea name="description" value={formData.description} onChange={handleChange} required />
+          <textarea name="description" value={formData.description} onChange={handleChange} className={fieldClassName('description')} required />
+          {fieldError('description') && <div className="error-text">{fieldError('description')}</div>}
         </div>
         <div className="form-group">
           <label>Difficulty:</label>
@@ -205,19 +167,38 @@ const EditProblemPage = () => {
         </div>
         <div className="form-group">
           <label>Function Name:</label>
-          <input type="text" name="functionName" value={formData.functionName} onChange={handleChange} required />
+          <input type="text" name="functionName" value={formData.functionName} onChange={handleChange} className={fieldClassName('functionName')} required />
+          {fieldError('functionName') && <div className="error-text">{fieldError('functionName')}</div>}
         </div>
         <div className="form-group">
           <label>Return Type:</label>
-          <input type="text" name="returnType" value={formData.returnType} onChange={handleChange} required />
+          <input type="text" name="returnType" value={formData.returnType} onChange={handleChange} className={fieldClassName('returnType')} required />
+          {fieldError('returnType') && <div className="error-text">{fieldError('returnType')}</div>}
         </div>
 
         <h3>Parameters</h3>
+        {fieldError('parameters') && <div className="error-text mb-20">{fieldError('parameters')}</div>}
         {formData.parameters.map((p, i) => (
           <div key={i} className="form-group problem-card">
             <label>Parameter {i + 1}</label>
-            <input type="text" name="name" placeholder="Name" value={p.name} onChange={(e) => handleParamChange(i, e)} />
-            <input type="text" name="type" placeholder="Type" value={p.type} onChange={(e) => handleParamChange(i, e)} />
+            <input
+              type="text"
+              name="name"
+              placeholder="Name"
+              value={p.name}
+              onChange={(e) => handleParamChange(i, e)}
+              className={fieldClassName(`parameters.${i}.name`)}
+            />
+            {fieldError(`parameters.${i}.name`) && <div className="error-text">{fieldError(`parameters.${i}.name`)}</div>}
+            <input
+              type="text"
+              name="type"
+              placeholder="Type"
+              value={p.type}
+              onChange={(e) => handleParamChange(i, e)}
+              className={fieldClassName(`parameters.${i}.type`)}
+            />
+            {fieldError(`parameters.${i}.type`) && <div className="error-text">{fieldError(`parameters.${i}.type`)}</div>}
           </div>
         ))}
         <button type="button" onClick={addParameter} className="button">Add Parameter</button>
@@ -238,10 +219,20 @@ const EditProblemPage = () => {
         </div>
 
         <h3>Test Cases</h3>
+        <p className="form-hint">Mark the first 1-2 test cases as sample so students can see example inputs and outputs.</p>
+        {fieldError('testCases') && <div className="error-text mb-20">{fieldError('testCases')}</div>}
         {formData.testCases.map((tc, i) => (
           <div key={i} className="form-group problem-card">
             <label>Test Case {i + 1}</label>
-            <textarea name="inputs" value={tc.inputs} onChange={(e) => handleTestCaseChange(i, e)} required />
+            <textarea
+              name="inputs"
+              value={tc.inputs}
+              onChange={(e) => handleTestCaseChange(i, e)}
+              className={fieldClassName(`testCases.${i}.inputs`) || fieldClassName(`testCases.${i}`)}
+              required
+            />
+            {fieldError(`testCases.${i}.inputs`) && <div className="error-text">{fieldError(`testCases.${i}.inputs`)}</div>}
+            {fieldError(`testCases.${i}`) && <div className="error-text">{fieldError(`testCases.${i}`)}</div>}
             <textarea name="expected" value={tc.expected} onChange={(e) => handleTestCaseChange(i, e)} required />
             <label>
               <input type="checkbox" name="isSample" checked={!!tc.isSample} onChange={(e) => handleTestCaseChange(i, e)} />

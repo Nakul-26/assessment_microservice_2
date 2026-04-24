@@ -11,14 +11,7 @@ function isSampleTestCase(tc = {}) {
   return true;
 }
 
-function toStoredTestCase(tc = {}) {
-  const sample = isSampleTestCase(tc);
-  return {
-    ...tc,
-    isSample: sample,
-    isHidden: !sample
-  };
-}
+const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function normalizeProblemPayload(payload = {}) {
   const normalized = { ...payload };
@@ -56,7 +49,7 @@ function normalizeProblemPayload(payload = {}) {
   return {
     ...normalized,
     testCases: normalized.testCases.map((tc = {}) => {
-      const sample = isSampleTestCase(tc);
+      const sample = tc.isSample === true;
       return {
         inputs: tc.inputs,
         expected: tc.expected,
@@ -119,7 +112,7 @@ function validateProblemPayload(payload) {
 
   if (!payload.functionName || typeof payload.functionName !== "string") {
     validationErrors.push("functionName is required");
-  } else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(payload.functionName.trim())) {
+  } else if (!IDENTIFIER_PATTERN.test(payload.functionName.trim())) {
     validationErrors.push("functionName must be a valid identifier");
   }
   if (!payload.returnType || typeof payload.returnType !== "string") {
@@ -135,6 +128,8 @@ function validateProblemPayload(payload) {
     payload.parameters.forEach((p, i) => {
       if (!p || typeof p.name !== "string" || !p.name.trim()) {
         validationErrors.push(`parameters[${i}].name is required`);
+      } else if (!IDENTIFIER_PATTERN.test(p.name.trim())) {
+        validationErrors.push(`parameters[${i}].name: invalid format`);
       }
       if (!p || typeof p.type !== "string" || !p.type.trim()) {
         validationErrors.push(`parameters[${i}].type is required`);
@@ -161,6 +156,10 @@ function validateProblemPayload(payload) {
         );
       }
     });
+  }
+
+  if (Array.isArray(payload.testCases) && !payload.testCases.some((tc) => tc?.isSample === true)) {
+    validationErrors.push("At least one test case must be marked as sample");
   }
 
   return validationErrors;
@@ -207,7 +206,10 @@ export async function createProblem(payload) {
   const normalizedPayload = normalizeProblemPayload(payload);
   const validationErrors = validateProblemPayload(normalizedPayload);
   if (validationErrors.length > 0) {
-    throw new HttpError(400, "Validation failed", { msg: "Validation failed", errors: validationErrors });
+    throw new HttpError(400, "Validation failed", {
+      error: validationErrors.join(", "),
+      errors: validationErrors
+    });
   }
   return problemsRepo.create(normalizedPayload);
 }
@@ -216,7 +218,10 @@ export async function updateProblem(id, payload) {
   const normalizedPayload = normalizeProblemPayload(payload);
   const validationErrors = validateProblemPayload(normalizedPayload);
   if (validationErrors.length > 0) {
-    throw new HttpError(400, "Validation failed", { msg: "Validation failed", errors: validationErrors });
+    throw new HttpError(400, "Validation failed", {
+      error: validationErrors.join(", "),
+      errors: validationErrors
+    });
   }
   return problemsRepo.updateById(id, normalizedPayload);
 }

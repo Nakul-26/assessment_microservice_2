@@ -150,10 +150,10 @@ const ProblemPage = () => {
         </p>
       )}
 
-      <h3 className="mt-20">Status: {submission ? submission.status : 'Not submitted'}</h3>
+      <h3 className="mt-20">Submission Status: {submission ? submission.status : 'Not submitted'}</h3>
       {submission && submission.output && (
         <>
-          <h3>Output:</h3>
+          <h3>Result</h3>
           <SubmissionOutput output={submission.output} />
         </>
       )}

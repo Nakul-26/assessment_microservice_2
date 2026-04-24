@@ -86,7 +86,9 @@ body {
 }
 
 .form-group input[type="text"],
-.form-group textarea {
+.form-group input[type="number"],
+.form-group textarea,
+.form-group select {
     width: 100%;
     padding: 10px;
     border: 1px solid #ccc;
@@ -98,6 +100,37 @@ body {
 .form-group textarea {
     min-height: 100px;
     resize: vertical;
+}
+
+.error-box {
+    background-color: #fdecec;
+    border: 1px solid #f5b5b5;
+    color: #b42318;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.error-box ul {
+    margin: 10px 0 0;
+    padding-left: 20px;
+}
+
+.error-text {
+    color: #b42318;
+    font-size: 14px;
+    margin-top: 6px;
+}
+
+.form-hint {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: #4b5563;
+}
+
+.input-error {
+    border-color: #dc3545 !important;
+    background-color: #fff6f6;
 }
 
 /* Table Styles */
