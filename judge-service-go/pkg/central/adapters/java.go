@@ -45,13 +45,13 @@ func prepareJavaWrapper(workDir string, submissionMsg models.SubmissionMessage, 
 }
 
 func (JavaAdapter) CompileCommand() []string {
-	return []string{"javac", "/app/Solution.java", "/app/Main.java"}
+	return []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Solution.java", "/app/Main.java"}
 }
 
 func (JavaAdapter) RunCommand(inputB64 string) []string {
-	return []string{"java", "Main", inputB64}
+	return []string{"java", "-cp", "/usr/share/java/gson.jar:.", "Main", inputB64}
 }
 
 func (JavaAdapter) BatchRunCommand(testsB64 string) []string {
-	return []string{"java", "Main", testsB64}
+	return []string{"java", "-cp", "/usr/share/java/gson.jar:.", "Main", testsB64}
 }

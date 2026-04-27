@@ -155,12 +155,17 @@ func (sr *SubmissionResult) UpdateStatus() {
 		sr.Status = SubmissionStatusRuntimeError
 		return
 	}
-	if sr.PassedCount == sr.TotalCount {
+	if sr.TotalCount > 0 && sr.PassedCount == sr.TotalCount {
 		sr.Status = SubmissionStatusAccepted
 		return
 	}
 
-	sr.Status = SubmissionStatusWrongAnswer
+	if sr.TotalCount == 0 && (sr.Status == "" || sr.Status == SubmissionStatusAccepted) {
+		// If no tests ran, keep current status if it's an error, otherwise it's likely a judge error or compilation failed
+		// But usually sr.Status is already set by the caller in case of failure.
+	} else if sr.TotalCount > 0 {
+		sr.Status = SubmissionStatusWrongAnswer
+	}
 }
 
 // ToJSON returns the JSON encoding (useful for logging or returning to caller).

@@ -3,17 +3,17 @@ import java.util.List;
 
 // USER_CODE_MARKER
 
-public class {{CLASS_NAME}} {
+public class {{.CLASS_NAME}} {
 
     public static void main(String[] args) {
         List<TestResult> results = new ArrayList<>();
-        // Assuming the user's code defines a class named by {{CLASS_NAME}} and a method named by {{FUNCTION_NAME}}
+        // Assuming the user's code defines a class named by {{.CLASS_NAME}} and a method named by {{.FUNCTION_NAME}}
         // We instantiate the class and call the method dynamically.
         // This part needs to be adapted based on how the user's code is structured.
         // For now, let's assume the user's code is directly within this class or a static method.
 
         // For simplicity, let's assume the user's solution is a static method within this class
-        // named {{FUNCTION_NAME}}.
+        // named {{.FUNCTION_NAME}}.
         
         for (int i = 0; i < args.length; i += 3) {
             try {
@@ -23,11 +23,11 @@ public class {{CLASS_NAME}} {
                 
                 // Dynamically call the function. This is a placeholder and needs actual reflection or a more robust approach.
                 // For now, we'll keep the direct call but use the placeholder for the method name.
-                int out = {{CLASS_NAME}}.{{FUNCTION_NAME}}(num1, num2);
+                int out = Solution.{{.FUNCTION_NAME}}(num1, num2);
                 boolean ok = out == expected;
                 results.add(new TestResult((i/3) + 1, ok, out, null));
             } catch (Exception e) {
-                results.push({ test: i + 1, ok: false, error: String(err), stack: err.stack });
+                results.add(new TestResult((i/3) + 1, false, null, e.toString()));
             }
         }
         

@@ -51,7 +51,7 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 			"FUNCTION_NAME":        sanitizedFuncName,
 			"EXPECTED_OUTPUT_TYPE": p.ReturnType,
 			"TestCases":            p.TestCases,
-			"CLASS_NAME":           "Solution",
+			"CLASS_NAME":           "GeneratedTester",
 		}
 
 		javaTests, javaExpected, err := buildJavaTestLiterals(p)

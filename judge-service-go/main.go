@@ -35,7 +35,7 @@ const (
 	defaultSubmissionQueue  = "submission_queue"
 	defaultMongoURI         = "mongodb://mongo:27017/assessment_db"
 	defaultRedisURI         = "redis://redis:6379"
-	defaultSandboxTimeout   = 5 * time.Second
+	defaultSandboxTimeout   = 10 * time.Second
 	centralComparePythonEnv = "JUDGE_CENTRAL_COMPARE_PY"
 	centralCompareJSEnv     = "JUDGE_CENTRAL_COMPARE_JS"
 	centralCompareJavaEnv   = "JUDGE_CENTRAL_COMPARE_JAVA"
@@ -132,10 +132,6 @@ func validateAndDecodeSubmission(d amqp.Delivery) (models.SubmissionMessage, err
 	if !ok {
 		log.Printf("[submission=%s] sanitized function name %q -> %q", msg.SubmissionID, msg.FunctionName, sanitizedName)
 		msg.FunctionName = sanitizedName
-	}
-
-	if msg.Language == "python" {
-		msg.FunctionName = toSnakeCase(msg.FunctionName)
 	}
 
 	return msg, nil
@@ -462,7 +458,10 @@ func isCentralCompareEnabled(language string) bool {
 		}
 		return true
 	case "java":
-		return isTruthyEnv(os.Getenv(centralCompareJavaEnv))
+		if raw, ok := os.LookupEnv(centralCompareJavaEnv); ok {
+			return isTruthyEnv(raw)
+		}
+		return true
 	default:
 		return false
 	}
