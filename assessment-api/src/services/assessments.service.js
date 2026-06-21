@@ -62,6 +62,7 @@ export async function startAssessment(assessmentId, userId, auditInfo = {}) {
   const assessment = await assessmentsRepo.findById(assessmentId);
   if (!assessment) throw new HttpError(404, "Assessment not found");
   if (assessment.status !== 'Published') throw new HttpError(400, "Assessment is not active");
+  if (assessment.locked) throw new HttpError(409, "Assessment is locked by the faculty");
 
   const now = new Date();
   if (now < assessment.startTime) throw new HttpError(400, "Assessment has not started yet");
@@ -245,7 +246,7 @@ export async function getAssessmentAttendance(assessmentId, user) {
   // Get all students
   // For now, let's get all users with role 'student'
   // In a real multi-college setup, we'd filter by collegeId
-  const students = await User.find({ role: 'student' }).select('name email');
+  const students = await User.find({ role: 'student' }).select('name email usn section');
 
   // Get all attempts for this assessment
   const attempts = await attemptsRepo.findAll({ assessmentId });
@@ -257,6 +258,8 @@ export async function getAssessmentAttendance(assessmentId, user) {
       studentId: student._id,
       name: student.name,
       email: student.email,
+      usn: student.usn || '',
+      section: student.section || '',
       status: attempt ? attempt.status : 'Not Started',
       attemptId: attempt ? attempt._id : null,
       score: attempt ? attempt.score : 0,
@@ -265,7 +268,8 @@ export async function getAssessmentAttendance(assessmentId, user) {
       tabSwitchCount: attempt ? (attempt.tabSwitchCount || 0) : 0,
       copyCount: attempt ? (attempt.copyCount || 0) : 0,
       pasteCount: attempt ? (attempt.pasteCount || 0) : 0,
-      fullscreenExitCount: attempt ? (attempt.fullscreenExitCount || 0) : 0
+      fullscreenExitCount: attempt ? (attempt.fullscreenExitCount || 0) : 0,
+      challenge: attempt && attempt.challenge ? attempt.challenge : { status: 'None' }
     };
   });
 
@@ -344,9 +348,10 @@ function isAttemptExpired(attempt, assessment) {
 
 function getExpirationTime(attempt, assessment) {
   const startTime = new Date(attempt.startedAt);
-  const durationMs = assessment.durationMinutes * 60000;
+  const graceMs = (attempt.graceMinutes || 0) * 60000;
+  const durationMs = (assessment.durationMinutes * 60000) + graceMs;
   const relativeExpiry = new Date(startTime.getTime() + durationMs);
-  const absoluteExpiry = new Date(assessment.endTime);
+  const absoluteExpiry = new Date(new Date(assessment.endTime).getTime() + graceMs);
   
   // Expiry is whichever comes first
   return relativeExpiry < absoluteExpiry ? relativeExpiry : absoluteExpiry;
@@ -425,3 +430,280 @@ export async function createAnnouncement(assessmentId, message) {
 
   return announcement;
 }
+
+export async function getAssessmentAnalytics(assessmentId, user) {
+  // Only faculty/admin can see analytics
+  if (user.role === 'student') {
+    throw new HttpError(403, "Forbidden");
+  }
+
+  const assessment = await assessmentsRepo.findById(assessmentId);
+  if (!assessment) throw new HttpError(404, "Assessment not found");
+
+  const students = await User.find({ role: 'student' }).select('name email usn section');
+  const attempts = await attemptsRepo.findAll({ assessmentId });
+  const submissions = await Submission.find({ assessmentId });
+
+  const maxPossibleScore = assessment.problems?.reduce((sum, p) => sum + (p.maxScore || 100), 0) || 100;
+  const completedAttempts = attempts.filter(a => a.status === 'Submitted' || a.status === 'TimedOut');
+
+  let avgScore = 0;
+  let highestScore = 0;
+  let lowestScore = 0;
+  let passRate = 0;
+
+  if (completedAttempts.length > 0) {
+    const scores = completedAttempts.map(a => a.score || 0);
+    avgScore = Number((scores.reduce((a, b) => a + b, 0) / completedAttempts.length).toFixed(1));
+    highestScore = Math.max(...scores);
+    lowestScore = Math.min(...scores);
+    const passedCount = completedAttempts.filter(a => (a.score || 0) >= (maxPossibleScore * 0.4)).length;
+    passRate = Number(((passedCount / completedAttempts.length) * 100).toFixed(0));
+  }
+
+  const overallStats = {
+    totalStudents: students.length,
+    startedCount: attempts.filter(a => a.status !== 'Not Started').length,
+    submittedCount: completedAttempts.length,
+    activeCount: attempts.filter(a => a.status === 'Active').length,
+    avgScore,
+    highestScore,
+    lowestScore,
+    passRate,
+    maxPossibleScore
+  };
+
+  // Section-wise reports
+  const sectionStats = {};
+  attempts.forEach(attempt => {
+    const student = attempt.studentId;
+    if (!student) return;
+    const sec = student.section || 'Unassigned';
+    if (!sectionStats[sec]) {
+      sectionStats[sec] = {
+        section: sec,
+        total: 0,
+        started: 0,
+        submitted: 0,
+        scores: [],
+        passedCount: 0
+      };
+    }
+    sectionStats[sec].total++;
+    if (attempt.status !== 'Not Started') {
+      sectionStats[sec].started++;
+    }
+    if (attempt.status === 'Submitted' || attempt.status === 'TimedOut') {
+      sectionStats[sec].submitted++;
+      sectionStats[sec].scores.push(attempt.score || 0);
+      if ((attempt.score || 0) >= (maxPossibleScore * 0.4)) {
+        sectionStats[sec].passedCount++;
+      }
+    }
+  });
+
+  // Include registered student users who haven't started yet!
+  students.forEach(student => {
+    const sec = student.section || 'Unassigned';
+    const hasAttempt = attempts.some(a => String(a.studentId?._id || a.studentId) === String(student._id));
+    if (!hasAttempt) {
+      if (!sectionStats[sec]) {
+        sectionStats[sec] = {
+          section: sec,
+          total: 0,
+          started: 0,
+          submitted: 0,
+          scores: [],
+          passedCount: 0
+        };
+      }
+      sectionStats[sec].total++;
+    }
+  });
+
+  const sectionReports = Object.values(sectionStats).map(sec => {
+    const avgScore = sec.scores.length > 0 ? (sec.scores.reduce((a, b) => a + b, 0) / sec.scores.length).toFixed(1) : 0;
+    const passRate = sec.submitted > 0 ? ((sec.passedCount / sec.submitted) * 100).toFixed(0) : 0;
+    return {
+      section: sec.section,
+      total: sec.total,
+      started: sec.started,
+      submitted: sec.submitted,
+      avgScore: Number(avgScore),
+      passRate: Number(passRate)
+    };
+  });
+
+  // Question Analytics
+  const questionReports = assessment.problems.map(p => {
+    const pId = String(p.problemId._id || p.problemId);
+    const title = p.problemId.title || 'Unknown';
+    const difficulty = p.problemId.difficulty || 'Medium';
+    const maxScore = p.maxScore || 100;
+
+    const pSubmissions = submissions.filter(s => String(s.problemId) === pId);
+
+    const attemptedStudents = new Set(pSubmissions.map(s => String(s.userId)));
+    const attemptCount = attemptedStudents.size;
+
+    const solvedStudents = new Set(
+      pSubmissions.filter(s => s.status === 'Success').map(s => String(s.userId))
+    );
+    const solvedCount = solvedStudents.size;
+    const solvedRate = attemptCount > 0 ? Number(((solvedCount / attemptCount) * 100).toFixed(0)) : 0;
+    const overallSolvedRate = completedAttempts.length > 0 ? Number(((solvedCount / completedAttempts.length) * 100).toFixed(0)) : 0;
+
+    return {
+      problemId: pId,
+      title,
+      difficulty,
+      maxScore,
+      attemptCount,
+      solvedCount,
+      solvedRate,
+      overallSolvedRate
+    };
+  });
+
+  return {
+    assessment: {
+      _id: assessment._id,
+      title: assessment.title,
+      startTime: assessment.startTime,
+      endTime: assessment.endTime
+    },
+    overallStats,
+    sectionReports,
+    questionReports
+  };
+}
+
+export async function saveDraft(attemptId, codeDrafts, user) {
+  const attempt = await attemptsRepo.findById(attemptId);
+  if (!attempt) throw new HttpError(404, "Attempt not found");
+
+  if (attempt.status !== 'Active') {
+    throw new HttpError(409, `Attempt is ${attempt.status.toLowerCase()} and cannot save draft`);
+  }
+
+  // Permission check: student owner or admin/faculty
+  const studentId = attempt.studentId._id || attempt.studentId;
+  if (user.role === 'student' && String(studentId) !== String(user._id)) {
+    throw new HttpError(403, "Forbidden");
+  }
+
+  return attemptsRepo.updateById(attemptId, { codeDrafts });
+}
+
+export async function lockAssessment(assessmentId, user) {
+  if (user.role === 'student') {
+    throw new HttpError(403, "Forbidden");
+  }
+  const assessment = await assessmentsRepo.findById(assessmentId);
+  if (!assessment) throw new HttpError(404, "Assessment not found");
+
+  return assessmentsRepo.updateById(assessmentId, { locked: true });
+}
+
+export async function unlockAssessment(assessmentId, user) {
+  if (user.role === 'student') {
+    throw new HttpError(403, "Forbidden");
+  }
+  const assessment = await assessmentsRepo.findById(assessmentId);
+  if (!assessment) throw new HttpError(404, "Assessment not found");
+
+  return assessmentsRepo.updateById(assessmentId, { locked: false });
+}
+
+export async function addGraceTime(attemptId, graceMinutes, user) {
+  if (user.role === 'student') {
+    throw new HttpError(403, "Forbidden");
+  }
+  const attempt = await attemptsRepo.findById(attemptId);
+  if (!attempt) throw new HttpError(404, "Attempt not found");
+
+  const newGraceMinutes = (attempt.graceMinutes || 0) + Number(graceMinutes);
+  
+  // Log event in timeline
+  const timelineEvent = {
+    event: 'GRACE_TIME_ADDED',
+    timestamp: new Date(),
+    details: { addedMinutes: Number(graceMinutes), totalGraceMinutes: newGraceMinutes }
+  };
+
+  const updateFields = { 
+    graceMinutes: newGraceMinutes,
+    $push: { timeline: timelineEvent }
+  };
+
+  // Re-activate if timed out
+  if (attempt.status === 'TimedOut') {
+    updateFields.status = 'Active';
+    updateFields.submittedAt = null;
+  }
+
+  return attemptsRepo.updateById(attemptId, updateFields);
+}
+
+export async function raiseChallenge(attemptId, reason, user) {
+  const attempt = await attemptsRepo.findById(attemptId);
+  if (!attempt) throw new HttpError(404, "Attempt not found");
+
+  const studentId = attempt.studentId._id || attempt.studentId;
+  if (String(studentId) !== String(user._id)) {
+    throw new HttpError(403, "Forbidden");
+  }
+
+  if (attempt.status === 'Active') {
+    throw new HttpError(400, "Cannot challenge an active assessment attempt");
+  }
+
+  if (attempt.challenge && attempt.challenge.status !== 'None') {
+    throw new HttpError(409, "A challenge has already been raised for this attempt");
+  }
+
+  const updateFields = {
+    'challenge.status': 'Raised',
+    'challenge.reason': reason,
+    'challenge.raisedAt': new Date(),
+    'challenge.facultyComment': '',
+    $push: {
+      timeline: {
+        event: 'CHALLENGE_RAISED',
+        timestamp: new Date(),
+        details: { reason }
+      }
+    }
+  };
+
+  return attemptsRepo.updateById(attemptId, updateFields);
+}
+
+export async function resolveChallenge(attemptId, status, facultyComment, user) {
+  const attempt = await attemptsRepo.findById(attemptId);
+  if (!attempt) throw new HttpError(404, "Attempt not found");
+
+  if (!attempt.challenge || attempt.challenge.status !== 'Raised') {
+    throw new HttpError(400, "No active challenge found to resolve");
+  }
+
+  if (!['Accepted', 'Rejected'].includes(status)) {
+    throw new HttpError(400, "Invalid status. Must be Accepted or Rejected");
+  }
+
+  const updateFields = {
+    'challenge.status': status,
+    'challenge.facultyComment': facultyComment || '',
+    'challenge.resolvedAt': new Date(),
+    $push: {
+      timeline: {
+        event: `CHALLENGE_${status.toUpperCase()}`,
+        timestamp: new Date(),
+        details: { facultyComment }
+      }
+    }
+  };
+
+  return attemptsRepo.updateById(attemptId, updateFields);
+}
+

@@ -1,11 +1,11 @@
 import AssessmentAttempt from "../../models/AssessmentAttempt.mjs";
 
 export async function findAll(filter = {}, options = {}) {
-  return AssessmentAttempt.find(filter, null, options).populate("studentId", "name email");
+  return AssessmentAttempt.find(filter, null, options).populate("studentId", "name email usn section");
 }
 
 export async function findById(id) {
-  return AssessmentAttempt.findById(id).populate("studentId", "name email").populate("assessmentId");
+  return AssessmentAttempt.findById(id).populate("studentId", "name email usn section").populate("assessmentId");
 }
 
 export async function findOne(filter) {
@@ -14,7 +14,7 @@ export async function findOne(filter) {
 
 export async function findOnePopulated(filter) {
   return AssessmentAttempt.findOne(filter)
-    .populate("studentId", "name email")
+    .populate("studentId", "name email usn section")
     .populate("assessmentId");
 }
 

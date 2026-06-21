@@ -21,6 +21,7 @@ const AssessmentSchema = new Schema(
       enum: ["Draft", "Published", "Completed"],
       default: "Draft"
     },
+    locked: { type: Boolean, default: false },
     announcements: [
       {
         message: { type: String, required: true },

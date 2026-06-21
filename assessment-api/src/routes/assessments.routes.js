@@ -15,7 +15,14 @@ import {
   getAssessmentAttendance,
   logAntiCheatingEvent,
   getAnnouncements,
-  createAnnouncement
+  createAnnouncement,
+  getAssessmentAnalytics,
+  saveDraft,
+  lockAssessment,
+  unlockAssessment,
+  addGraceTime,
+  raiseChallenge,
+  resolveChallenge
 } from "../controllers/assessments.controller.js";
 
 const router = express.Router();
@@ -125,9 +132,16 @@ router.post("/attempts/:attemptId/submit", verifyToken, authorizeRoles("student"
 router.post("/attempts/:attemptId/log-event", verifyToken, authorizeRoles("student"), logAntiCheatingEvent);
 router.get("/:_id/attempts", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), listAssessmentAttempts);
 router.get("/:_id/attendance", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), getAssessmentAttendance);
+router.get("/:_id/analytics", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), getAssessmentAnalytics);
 router.get("/attempts/:attemptId", verifyToken, getAssessmentAttemptById);
 router.get("/attempts/:attemptId/submissions", verifyToken, getAttemptSubmissions);
 router.get("/:_id/announcements", verifyToken, getAnnouncements);
 router.post("/:_id/announcements", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), createAnnouncement);
+router.post("/attempts/:attemptId/draft", verifyToken, authorizeRoles("student", "admin", "faculty", "superadmin"), saveDraft);
+router.post("/:_id/lock", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), lockAssessment);
+router.post("/:_id/unlock", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), unlockAssessment);
+router.post("/attempts/:attemptId/grace", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), addGraceTime);
+router.post("/attempts/:attemptId/challenge", verifyToken, authorizeRoles("student"), raiseChallenge);
+router.post("/attempts/:attemptId/challenge/resolve", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), resolveChallenge);
 
 export default router;

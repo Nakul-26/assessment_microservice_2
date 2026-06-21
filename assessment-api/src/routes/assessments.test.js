@@ -147,4 +147,149 @@ describe('Assessments API', () => {
     expect(getRes.body.length).toBe(1);
     expect(getRes.body[0].message).toBe('Typo in question 1 has been fixed.');
   });
+
+  it('GET /api/assessments/:id/analytics should allow admin to fetch analytics and reject student', async () => {
+    const listRes = await request(app)
+      .get('/api/assessments')
+      .set('Authorization', `Bearer ${studentToken}`);
+    const assessmentId = listRes.body[0]._id;
+
+    // Student should be rejected (403)
+    const studentRes = await request(app)
+      .get(`/api/assessments/${assessmentId}/analytics`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(studentRes.status).toBe(403);
+
+    // Admin should be allowed (200)
+    const adminRes = await request(app)
+      .get(`/api/assessments/${assessmentId}/analytics`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(adminRes.status).toBe(200);
+    expect(adminRes.body).toHaveProperty('overallStats');
+    expect(adminRes.body).toHaveProperty('sectionReports');
+    expect(adminRes.body).toHaveProperty('questionReports');
+    expect(adminRes.body.overallStats.totalStudents).toBeGreaterThanOrEqual(0);
+  });
+
+  it('should support Assessment Lock/Unlock, Grace Time, and Draft Sync operations', async () => {
+    // 1. Get assessment ID
+    const listRes = await request(app)
+      .get('/api/assessments')
+      .set('Authorization', `Bearer ${studentToken}`);
+    const assessmentId = listRes.body[0]._id;
+
+    // 2. Lock Assessment (Admin)
+    const lockRes = await request(app)
+      .post(`/api/assessments/${assessmentId}/lock`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(lockRes.status).toBe(200);
+
+    // Verify it is locked in database
+    const getRes = await request(app)
+      .get(`/api/assessments/${assessmentId}`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(getRes.body.locked).toBe(true);
+
+    // Verify student cannot start a locked assessment
+    const startRes = await request(app)
+      .post(`/api/assessments/${assessmentId}/start`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(startRes.status).toBe(409);
+
+    // 3. Unlock Assessment (Admin)
+    const unlockRes = await request(app)
+      .post(`/api/assessments/${assessmentId}/unlock`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(unlockRes.status).toBe(200);
+
+    // Start attempt now that it is unlocked
+    const startOkRes = await request(app)
+      .post(`/api/assessments/${assessmentId}/start`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(startOkRes.status).toBe(200);
+    const attemptId = startOkRes.body._id;
+
+    // 4. Save Draft
+    const codeDrafts = { codeMap: { [problemId]: 'console.log("hello");' }, langMap: { [problemId]: 'javascript' } };
+    const draftRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/draft`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ codeDrafts });
+    expect(draftRes.status).toBe(200);
+
+    // Verify draft is populated in the database
+    const attemptDetail = await request(app)
+      .get(`/api/assessments/attempts/${attemptId}`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(attemptDetail.body.codeDrafts).toEqual(codeDrafts);
+
+    // 5. Add Grace Time
+    const graceRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/grace`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ graceMinutes: 10 });
+    expect(graceRes.status).toBe(200);
+    expect(graceRes.body.graceMinutes).toBe(10);
+  });
+
+  it('should handle Challenge / Appeal workflow endpoints correctly', async () => {
+    // 1. Get assessment ID and start a new attempt (by another student or using clean database state)
+    const listRes = await request(app)
+      .get('/api/assessments')
+      .set('Authorization', `Bearer ${studentToken}`);
+    const assessmentId = listRes.body[0]._id;
+
+    // Start attempt for student
+    const startRes = await request(app)
+      .post(`/api/assessments/${assessmentId}/start`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(startRes.status).toBe(200);
+    const attemptId = startRes.body._id;
+
+    // 2. Student cannot raise challenge while attempt is Active
+    const activeChallengeRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/challenge`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ reason: 'Failed testcases explanation' });
+    expect(activeChallengeRes.status).toBe(400);
+
+    // 3. Student submits assessment
+    const submitRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/submit`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(submitRes.status).toBe(200);
+    expect(submitRes.body.status).toBe('Submitted');
+
+    // 4. Student raises challenge
+    const raiseRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/challenge`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ reason: 'I believe my solution is correct.' });
+    expect(raiseRes.status).toBe(200);
+    expect(raiseRes.body.challenge.status).toBe('Raised');
+    expect(raiseRes.body.challenge.reason).toBe('I believe my solution is correct.');
+
+    // 5. Student cannot raise challenge again
+    const doubleRaiseRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/challenge`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ reason: 'Another reason.' });
+    expect(doubleRaiseRes.status).toBe(409);
+
+    // 6. Student cannot resolve challenge
+    const studentResolveRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/challenge/resolve`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ status: 'Accepted', facultyComment: 'Approved' });
+    expect(studentResolveRes.status).toBe(403);
+
+    // 7. Admin resolves challenge with Acceptance
+    const resolveRes = await request(app)
+      .post(`/api/assessments/attempts/${attemptId}/challenge/resolve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'Accepted', facultyComment: 'Agreed. Full marks awarded.' });
+    expect(resolveRes.status).toBe(200);
+    expect(resolveRes.body.challenge.status).toBe('Accepted');
+    expect(resolveRes.body.challenge.facultyComment).toBe('Agreed. Full marks awarded.');
+  });
 });

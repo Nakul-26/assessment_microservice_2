@@ -13,6 +13,15 @@ const AssessmentAttemptSchema = new Schema(
       enum: ["Active", "Submitted", "TimedOut"],
       default: "Active"
     },
+    graceMinutes: { type: Number, default: 0 },
+    codeDrafts: { type: Schema.Types.Mixed, default: {} },
+    challenge: {
+      status: { type: String, enum: ["None", "Raised", "Accepted", "Rejected"], default: "None" },
+      reason: { type: String },
+      facultyComment: { type: String },
+      raisedAt: { type: Date },
+      resolvedAt: { type: Date }
+    },
     // Anti-cheating tracking
     tabSwitchCount: { type: Number, default: 0 },
     copyCount: { type: Number, default: 0 },

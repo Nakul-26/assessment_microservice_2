@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
-import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, Megaphone } from 'lucide-react';
+import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, Megaphone, AlertTriangle } from 'lucide-react';
 import api, { assessments } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import buildTemplate from '../utils/buildTemplate';
@@ -128,8 +128,14 @@ const AssessmentWorkspace = () => {
         setProblems(fullProblems);
 
         const savedDraft = loadDraft(attemptId);
-        const initialCodeMap = { ...(savedDraft.codeMap || {}) };
-        const initialLangMap = { ...(savedDraft.langMap || {}) };
+        const initialCodeMap = { ...(attemptData.codeDrafts?.codeMap || {}), ...(savedDraft.codeMap || {}) };
+        const initialLangMap = { ...(attemptData.codeDrafts?.langMap || {}), ...(savedDraft.langMap || {}) };
+        const initialProblemIdx = typeof savedDraft.currentProblemIndex === 'number'
+          ? savedDraft.currentProblemIndex
+          : (typeof attemptData.codeDrafts?.currentProblemIndex === 'number'
+             ? attemptData.codeDrafts.currentProblemIndex
+             : 0);
+        setCurrentProblemIndex(initialProblemIdx);
         const initialTestCasesMap = {};
         const initialActiveIdxMap = {};
 
@@ -155,8 +161,9 @@ const AssessmentWorkspace = () => {
         setPasteCount(attemptData.pasteCount || 0);
 
         const startTime = new Date(attemptData.startedAt).getTime();
-        const durationMs = assessmentData.durationMinutes * 60 * 1000;
-        const endTime = Math.min(startTime + durationMs, new Date(assessmentData.endTime).getTime());
+        const graceMs = (attemptData.graceMinutes || 0) * 60 * 1000;
+        const durationMs = (assessmentData.durationMinutes * 60 * 1000) + graceMs;
+        const endTime = Math.min(startTime + durationMs, new Date(assessmentData.endTime).getTime() + graceMs);
         const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
         setTimeLeft(remaining);
 
@@ -171,8 +178,18 @@ const AssessmentWorkspace = () => {
 
   useEffect(() => {
     if (loading || Object.keys(codeMap).length === 0) return;
-    localStorage.setItem(`assessment-draft:${attemptId}`, JSON.stringify({ codeMap, langMap }));
-  }, [attemptId, codeMap, langMap, loading]);
+    localStorage.setItem(`assessment-draft:${attemptId}`, JSON.stringify({ codeMap, langMap, currentProblemIndex }));
+
+    const timeout = setTimeout(async () => {
+      try {
+        await assessments.saveDraft(attemptId, { codeMap, langMap, currentProblemIndex });
+      } catch (err) {
+        console.error('Failed to sync draft with server:', err);
+      }
+    }, 2000);
+
+    return () => clearTimeout(timeout);
+  }, [attemptId, codeMap, langMap, currentProblemIndex, loading]);
 
   useEffect(() => () => {
     Object.values(intervalRefs.current).forEach(clearInterval);
@@ -324,9 +341,27 @@ const AssessmentWorkspace = () => {
 
     const fetchAnnouncements = async () => {
       try {
-        const res = await api.get(`/api/v1/assessments/${assessmentId}/announcements`);
-        const list = res.data || [];
+        const [announceRes, assessmentRes, attemptRes] = await Promise.all([
+          api.get(`/api/v1/assessments/${assessmentId}/announcements`),
+          assessments.get(assessmentId),
+          assessments.getAttempt(attemptId)
+        ]);
+        const list = announceRes.data || [];
         setAnnouncements(list);
+
+        const assessmentData = assessmentRes.data;
+        setAssessment(assessmentData);
+
+        const attemptData = attemptRes.data;
+        setAttempt(attemptData);
+
+        // Dynamic timer updates (graceMinutes sync)
+        const startTime = new Date(attemptData.startedAt).getTime();
+        const graceMs = (attemptData.graceMinutes || 0) * 60 * 1000;
+        const durationMs = (assessmentData.durationMinutes * 60 * 1000) + graceMs;
+        const endTime = Math.min(startTime + durationMs, new Date(assessmentData.endTime).getTime() + graceMs);
+        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        setTimeLeft(remaining);
 
         // Check if there's any new announcement since lastSeenAnnouncementTime
         const newAnnouncements = list.filter(a => new Date(a.sentAt) > new Date(lastSeenAnnouncementTime));
@@ -340,14 +375,14 @@ const AssessmentWorkspace = () => {
           return () => clearTimeout(timer);
         }
       } catch (err) {
-        console.error("Failed to fetch announcements:", err);
+        console.error("Failed to sync announcements and assessment state:", err);
       }
     };
 
     fetchAnnouncements();
     const interval = setInterval(fetchAnnouncements, 10000);
     return () => clearInterval(interval);
-  }, [assessmentId, lastSeenAnnouncementTime]);
+  }, [assessmentId, attemptId, lastSeenAnnouncementTime]);
 
   const currentProblem = problems[currentProblemIndex];
   const unreadAnnouncementsCount = announcements.filter(a => new Date(a.sentAt) > new Date(lastSeenAnnouncementTime)).length;
@@ -544,6 +579,46 @@ const AssessmentWorkspace = () => {
 
   return (
     <div className="ide-layout assessment-workspace fade-in">
+      {/* Assessment Locked Overlay */}
+      {assessment?.locked && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 999999,
+          background: 'rgba(9, 9, 11, 0.96)',
+          backdropFilter: 'blur(10px)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '24px',
+          color: 'var(--text)'
+        }}>
+          <div style={{
+            background: 'var(--surface)',
+            padding: '40px',
+            borderRadius: 'var(--radius-lg)',
+            border: '2px solid var(--error)',
+            boxShadow: '0 0 50px rgba(239, 68, 68, 0.25)',
+            maxWidth: '500px',
+            width: '100%',
+            textAlign: 'center'
+          }}>
+            <AlertTriangle size={64} color="var(--error)" style={{ margin: '0 auto 20px auto', display: 'block' }} />
+            <h2 style={{ fontSize: '1.5rem', fontWeight: '800', margin: '0 0 16px 0', color: 'var(--error)' }}>
+              Assessment Temporarily Locked
+            </h2>
+            <p style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+              The faculty coordinator has temporarily locked this assessment. Code editing, execution, and submissions are paused.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              <span className="spin" style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid var(--text-muted)', borderTopColor: 'transparent', borderRadius: '50%' }} />
+              Waiting for faculty release...
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Floating Announcement Popup Notification */}
       {activeNotification && (
         <div style={{

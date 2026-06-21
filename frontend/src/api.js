@@ -81,7 +81,14 @@ export const assessments = {
   getAttemptSubmissions: (attemptId) => api.get(`/api/v1/assessments/attempts/${attemptId}/submissions`),
   listAttempts: (assessmentId) => api.get(`/api/v1/assessments/${assessmentId}/attempts`),
   getAttendance: (id) => api.get(`/api/v1/assessments/${id}/attendance`),
-  logEvent: (attemptId, eventType) => api.post(`/api/v1/assessments/attempts/${attemptId}/log-event`, { eventType })
+  getAnalytics: (id) => api.get(`/api/v1/assessments/${id}/analytics`),
+  saveDraft: (attemptId, codeDrafts) => api.post(`/api/v1/assessments/attempts/${attemptId}/draft`, { codeDrafts }),
+  lock: (id) => api.post(`/api/v1/assessments/${id}/lock`),
+  unlock: (id) => api.post(`/api/v1/assessments/${id}/unlock`),
+  addGraceTime: (attemptId, graceMinutes) => api.post(`/api/v1/assessments/attempts/${attemptId}/grace`, { graceMinutes }),
+  logEvent: (attemptId, eventType) => api.post(`/api/v1/assessments/attempts/${attemptId}/log-event`, { eventType }),
+  raiseChallenge: (attemptId, reason) => api.post(`/api/v1/assessments/attempts/${attemptId}/challenge`, { reason }),
+  resolveChallenge: (attemptId, status, facultyComment) => api.post(`/api/v1/assessments/attempts/${attemptId}/challenge/resolve`, { status, facultyComment })
 };
 
 export const problems = {

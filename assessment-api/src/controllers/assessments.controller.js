@@ -145,3 +145,68 @@ export async function createAnnouncement(req, res, next) {
     next(err);
   }
 }
+
+export async function getAssessmentAnalytics(req, res, next) {
+  try {
+    const analytics = await assessmentsService.getAssessmentAnalytics(req.params._id, req.user);
+    res.json(analytics);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function saveDraft(req, res, next) {
+  try {
+    const attempt = await assessmentsService.saveDraft(req.params.attemptId, req.body.codeDrafts, req.user);
+    res.json(attempt);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function lockAssessment(req, res, next) {
+  try {
+    const assessment = await assessmentsService.lockAssessment(req.params._id, req.user);
+    res.json(assessment);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function unlockAssessment(req, res, next) {
+  try {
+    const assessment = await assessmentsService.unlockAssessment(req.params._id, req.user);
+    res.json(assessment);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function addGraceTime(req, res, next) {
+  try {
+    const attempt = await assessmentsService.addGraceTime(req.params.attemptId, req.body.graceMinutes, req.user);
+    res.json(attempt);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function raiseChallenge(req, res, next) {
+  try {
+    const attempt = await assessmentsService.raiseChallenge(req.params.attemptId, req.body.reason, req.user);
+    res.json(attempt);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resolveChallenge(req, res, next) {
+  try {
+    const { status, facultyComment } = req.body;
+    const attempt = await assessmentsService.resolveChallenge(req.params.attemptId, status, facultyComment, req.user);
+    res.json(attempt);
+  } catch (err) {
+    next(err);
+  }
+}
+

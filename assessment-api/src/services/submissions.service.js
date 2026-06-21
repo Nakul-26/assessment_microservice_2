@@ -39,8 +39,9 @@ export function isSampleTestCase(tc = {}) {
 }
 
 function getAttemptExpiration(attempt, assessment) {
-  const durationExpiry = new Date(attempt.startedAt).getTime() + assessment.durationMinutes * 60 * 1000;
-  return new Date(Math.min(durationExpiry, new Date(assessment.endTime).getTime()));
+  const graceMs = (attempt.graceMinutes || 0) * 60 * 1000;
+  const durationExpiry = new Date(attempt.startedAt).getTime() + (assessment.durationMinutes * 60 * 1000) + graceMs;
+  return new Date(Math.min(durationExpiry, new Date(assessment.endTime).getTime() + graceMs));
 }
 
 async function validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId }) {
@@ -65,6 +66,10 @@ async function validateAssessmentSubmission({ problemId, language, userId, asses
 
   const assessment = await assessmentsRepo.findById(assessmentId);
   if (!assessment) throw new HttpError(404, "Assessment not found");
+
+  if (assessment.locked) {
+    throw new HttpError(409, "Assessment is locked by the faculty and no longer accepts submissions");
+  }
 
   if (attempt.status !== "Active") {
     throw new HttpError(409, `Attempt is ${attempt.status.toLowerCase()} and no longer accepts submissions`);
