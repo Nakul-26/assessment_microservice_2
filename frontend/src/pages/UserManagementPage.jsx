@@ -39,6 +39,85 @@ const UserManagementPage = () => {
     }
   }, [activeTab, fetchUsers]);
 
+  const [previewUsers, setPreviewUsers] = useState([]);
+
+  const processAndValidateUsers = (rawUsers) => {
+    const seenEmails = new Set();
+    const seenUsns = new Set();
+
+    return rawUsers.map((u, i) => {
+      const name = (u.name || '').trim();
+      const email = (u.email || '').trim().toLowerCase();
+      const usn = (u.usn || '').trim();
+      const section = (u.section || '').trim();
+
+      const validationErrors = [];
+      if (!name) validationErrors.push('Missing name');
+      if (!email) {
+        validationErrors.push('Missing email');
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        validationErrors.push('Invalid email format');
+      }
+
+      if (email && seenEmails.has(email)) {
+        validationErrors.push('Duplicate email in batch');
+      }
+      if (email) seenEmails.add(email);
+
+      if (usn) {
+        if (seenUsns.has(usn)) {
+          validationErrors.push('Duplicate USN in batch');
+        }
+        seenUsns.add(usn);
+      }
+
+      return {
+        rowNum: u.rowNum || (i + 1),
+        name,
+        email,
+        usn,
+        section,
+        errors: validationErrors,
+        isValid: validationErrors.length === 0
+      };
+    });
+  };
+
+  useEffect(() => {
+    if (!usersJson.trim()) {
+      setPreviewUsers([]);
+      return;
+    }
+    try {
+      let parsed = [];
+      try {
+        parsed = JSON.parse(usersJson);
+      } catch {
+        // Try parsing as CSV-like lines: USN, Name, Email, Section
+        const lines = usersJson.split('\n').filter(line => line.trim());
+        parsed = lines.map((line) => {
+          const parts = line.split(',').map(p => p.trim());
+          if (parts.length >= 2) {
+            return {
+              usn: parts[0] || '',
+              name: parts[1] || '',
+              email: parts[2] || '',
+              section: parts[3] || ''
+            };
+          }
+          return null;
+        }).filter(Boolean);
+      }
+
+      if (Array.isArray(parsed)) {
+        const validated = processAndValidateUsers(parsed);
+        setPreviewUsers(validated);
+      }
+    } catch {
+      setPreviewUsers([]);
+    }
+  }, [usersJson]);
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -50,24 +129,32 @@ const UserManagementPage = () => {
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
         
-        // Assume first row is header: Name, Email
-        const processedUsers = data.slice(1).map(row => {
-          if (row.length >= 2 && row[1]) {
-            return { 
-              name: String(row[0] || 'Unknown').trim(), 
-              email: String(row[1]).trim().toLowerCase() 
-            };
-          }
-          return null;
-        }).filter(u => u && u.email && u.email.includes('@'));
+        const rawJson = XLSX.utils.sheet_to_json(ws);
+        
+        const mapped = rawJson.map((row, idx) => {
+          const rowKeys = Object.keys(row);
+          const getVal = (possibleHeaders) => {
+            const match = rowKeys.find(k => possibleHeaders.includes(k.toLowerCase().trim()));
+            return match ? String(row[match]).trim() : '';
+          };
 
-        if (processedUsers.length === 0) {
-          throw new Error('No valid student data found. Ensure Column A is Name and Column B is Email.');
+          return {
+            rowNum: idx + 2,
+            usn: getVal(['usn', 'roll number', 'usn/roll', 'id', 'rollno', 'student usn']),
+            name: getVal(['name', 'student name', 'full name', 'studentname']),
+            email: getVal(['email', 'email id', 'emailaddress', 'email address']),
+            section: getVal(['section', 'sec', 'class'])
+          };
+        });
+
+        if (mapped.length === 0) {
+          throw new Error('No data rows found in the sheet. Please make sure the headers are USN, Name, Email, Section.');
         }
 
-        setUsersJson(JSON.stringify(processedUsers, null, 2));
+        const validated = processAndValidateUsers(mapped);
+        setPreviewUsers(validated);
+        setUsersJson(JSON.stringify(mapped.map(({ usn, name, email, section }) => ({ usn, name, email, section })), null, 2));
         setError(null);
       } catch (err) {
         console.error(err);
@@ -79,36 +166,41 @@ const UserManagementPage = () => {
 
   const handleBulkImport = async (e) => {
     e.preventDefault();
+    if (previewUsers.length === 0) {
+      setError('No student records loaded to import');
+      return;
+    }
+
+    const invalidUsersCount = previewUsers.filter(u => !u.isValid).length;
+    if (invalidUsersCount > 0) {
+      if (!window.confirm(`There are ${invalidUsersCount} rows with errors. They will be skipped. Proceed with importing valid users?`)) {
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     setResults(null);
 
     try {
-      let usersToImport;
-      try {
-        usersToImport = JSON.parse(usersJson);
-      } catch {
-        const lines = usersJson.split('\n').filter(line => line.trim());
-        usersToImport = lines.map(line => {
-          const parts = line.split(',').map(p => p.trim());
-          if (parts.length >= 2) {
-            return { name: parts[0], email: parts[1] };
-          }
-          return null;
-        }).filter(u => u !== null);
-      }
+      const validUsersToImport = previewUsers
+        .filter(u => u.isValid)
+        .map(({ name, email, usn, section }) => ({ name, email, usn, section }));
 
-      if (!Array.isArray(usersToImport) || usersToImport.length === 0) {
-        throw new Error('No valid user data found. Please check the format.');
+      if (validUsersToImport.length === 0) {
+        throw new Error('No valid student records found to import');
       }
 
       const res = await admin.bulkImportStudents({
-        users: usersToImport,
+        users: validUsersToImport,
         defaultPassword
       });
 
       setResults(res.data);
       setUsersJson('');
+      setPreviewUsers([]);
+      // Reload current users page
+      fetchUsers();
     } catch (err) {
       console.error('Import failed', err);
       setError(err.response?.data?.error || err.message || 'Import failed');
@@ -132,21 +224,40 @@ const UserManagementPage = () => {
 
   const downloadSample = () => {
     const sampleData = [
-      ["Name", "Email"],
-      ["John Doe", "john@college.edu"],
-      ["Jane Smith", "jane@college.edu"]
+      ["USN", "Name", "Email", "Section"],
+      ["1BY23CS001", "John Doe", "john@college.edu", "A"],
+      ["1BY23CS002", "Jane Smith", "jane@college.edu", "A"]
     ];
     const ws = XLSX.utils.aoa_to_sheet(sampleData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Students");
-    XLSX.writeFile(wb, "student_import_sample.xlsx");
+    XLSX.writeFile(wb, "student_import_template.xlsx");
+  };
+
+  const downloadCredentials = () => {
+    if (!results || !results.created || results.created.length === 0) return;
+    
+    const data = results.created.map(u => ({
+      USN: u.usn || '',
+      Name: u.name || '',
+      Email: u.email || '',
+      Section: u.section || '',
+      Password: u.password || ''
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Credentials");
+    XLSX.writeFile(wb, "student_credentials.xlsx");
   };
 
   const exportAllUsers = () => {
     const data = users.map(u => ({
       ID: u.id,
       Name: u.name,
+      USN: u.usn || '',
       Email: u.email,
+      Section: u.section || '',
       Role: u.role
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -171,7 +282,7 @@ const UserManagementPage = () => {
           </button>
           <button 
             className={`button ${activeTab === 'bulk' ? 'button-primary' : 'button-outline'}`}
-            onClick={() => setActiveTab('bulk')}
+            onClick={() => { setActiveTab('bulk'); setResults(null); }}
           >
             <Upload size={18} /> Bulk Import
           </button>
@@ -186,7 +297,7 @@ const UserManagementPage = () => {
               <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input 
                 type="text" 
-                placeholder="Search by name or email..." 
+                placeholder="Search by name, email, or USN..." 
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                 style={{ paddingLeft: '40px', background: 'var(--bg)', width: '100%' }}
@@ -211,6 +322,8 @@ const UserManagementPage = () => {
               <thead>
                 <tr>
                   <th>Name & Email</th>
+                  <th>USN</th>
+                  <th>Section</th>
                   <th>Role</th>
                   <th>ID</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
@@ -223,6 +336,8 @@ const UserManagementPage = () => {
                       <div style={{ fontWeight: '600' }}>{user.name}</div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{user.email}</div>
                     </td>
+                    <td style={{ fontFamily: 'monospace', fontWeight: '500' }}>{user.usn || '-'}</td>
+                    <td>{user.section || '-'}</td>
                     <td>
                       <span className={`tag ${user.role === 'admin' ? 'difficulty-hard' : (user.role === 'faculty' ? 'difficulty-medium' : '')}`} style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
                         {user.role}
@@ -242,7 +357,7 @@ const UserManagementPage = () => {
                 ))}
                 {users.length === 0 && !loading && (
                   <tr>
-                    <td colSpan="4" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+                    <td colSpan="6" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
                       No users found.
                     </td>
                   </tr>
@@ -275,128 +390,198 @@ const UserManagementPage = () => {
       )}
 
       {activeTab === 'bulk' && (
-        <div className="grid-2-col fade-in">
-          {/* Import Form */}
-          <div className="problem-card">
-            <h3 className="mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
-              <UserPlus size={22} color="var(--primary)" /> Import Students
-            </h3>
-
-            <div className="mb-8 p-8" style={{ background: 'var(--bg)', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--border)', textAlign: 'center' }}>
-              <FileSpreadsheet size={48} className="text-muted mb-4" style={{ margin: '0 auto' }} />
-              <h4 className="mb-2">Upload Spreadsheet</h4>
-              <p className="text-muted mb-6" style={{ fontSize: '0.9rem' }}>Upload .xlsx or .csv (Column A: Name, Column B: Email)</p>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileUpload} 
-                accept=".xlsx, .xls, .csv" 
-                style={{ display: 'none' }} 
-              />
-              <button 
-                type="button" 
-                className="button button-primary" 
-                onClick={() => fileInputRef.current.click()}
-              >
-                <Upload size={18} /> Select File
-              </button>
-            </div>
-            
-            <form onSubmit={handleBulkImport}>
-              <div className="form-group mb-6">
-                <label className="label">Default Password for All</label>
-                <input 
-                  type="text" 
-                  className="input" 
-                  value={defaultPassword}
-                  onChange={(e) => setDefaultPassword(e.target.value)}
-                  placeholder="e.g. Student@2026"
-                  required
-                />
-                <p className="form-hint">
-                  Students will use this as their initial login password.
-                </p>
-              </div>
-
-              <div className="form-group mb-6">
-                <div className="flex-between mb-2">
-                  <label className="label" style={{ margin: 0 }}>Review Data (JSON)</label>
-                  <button type="button" onClick={downloadSample} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Download size={14} /> Download Excel Template
-                  </button>
-                </div>
-                <textarea 
-                  className="input" 
-                  style={{ minHeight: '250px', fontFamily: 'var(--font-mono, "JetBrains Mono", monospace)', fontSize: '0.9rem', lineHeight: '1.5' }}
-                  value={usersJson}
-                  onChange={(e) => setUsersJson(e.target.value)}
-                  placeholder={`PASTE JSON:
-[
-  {"name": "John Doe", "email": "john@college.edu"},
-  ...
-]
-
-OR UPLOAD EXCEL FILE ABOVE`}
-                  required
-                />
-              </div>
-
-              {error && (
-                <div className="error-box mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
-                  <AlertCircle size={18} /> {error}
-                </div>
-              )}
-
-              <button type="submit" className="button button-primary w-full" disabled={loading} style={{ height: '48px', fontSize: '1rem' }}>
-                {loading ? 'Processing Import...' : 'Start Bulk Onboarding'}
-              </button>
-            </form>
-          </div>
-
-          {/* Instructions & Results */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="grid-2-col fade-in" style={{ gridTemplateColumns: previewUsers.length > 0 || results ? '1fr' : '1fr 1fr' }}>
+          {/* Left panel: Upload and Input forms */}
+          {!results && (
             <div className="problem-card">
-              <h4 className="mb-4">Onboarding Instructions</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div className="flex-center gap-3" style={{ justifyContent: 'flex-start' }}>
-                  <div style={{ background: 'var(--primary-glow)', color: 'var(--primary)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '0.9rem' }}>1</div>
-                  <p className="text-secondary" style={{ fontSize: '0.9rem', margin: 0 }}>Upload an Excel file or paste a JSON student list.</p>
+              <h3 className="mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
+                <UserPlus size={22} color="var(--primary)" /> Import Students
+              </h3>
+
+              <div className="mb-8 p-8" style={{ background: 'var(--bg)', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--border)', textAlign: 'center' }}>
+                <FileSpreadsheet size={48} className="text-muted mb-4" style={{ margin: '0 auto' }} />
+                <h4 className="mb-2">Upload Student Sheet</h4>
+                <p className="text-muted mb-6" style={{ fontSize: '0.9rem' }}>Upload .xlsx, .xls, or .csv containing USN, Name, Email, Section</p>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileUpload} 
+                  accept=".xlsx, .xls, .csv" 
+                  style={{ display: 'none' }} 
+                />
+                <button 
+                  type="button" 
+                  className="button button-primary" 
+                  onClick={() => fileInputRef.current.click()}
+                >
+                  <Upload size={18} /> Select Excel/CSV
+                </button>
+              </div>
+              
+              <form onSubmit={handleBulkImport}>
+                <div className="form-group mb-6">
+                  <label className="label">Default Password for All</label>
+                  <input 
+                    type="text" 
+                    className="input" 
+                    value={defaultPassword}
+                    onChange={(e) => setDefaultPassword(e.target.value)}
+                    placeholder="e.g. Student@2026"
+                    required
+                  />
+                  <p className="form-hint">
+                    Initial login password. Leave blank if random password auto-generation per student is preferred.
+                  </p>
                 </div>
-                <div className="flex-center gap-3" style={{ justifyContent: 'flex-start' }}>
-                  <div style={{ background: 'var(--primary-glow)', color: 'var(--primary)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '0.9rem' }}>2</div>
-                  <p className="text-secondary" style={{ fontSize: '0.9rem', margin: 0 }}>Review the data in the text area before starting.</p>
+
+                <div className="form-group mb-6">
+                  <div className="flex-between mb-2">
+                    <label className="label" style={{ margin: 0 }}>Review or Paste CSV Data (USN,Name,Email,Section)</label>
+                    <button type="button" onClick={downloadSample} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Download size={14} /> Download Template
+                    </button>
+                  </div>
+                  <textarea 
+                    className="input" 
+                    style={{ minHeight: '150px', fontFamily: 'var(--font-mono, "JetBrains Mono", monospace)', fontSize: '0.9rem', lineHeight: '1.5' }}
+                    value={usersJson}
+                    onChange={(e) => setUsersJson(e.target.value)}
+                    placeholder={`PASTE JSON OR CSV:
+USN,Name,Email,Section
+1BY23CS001,John Doe,john@college.edu,A
+1BY23CS002,Jane Smith,jane@college.edu,B`}
+                  />
                 </div>
-                <div className="flex-center gap-3" style={{ justifyContent: 'flex-start' }}>
-                  <div style={{ background: 'var(--primary-glow)', color: 'var(--primary)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '0.9rem' }}>3</div>
-                  <p className="text-secondary" style={{ fontSize: '0.9rem', margin: 0 }}>Duplicates will be skipped automatically.</p>
+
+                {error && (
+                  <div className="error-box mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
+                    <AlertCircle size={18} /> {error}
+                  </div>
+                )}
+
+                {previewUsers.length > 0 && (
+                  <button type="submit" className="button button-primary w-full" disabled={loading} style={{ height: '48px', fontSize: '1rem' }}>
+                    {loading ? 'Processing Import...' : `Onboard ${previewUsers.filter(u => u.isValid).length} Valid Students`}
+                  </button>
+                )}
+              </form>
+            </div>
+          )}
+
+          {/* Right panel: Preview or Results */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {!results && previewUsers.length === 0 && (
+              <div className="problem-card">
+                <h4 className="mb-4">Onboarding Instructions</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="flex-center gap-3" style={{ justifyContent: 'flex-start' }}>
+                    <div style={{ background: 'var(--primary-glow)', color: 'var(--primary)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '0.9rem' }}>1</div>
+                    <p className="text-secondary" style={{ fontSize: '0.9rem', margin: 0 }}>Upload an Excel file or paste a student list with column headers.</p>
+                  </div>
+                  <div className="flex-center gap-3" style={{ justifyContent: 'flex-start' }}>
+                    <div style={{ background: 'var(--primary-glow)', color: 'var(--primary)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '0.9rem' }}>2</div>
+                    <p className="text-secondary" style={{ fontSize: '0.9rem', margin: 0 }}>The system will parse columns: USN (optional), Name, Email, and Section (optional).</p>
+                  </div>
+                  <div className="flex-center gap-3" style={{ justifyContent: 'flex-start' }}>
+                    <div style={{ background: 'var(--primary-glow)', color: 'var(--primary)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '0.9rem' }}>3</div>
+                    <p className="text-secondary" style={{ fontSize: '0.9rem', margin: 0 }}>Verify data sanity, identify duplicates instantly in the interactive preview grid, and click Onboard.</p>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {!results && previewUsers.length > 0 && (
+              <div className="problem-card fade-in">
+                <div className="flex-between mb-4">
+                  <h4 style={{ margin: 0 }}>Import Preview ({previewUsers.length} Students Detected)</h4>
+                  <div className="flex-center gap-2">
+                    <span className="tag status-success" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', border: 'none' }}>
+                      {previewUsers.filter(u => u.isValid).length} Valid
+                    </span>
+                    {previewUsers.filter(u => !u.isValid).length > 0 && (
+                      <span className="tag status-error" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error)', border: 'none' }}>
+                        {previewUsers.filter(u => !u.isValid).length} Errors
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                  <table className="table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr>
+                        <th>USN</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Section</th>
+                        <th style={{ textAlign: 'right' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewUsers.map((u, i) => (
+                        <tr key={i} style={{ opacity: u.isValid ? 1 : 0.7 }}>
+                          <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{u.usn || '-'}</td>
+                          <td style={{ fontWeight: '500' }}>{u.name || <span className="text-muted" style={{ fontStyle: 'italic' }}>empty</span>}</td>
+                          <td style={{ fontSize: '0.85rem' }}>{u.email || <span className="text-muted" style={{ fontStyle: 'italic' }}>empty</span>}</td>
+                          <td>{u.section || '-'}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {u.isValid ? (
+                              <span style={{ color: 'var(--success)', fontSize: '0.8rem', fontWeight: '600' }}>Ready</span>
+                            ) : (
+                              <span style={{ color: 'var(--error)', fontSize: '0.8rem', fontWeight: '600' }}>
+                                {u.errors[0]}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {results && (
-              <div className="problem-card fade-in" style={{ borderColor: 'var(--success)', background: 'rgba(16, 185, 129, 0.02)' }}>
-                <h4 className="mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start', color: 'var(--success)' }}>
-                  <CheckCircle size={20} /> Import Results
-                </h4>
+              <div className="problem-card fade-in" style={{ borderColor: 'var(--success)', background: 'rgba(16, 185, 129, 0.01)' }}>
+                <h3 className="mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start', color: 'var(--success)' }}>
+                  <CheckCircle size={24} /> Import Complete
+                </h3>
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-                  <div style={{ background: 'var(--bg)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.75rem', fontWeight: '800', color: 'var(--success)' }}>{results.count}</div>
-                    <div className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.05em' }}>Imported</div>
+                  <div style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                    <div style={{ fontSize: '2.25rem', fontWeight: '800', color: 'var(--success)' }}>{results.count}</div>
+                    <div className="text-muted" style={{ fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.05em', marginTop: '4px' }}>Created Accounts</div>
                   </div>
-                  <div style={{ background: 'var(--bg)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.75rem', fontWeight: '800', color: results.errors.length > 0 ? 'var(--error)' : 'var(--text-muted)' }}>{results.errors.length}</div>
-                    <div className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.05em' }}>Skipped</div>
+                  <div style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                    <div style={{ fontSize: '2.25rem', fontWeight: '800', color: results.errors.length > 0 ? 'var(--error)' : 'var(--text-muted)' }}>{results.errors.length}</div>
+                    <div className="text-muted" style={{ fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.05em', marginTop: '4px' }}>Failed/Skipped</div>
                   </div>
+                </div>
+
+                <div className="flex-center gap-3 mb-8">
+                  {results.created.length > 0 && (
+                    <button className="button button-primary" onClick={downloadCredentials} style={{ flex: 1, height: '44px' }}>
+                      <Download size={16} /> Download Credentials CSV
+                    </button>
+                  )}
+                  <button className="button button-outline" onClick={() => setResults(null)} style={{ flex: 1, height: '44px' }}>
+                    Done
+                  </button>
                 </div>
 
                 {results.errors.length > 0 && (
                   <div>
-                    <h5 className="mb-3 text-muted" style={{ fontSize: '0.85rem', textTransform: 'uppercase' }}>Details on Skipped Users:</h5>
-                    <div style={{ maxHeight: '250px', overflowY: 'auto', background: 'var(--bg)', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                    <h4 className="mb-3 text-muted" style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Details on skipped rows:</h4>
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', background: 'var(--bg)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
                       {results.errors.map((err, i) => (
                         <div key={i} className="mb-2 pb-2 flex-between" style={{ fontSize: '0.85rem', borderBottom: i < results.errors.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                          <span style={{ fontWeight: '600' }}>{err.email}</span>
-                          <span className="tag" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error)', border: 'none' }}>{err.error}</span>
+                          <div>
+                            <span style={{ color: 'var(--text-muted)', marginRight: '8px' }}>Row {err.row || i+1}:</span>
+                            <span style={{ fontWeight: '600' }}>{err.email || err.usn || 'Unknown'}</span>
+                          </div>
+                          <span className="tag" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error)', border: 'none', fontSize: '0.8rem' }}>
+                            {err.error}
+                          </span>
                         </div>
                       ))}
                     </div>

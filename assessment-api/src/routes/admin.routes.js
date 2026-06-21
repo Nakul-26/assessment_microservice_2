@@ -170,4 +170,70 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
   }
 });
 
+import * as submissionsService from "../services/submissions.service.js";
+
+router.post("/rejudge/submission/:submissionId", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
+  try {
+    const result = await submissionsService.rejudgeSubmission(req.params.submissionId);
+    
+    const auditInfo = {
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    };
+    await auditService.logEvent({
+      event: "REJUDGE_SUBMISSION",
+      userId: req.user.id,
+      details: { submissionId: req.params.submissionId, problemId: result.problemId },
+      ...auditInfo
+    });
+
+    res.json({ msg: "Rejudge scheduled successfully", submission: result });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+router.post("/rejudge/problem/:problemId", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
+  try {
+    const assessmentId = req.query.assessmentId || null;
+    const result = await submissionsService.rejudgeProblemSubmissions(req.params.problemId, assessmentId);
+    
+    const auditInfo = {
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    };
+    await auditService.logEvent({
+      event: "REJUDGE_PROBLEM",
+      userId: req.user.id,
+      details: { problemId: req.params.problemId, assessmentId },
+      ...auditInfo
+    });
+
+    res.json({ msg: `Rejudge scheduled successfully for ${result.count} submissions`, count: result.count });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+router.post("/rejudge/assessment/:assessmentId", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
+  try {
+    const result = await submissionsService.rejudgeAssessmentSubmissions(req.params.assessmentId);
+    
+    const auditInfo = {
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    };
+    await auditService.logEvent({
+      event: "REJUDGE_ASSESSMENT",
+      userId: req.user.id,
+      details: { assessmentId: req.params.assessmentId },
+      ...auditInfo
+    });
+
+    res.json({ msg: `Rejudge scheduled successfully for ${result.count} submissions`, count: result.count });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
 export default router;

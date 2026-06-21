@@ -12,11 +12,13 @@ function toPublicUser(user) {
     name: user.name,
     email: user.email,
     role: user.role,
+    usn: user.usn || null,
+    section: user.section || null,
     collegeId: user.collegeId || null
   };
 }
 
-export async function register({ name, email, password, role, collegeId }) {
+export async function register({ name, email, password, role, collegeId, usn, section }) {
   const normalizedCollegeId = typeof collegeId === "string" ? collegeId.trim() : collegeId;
   if (normalizedCollegeId && !mongoose.isValidObjectId(normalizedCollegeId)) {
     throw new HttpError(400, "Invalid collegeId", {
@@ -24,17 +26,27 @@ export async function register({ name, email, password, role, collegeId }) {
     });
   }
 
-  const existing = await User.findOne({ email: email.toLowerCase() });
+  const emailLower = email.toLowerCase();
+  const existing = await User.findOne({ email: emailLower });
   if (existing) {
     throw new HttpError(409, "Email already registered", { message: "Email already registered" });
+  }
+
+  if (usn) {
+    const existingUsn = await User.findOne({ usn: usn.trim() });
+    if (existingUsn) {
+      throw new HttpError(409, "USN already registered", { message: "USN already registered" });
+    }
   }
 
   const hashed = await bcrypt.hash(password, 10);
   const user = await User.create({
     name,
-    email: email.toLowerCase(),
+    email: emailLower,
     password: hashed,
     role,
+    usn: usn ? usn.trim() : undefined,
+    section: section ? section.trim() : undefined,
     collegeId: normalizedCollegeId || undefined
   });
 
@@ -54,34 +66,110 @@ export async function bulkRegister(users, defaultPassword, collegeId) {
     count: 0
   };
 
-  const hashedDefault = await bcrypt.hash(defaultPassword, 10);
+  const seenEmails = new Set();
+  const seenUsns = new Set();
+  const verifiedUsersToCreate = [];
 
-  for (const userData of users) {
+  for (let i = 0; i < users.length; i++) {
+    const userData = users[i];
+    const email = userData.email ? userData.email.trim().toLowerCase() : "";
+    const usn = userData.usn ? userData.usn.trim() : "";
+    const name = userData.name ? userData.name.trim() : "";
+    const section = userData.section ? userData.section.trim() : "";
+
+    if (!name) {
+      results.errors.push({ row: i + 1, email, usn, error: "Name is required" });
+      continue;
+    }
+    if (!email) {
+      results.errors.push({ row: i + 1, email, usn, error: "Email is required" });
+      continue;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      results.errors.push({ row: i + 1, email, usn, error: "Invalid email format" });
+      continue;
+    }
+
+    if (seenEmails.has(email)) {
+      results.errors.push({ row: i + 1, email, usn, error: "Duplicate email in upload batch" });
+      continue;
+    }
+    seenEmails.add(email);
+
+    if (usn) {
+      if (seenUsns.has(usn)) {
+        results.errors.push({ row: i + 1, email, usn, error: "Duplicate USN in upload batch" });
+        continue;
+      }
+      seenUsns.add(usn);
+    }
+
     try {
-      const email = userData.email.toLowerCase();
-      const existing = await User.findOne({ email });
-      
-      if (existing) {
-        results.errors.push({ email, error: "Email already exists" });
+      const existingEmail = await User.findOne({ email });
+      if (existingEmail) {
+        results.errors.push({ row: i + 1, email, usn, error: "Email already registered in system" });
         continue;
       }
 
+      if (usn) {
+        const existingUsn = await User.findOne({ usn });
+        if (existingUsn) {
+          results.errors.push({ row: i + 1, email, usn, error: "USN already registered in system" });
+          continue;
+        }
+      }
+
+      let plainPassword = userData.password || defaultPassword;
+      if (!plainPassword) {
+        plainPassword = Math.random().toString(36).substring(2, 10);
+      }
+
+      verifiedUsersToCreate.push({
+        name,
+        email,
+        plainPassword,
+        usn: usn || undefined,
+        section: section || undefined
+      });
+    } catch (err) {
+      results.errors.push({ row: i + 1, email, usn, error: `Validation error: ${err.message}` });
+    }
+  }
+
+  const createdIds = [];
+  try {
+    for (const userData of verifiedUsersToCreate) {
+      const hashedPassword = await bcrypt.hash(userData.plainPassword, 10);
       const user = await User.create({
         name: userData.name,
-        email,
-        password: hashedDefault,
+        email: userData.email,
+        password: hashedPassword,
+        usn: userData.usn,
+        section: userData.section,
         role: "student",
         collegeId: collegeId || undefined
       });
 
-      results.created.push(toPublicUser(user));
-      results.count++;
-    } catch (err) {
-      results.errors.push({ 
-        email: userData.email, 
-        error: err.message 
+      createdIds.push(user._id);
+
+      results.created.push({
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        usn: user.usn || null,
+        section: user.section || null,
+        role: user.role,
+        password: userData.plainPassword
       });
+      results.count++;
     }
+  } catch (creationError) {
+    console.error("Catastrophic error during bulk registration, rolling back...", creationError);
+    if (createdIds.length > 0) {
+      await User.deleteMany({ _id: { $in: createdIds } });
+    }
+    throw new HttpError(500, `Catastrophic import error: ${creationError.message}. All modifications in this batch have been rolled back.`);
   }
 
   return results;

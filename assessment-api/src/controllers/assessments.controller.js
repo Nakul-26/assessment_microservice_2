@@ -127,3 +127,21 @@ export async function getAttemptSubmissions(req, res, next) {
     next(err);
   }
 }
+
+export async function getAnnouncements(req, res, next) {
+  try {
+    const announcements = await assessmentsService.getAnnouncements(req.params._id);
+    res.json(announcements);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createAnnouncement(req, res, next) {
+  try {
+    const announcement = await assessmentsService.createAnnouncement(req.params._id, req.body.message);
+    res.status(201).json(announcement);
+  } catch (err) {
+    next(err);
+  }
+}

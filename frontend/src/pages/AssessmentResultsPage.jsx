@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Download, Users, CheckCircle, Clock, AlertCircle, Search, RefreshCw, BarChart3, ChevronRight, FileSpreadsheet, MonitorOff, Copy, ClipboardPaste, Maximize, AlertTriangle, Trophy } from 'lucide-react';
+import { Download, Users, CheckCircle, Clock, AlertCircle, Search, RefreshCw, BarChart3, ChevronRight, FileSpreadsheet, MonitorOff, Copy, ClipboardPaste, Maximize, AlertTriangle, Trophy, Megaphone } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { assessments } from '../api';
+import api, { assessments } from '../api';
 
 const AssessmentResultsPage = () => {
   const { id } = useParams();
@@ -14,6 +14,7 @@ const AssessmentResultsPage = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [riskFilter, setRiskFilter] = useState('');
+  const [announcementText, setAnnouncementText] = useState('');
 
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -33,6 +34,49 @@ const AssessmentResultsPage = () => {
       setRefreshing(false);
     }
   }, [id]);
+
+  const handleSendAnnouncement = async () => {
+    if (!announcementText.trim()) return;
+    try {
+      await api.post(`/api/v1/assessments/${id}/announcements`, { message: announcementText });
+      setAnnouncementText('');
+      fetchData(true);
+    } catch (err) {
+      alert(err.response?.data?.msg || 'Failed to send announcement');
+    }
+  };
+
+  const handleRejudgeAssessment = async () => {
+    if (!window.confirm("Are you sure you want to rejudge all submissions for this entire assessment? This will reset all student scores and queue them for evaluation. This action is irreversible.")) {
+      return;
+    }
+    try {
+      setRefreshing(true);
+      await api.post(`/api/v1/admin/rejudge/assessment/${id}`);
+      alert("Rejudging scheduled successfully for all submissions. Dashboard stats will refresh dynamically as tests complete.");
+      fetchData(true);
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to trigger rejudge");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleRejudgeProblem = async (problemId, problemTitle) => {
+    if (!window.confirm(`Are you sure you want to rejudge all submissions for "${problemTitle}" in this assessment?`)) {
+      return;
+    }
+    try {
+      setRefreshing(true);
+      await api.post(`/api/v1/admin/rejudge/problem/${problemId}?assessmentId=${id}`);
+      alert(`Rejudging scheduled successfully for challenge: ${problemTitle}.`);
+      fetchData(true);
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to trigger rejudge");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -159,6 +203,15 @@ const AssessmentResultsPage = () => {
             <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
             Refresh
           </button>
+          <button 
+            className="button button-outline" 
+            onClick={handleRejudgeAssessment} 
+            disabled={refreshing}
+            style={{ color: 'var(--warning)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+          >
+            <RefreshCw size={16} />
+            Rejudge All
+          </button>
           <button className="button button-primary" onClick={exportToExcel}>
             <FileSpreadsheet size={16} />
             Export to Excel
@@ -197,49 +250,143 @@ const AssessmentResultsPage = () => {
       </div>
 
       {/* Insights Section */}
-      <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-        <div className="problem-card" style={{ borderLeft: '4px solid var(--warning)' }}>
-          <div className="flex-between mb-4">
-            <h3 className="flex-center gap-2" style={{ margin: 0 }}><AlertTriangle size={18} color="var(--warning)" /> Integrity Insights</h3>
-            <span className="tag" style={getRiskTagStyle('High')}>{stats.highRisk} High Risk</span>
+      <div className="grid grid-cols-3 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '24px' }}>
+        <div className="problem-card" style={{ borderLeft: '4px solid var(--warning)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div className="flex-between mb-4">
+              <h3 className="flex-center gap-2" style={{ margin: 0 }}><AlertTriangle size={18} color="var(--warning)" /> Integrity Insights</h3>
+              <span className="tag" style={getRiskTagStyle('High')}>{stats.highRisk} High Risk</span>
+            </div>
+            <p className="text-secondary mb-4" style={{ fontSize: '0.9rem' }}>
+              {stats.highRisk > 0 
+                ? `${stats.highRisk} student(s) flagged for highly suspicious activity. We recommend reviewing their detailed attempts.`
+                : 'No students flagged for high-risk behavior. Academic integrity appears strong.'}
+            </p>
           </div>
-          <p className="text-secondary mb-4" style={{ fontSize: '0.9rem' }}>
-            {stats.highRisk > 0 
-              ? `${stats.highRisk} student(s) flagged for highly suspicious activity (excessive tab switches, pastes, or leaving fullscreen). We recommend reviewing their detailed attempts.`
-              : 'No students flagged for high-risk behavior. Academic integrity appears strong.'}
-          </p>
           <button 
             className="button button-outline" 
-            style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+            style={{ padding: '6px 12px', fontSize: '0.85rem', width: 'fit-content' }}
             onClick={() => setRiskFilter('High')}
           >
             Filter High Risk
           </button>
         </div>
 
-        <div className="problem-card" style={{ borderLeft: '4px solid var(--primary)' }}>
-          <div className="flex-between mb-4">
-            <h3 className="flex-center gap-2" style={{ margin: 0 }}><Trophy size={18} color="var(--primary)" /> Performance Insights</h3>
-            <span className="tag difficulty-easy">{stats.passRate}% Pass Rate</span>
-          </div>
-          <p className="text-secondary mb-3" style={{ fontSize: '0.9rem' }}>
-            Top Performers:
-          </p>
-          {topPerformers.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {topPerformers.map((p, idx) => (
-                <div key={p.studentId} className="flex-between" style={{ background: 'var(--bg)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                  <div className="flex-center gap-2">
-                    <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>#{idx + 1}</span>
-                    <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>{p.name}</span>
-                  </div>
-                  <span style={{ fontWeight: '700', color: 'var(--primary)' }}>{p.score} pts</span>
-                </div>
-              ))}
+        <div className="problem-card" style={{ borderLeft: '4px solid var(--primary)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div className="flex-between mb-4">
+              <h3 className="flex-center gap-2" style={{ margin: 0 }}><Trophy size={18} color="var(--primary)" /> Performance Insights</h3>
+              <span className="tag difficulty-easy">{stats.passRate}% Pass Rate</span>
             </div>
-          ) : (
-            <p className="text-muted" style={{ fontSize: '0.9rem' }}>No submissions yet.</p>
-          )}
+            <p className="text-secondary mb-3" style={{ fontSize: '0.9rem' }}>
+              Top Performers:
+            </p>
+            {topPerformers.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {topPerformers.map((p, idx) => (
+                  <div key={p.studentId} className="flex-between" style={{ background: 'var(--bg)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+                    <div className="flex-center gap-2">
+                      <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>#{idx + 1}</span>
+                      <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>{p.name}</span>
+                    </div>
+                    <span style={{ fontWeight: '700', color: 'var(--primary)' }}>{p.score} pts</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted" style={{ fontSize: '0.9rem' }}>No submissions yet.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="problem-card" style={{ borderLeft: '4px solid var(--success)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div className="flex-between mb-4">
+              <h3 className="flex-center gap-2" style={{ margin: 0 }}>
+                <Megaphone size={18} color="var(--success)" /> Live Announcements
+              </h3>
+              <span className="tag" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)' }}>
+                {assessment.announcements?.length || 0} Sent
+              </span>
+            </div>
+            
+            <div style={{
+              overflowY: 'auto',
+              maxHeight: '140px',
+              height: '140px',
+              marginBottom: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '8px',
+              background: 'var(--bg)'
+            }}>
+              {assessment.announcements && assessment.announcements.length > 0 ? (
+                [...assessment.announcements].reverse().map((announce, idx) => (
+                  <div key={idx} style={{ fontSize: '0.85rem', borderBottom: idx < assessment.announcements.length - 1 ? '1px solid var(--border)' : 'none', paddingBottom: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '2px' }}>
+                      <span style={{ fontWeight: '700' }}>Broadcast</span>
+                      <span>{new Date(announce.sentAt).toLocaleTimeString()}</span>
+                    </div>
+                    <div style={{ color: 'var(--text)', fontWeight: '500' }}>{announce.message}</div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  No announcements sent yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input 
+              type="text" 
+              placeholder="Send announcement..." 
+              value={announcementText}
+              onChange={(e) => setAnnouncementText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSendAnnouncement(); }}
+              style={{ flex: 1, padding: '8px 12px', fontSize: '0.85rem', background: 'var(--bg)' }}
+            />
+            <button 
+              className="button button-primary" 
+              style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+              onClick={handleSendAnnouncement}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Problems & Administrative Actions */}
+      <div className="problem-card mb-8">
+        <h3 className="mb-4">Assessment Challenges & Rejudge Control</h3>
+        <p className="text-secondary mb-6" style={{ fontSize: '0.9rem' }}>
+          Rejudge submissions if verification logic, correct answers, or templates were updated during the assessment window.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+          {assessment.problems?.map((p) => {
+            const probId = p.problemId?._id || p.problemId;
+            const probTitle = p.problemId?.title || 'Unknown Challenge';
+            return (
+              <div key={probId} className="flex-between" style={{ background: 'var(--bg)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                <div>
+                  <h4 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: '700' }}>{probTitle}</h4>
+                  <span className="text-muted" style={{ fontSize: '0.8rem' }}>Max Score: {p.maxScore || 100} pts</span>
+                </div>
+                <button
+                  className="button button-outline"
+                  onClick={() => handleRejudgeProblem(probId, probTitle)}
+                  style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--warning)', borderColor: 'rgba(245, 158, 11, 0.3)' }}
+                >
+                  <RefreshCw size={14} style={{ marginRight: '4px' }} /> Rejudge Problem
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 

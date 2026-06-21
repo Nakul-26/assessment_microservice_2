@@ -187,6 +187,26 @@ export async function submitSolution({ problemId, code, language, userId, assess
 
   const submission = await submissionsRepo.create(submissionData);
 
+  if (attemptId) {
+    try {
+      await attemptsRepo.updateById(attemptId, {
+        $push: {
+          timeline: {
+            event: 'SUBMIT_PROBLEM',
+            timestamp: new Date(),
+            details: {
+              problemId,
+              problemTitle: problem ? problem.title : 'Unknown Problem',
+              submissionId: submission._id
+            }
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Failed to log submission event to attempt timeline:", err);
+    }
+  }
+
   const tests = problem.testCases.map((tc) => ({
     inputs: tc.inputs,
     expected: tc.expected,
@@ -358,4 +378,150 @@ export async function getMyAnalytics(userId) {
     weakAreas,
     tagStats: tagsArray
   };
+}
+
+import Submission from "../../models/Submission.mjs";
+
+export async function rejudgeSubmission(submissionId) {
+  const submission = await submissionsRepo.findById(submissionId);
+  if (!submission) {
+    throw new HttpError(404, "Submission not found");
+  }
+
+  const problem = await problemsRepo.findById(submission.problemId);
+  if (!problem) {
+    throw new HttpError(404, "Problem not found for this submission");
+  }
+
+  // Reset status, score, output
+  submission.status = "Pending";
+  submission.score = 0;
+  submission.output = undefined;
+  submission.testResult = undefined;
+  await submission.save();
+
+  const tests = problem.testCases.map((tc) => ({
+    inputs: tc.inputs,
+    expected: tc.expected,
+    isHidden: !isSampleTestCase(tc),
+    isSample: isSampleTestCase(tc)
+  }));
+
+  const functionName = problem.functionName || "solution";
+
+  const messageBody = {
+    schemaVersion: "v2",
+    submissionId: submission._id.toString(),
+    problemId: problem._id.toString(),
+    language: submission.language,
+    code: submission.code,
+    tests: tests,
+    functionName: functionName,
+    compareMode: problem.compareConfig?.mode || "EXACT"
+  };
+
+  if (!validateSubmissionMessage(messageBody)) {
+    throw new HttpError(500, "Invalid submission message configuration");
+  }
+
+  await publishSubmissionMessage(messageBody);
+
+  return submission;
+}
+
+export async function rejudgeProblemSubmissions(problemId, assessmentId = null) {
+  const problem = await problemsRepo.findById(problemId);
+  if (!problem) {
+    throw new HttpError(404, "Problem not found");
+  }
+
+  const filter = { problemId };
+  if (assessmentId) {
+    filter.assessmentId = assessmentId;
+  }
+
+  const submissions = await Submission.find(filter);
+  const tests = problem.testCases.map((tc) => ({
+    inputs: tc.inputs,
+    expected: tc.expected,
+    isHidden: !isSampleTestCase(tc),
+    isSample: isSampleTestCase(tc)
+  }));
+  const functionName = problem.functionName || "solution";
+
+  for (const submission of submissions) {
+    submission.status = "Pending";
+    submission.score = 0;
+    submission.output = undefined;
+    submission.testResult = undefined;
+    await submission.save();
+
+    const messageBody = {
+      schemaVersion: "v2",
+      submissionId: submission._id.toString(),
+      problemId: problem._id.toString(),
+      language: submission.language,
+      code: submission.code,
+      tests: tests,
+      functionName: functionName,
+      compareMode: problem.compareConfig?.mode || "EXACT"
+    };
+
+    await publishSubmissionMessage(messageBody);
+  }
+
+  return { count: submissions.length };
+}
+
+export async function rejudgeAssessmentSubmissions(assessmentId) {
+  const assessment = await assessmentsRepo.findById(assessmentId);
+  if (!assessment) {
+    throw new HttpError(404, "Assessment not found");
+  }
+
+  const submissions = await Submission.find({ assessmentId });
+  const problemsCache = {};
+
+  for (const submission of submissions) {
+    const pId = submission.problemId.toString();
+    if (!problemsCache[pId]) {
+      const problem = await problemsRepo.findById(pId);
+      if (problem) {
+        problemsCache[pId] = {
+          tests: problem.testCases.map((tc) => ({
+            inputs: tc.inputs,
+            expected: tc.expected,
+            isHidden: !isSampleTestCase(tc),
+            isSample: isSampleTestCase(tc)
+          })),
+          functionName: problem.functionName || "solution",
+          compareMode: problem.compareConfig?.mode || "EXACT"
+        };
+      }
+    }
+
+    const problemData = problemsCache[pId];
+    if (!problemData) continue;
+
+    submission.status = "Pending";
+    submission.score = 0;
+    submission.output = undefined;
+    submission.testResult = undefined;
+    await submission.save();
+
+    const messageBody = {
+      schemaVersion: "v2",
+      submissionId: submission._id.toString(),
+      problemId: pId,
+      language: submission.language,
+      code: submission.code,
+      tests: problemData.tests,
+      functionName: problemData.functionName,
+      compareMode: problemData.compareMode
+    };
+
+    await publishSubmissionMessage(messageBody);
+  }
+
+  return { count: submissions.length };
 }

@@ -20,7 +20,13 @@ const AssessmentSchema = new Schema(
       type: String,
       enum: ["Draft", "Published", "Completed"],
       default: "Draft"
-    }
+    },
+    announcements: [
+      {
+        message: { type: String, required: true },
+        sentAt: { type: Date, default: Date.now }
+      }
+    ]
   },
   { timestamps: true }
 );

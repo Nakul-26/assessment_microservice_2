@@ -18,7 +18,14 @@ const AssessmentAttemptSchema = new Schema(
     copyCount: { type: Number, default: 0 },
     pasteCount: { type: Number, default: 0 },
     fullscreenExitCount: { type: Number, default: 0 },
-    problemOrder: [{ type: Schema.Types.ObjectId, ref: "Problem" }]
+    problemOrder: [{ type: Schema.Types.ObjectId, ref: "Problem" }],
+    timeline: [
+      {
+        event: { type: String, required: true },
+        timestamp: { type: Date, default: Date.now },
+        details: { type: Schema.Types.Mixed }
+      }
+    ]
   },
   { timestamps: true }
 );

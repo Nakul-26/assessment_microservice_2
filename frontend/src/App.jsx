@@ -98,7 +98,7 @@ function AppContent() {
 
     useEffect(() => {
         // Global handler to prevent scrolling over number inputs from changing their values
-        const handleWheel = (e) => {
+        const handleWheel = () => {
             if (document.activeElement.type === 'number') {
                 document.activeElement.blur();
             }

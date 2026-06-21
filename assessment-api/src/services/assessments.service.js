@@ -81,7 +81,8 @@ export async function startAssessment(assessmentId, userId, auditInfo = {}) {
       studentId: userId,
       startedAt: now,
       status: 'Active',
-      problemOrder: shuffledOrder
+      problemOrder: shuffledOrder,
+      timeline: [{ event: 'START', timestamp: now }]
     });
   } catch (error) {
     // The unique attempt index makes concurrent start requests idempotent.
@@ -112,7 +113,14 @@ export async function logAntiCheatingEvent(attemptId, eventType, user) {
 
   if (attempt.status !== 'Active') return attempt;
 
-  const update = {};
+  const update = {
+    $push: {
+      timeline: {
+        event: eventType,
+        timestamp: new Date()
+      }
+    }
+  };
   switch (eventType) {
     case 'TAB_SWITCH':
       update.$inc = { tabSwitchCount: 1 };
@@ -125,6 +133,9 @@ export async function logAntiCheatingEvent(attemptId, eventType, user) {
       break;
     case 'FULLSCREEN_EXIT':
       update.$inc = { fullscreenExitCount: 1 };
+      break;
+    case 'RETURN':
+      // Just logged in the timeline, no counters incremented
       break;
     default:
       throw new HttpError(400, "Invalid event type");
@@ -283,7 +294,13 @@ export async function submitAssessment(attemptId, user, auditInfo = {}) {
     await recalculateAttemptScore(attemptId);
     const result = await attemptsRepo.updateById(attemptId, {
       status: 'TimedOut',
-      submittedAt: getExpirationTime(attempt, assessment)
+      submittedAt: getExpirationTime(attempt, assessment),
+      $push: {
+        timeline: {
+          event: 'TIMED_OUT',
+          timestamp: getExpirationTime(attempt, assessment)
+        }
+      }
     });
 
     await auditService.logEvent({
@@ -300,7 +317,13 @@ export async function submitAssessment(attemptId, user, auditInfo = {}) {
   
   const result = await attemptsRepo.updateById(attemptId, {
     status: 'Submitted',
-    submittedAt: new Date()
+    submittedAt: new Date(),
+    $push: {
+      timeline: {
+        event: 'SUBMIT',
+        timestamp: new Date()
+      }
+    }
   });
 
   await auditService.logEvent({
@@ -376,4 +399,29 @@ function validateAssessmentPayload(payload) {
   if (errors.length > 0) {
     throw new HttpError(400, "Validation failed", { errors });
   }
+}
+
+export async function getAnnouncements(assessmentId) {
+  const assessment = await assessmentsRepo.findById(assessmentId);
+  if (!assessment) throw new HttpError(404, "Assessment not found");
+  return assessment.announcements || [];
+}
+
+export async function createAnnouncement(assessmentId, message) {
+  if (!message || typeof message !== 'string' || message.trim() === '') {
+    throw new HttpError(400, "Message must be a non-empty string");
+  }
+  const assessment = await assessmentsRepo.findById(assessmentId);
+  if (!assessment) throw new HttpError(404, "Assessment not found");
+
+  const announcement = {
+    message: message.trim(),
+    sentAt: new Date()
+  };
+
+  await assessmentsRepo.updateById(assessmentId, {
+    $push: { announcements: announcement }
+  });
+
+  return announcement;
 }

@@ -10,6 +10,14 @@ const userSchema = new mongoose.Schema(
       enum: ["superadmin", "admin", "faculty", "student"],
       default: "student"
     },
+    usn: {
+      type: String,
+      unique: true,
+      sparse: true
+    },
+    section: {
+      type: String
+    },
     collegeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "College"

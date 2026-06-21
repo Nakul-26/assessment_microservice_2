@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import app from '../app.js';
 import Problem from '../../models/Problem.mjs';
+import * as authService from '../services/auth.service.js';
 
 describe('Problems API', () => {
   let adminToken;
@@ -9,26 +10,22 @@ describe('Problems API', () => {
 
   beforeEach(async () => {
     // Create admin user
-    const adminRes = await request(app)
-      .post('/api/auth/register')
-      .send({
-        name: 'Admin User',
-        email: `admin-${Date.now()}@test.com`,
-        password: 'password123',
-        role: 'admin'
-      });
-    adminToken = adminRes.body.token;
+    const admin = await authService.register({
+      name: 'Admin User',
+      email: `admin-${Date.now()}@test.com`,
+      password: 'password123',
+      role: 'admin'
+    });
+    adminToken = admin.token;
 
     // Create student user
-    const studentRes = await request(app)
-      .post('/api/auth/register')
-      .send({
-        name: 'Student User',
-        email: `student-${Date.now()}@test.com`,
-        password: 'password123',
-        role: 'student'
-      });
-    studentToken = studentRes.body.token;
+    const student = await authService.register({
+      name: 'Student User',
+      email: `student-${Date.now()}@test.com`,
+      password: 'password123',
+      role: 'student'
+    });
+    studentToken = student.token;
 
     // Seed some problems
     await Problem.create([

@@ -13,7 +13,9 @@ import {
   listAssessmentAttempts,
   getAttemptSubmissions,
   getAssessmentAttendance,
-  logAntiCheatingEvent
+  logAntiCheatingEvent,
+  getAnnouncements,
+  createAnnouncement
 } from "../controllers/assessments.controller.js";
 
 const router = express.Router();
@@ -125,5 +127,7 @@ router.get("/:_id/attempts", verifyToken, authorizeRoles("admin", "faculty", "su
 router.get("/:_id/attendance", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), getAssessmentAttendance);
 router.get("/attempts/:attemptId", verifyToken, getAssessmentAttemptById);
 router.get("/attempts/:attemptId/submissions", verifyToken, getAttemptSubmissions);
+router.get("/:_id/announcements", verifyToken, getAnnouncements);
+router.post("/:_id/announcements", verifyToken, authorizeRoles("admin", "faculty", "superadmin"), createAnnouncement);
 
 export default router;

@@ -123,4 +123,28 @@ describe('Assessments API', () => {
     expect(res.body.errors).toContain('An assessment cannot contain duplicate problems');
     expect(res.body.errors).toContain('Every problem max score must be greater than zero');
   });
+
+  it('POST /api/assessments/:id/announcements should allow admin to post announcements and GET should return them', async () => {
+    const listRes = await request(app)
+      .get('/api/assessments')
+      .set('Authorization', `Bearer ${studentToken}`);
+    const assessmentId = listRes.body[0]._id;
+
+    const announceRes = await request(app)
+      .post(`/api/assessments/${assessmentId}/announcements`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ message: 'Typo in question 1 has been fixed.' });
+
+    expect(announceRes.status).toBe(201);
+    expect(announceRes.body.message).toBe('Typo in question 1 has been fixed.');
+
+    const getRes = await request(app)
+      .get(`/api/assessments/${assessmentId}/announcements`)
+      .set('Authorization', `Bearer ${studentToken}`);
+
+    expect(getRes.status).toBe(200);
+    expect(Array.isArray(getRes.body)).toBe(true);
+    expect(getRes.body.length).toBe(1);
+    expect(getRes.body[0].message).toBe('Typo in question 1 has been fixed.');
+  });
 });

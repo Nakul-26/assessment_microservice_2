@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
-import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2 } from 'lucide-react';
+import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, Megaphone } from 'lucide-react';
 import api, { assessments } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import buildTemplate from '../utils/buildTemplate';
-import { mapType } from '../utils/typeValidator';
+
 
 const supportedLanguages = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go'];
 
@@ -37,10 +37,17 @@ const AssessmentWorkspace = () => {
 
   const [timeLeft, setTimeLeft] = useState(null);
   const [showConsole, setShowConsole] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
   const [consoleTab, setConsoleTab] = useState('testcases');
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
-  const [copyCount, setCopyCount] = useState(0);
-  const [pasteCount, setPasteCount] = useState(0);
+  const [, setCopyCount] = useState(0);
+  const [, setPasteCount] = useState(0);
+  const [announcements, setAnnouncements] = useState([]);
+  const [showAnnouncementsModal, setShowAnnouncementsModal] = useState(false);
+  const [activeNotification, setActiveNotification] = useState(null);
+  const [lastSeenAnnouncementTime, setLastSeenAnnouncementTime] = useState(() => {
+    return localStorage.getItem(`last-seen-announce:${attemptId}`) || new Date().toISOString();
+  });
   const [showTabWarning, setShowTabWarning] = useState(false);
   const [securityWarningCount, setSecurityWarningCount] = useState(0);
   const [fsExitWarning, setFsExitWarning] = useState(false);
@@ -252,6 +259,7 @@ const AssessmentWorkspace = () => {
         startSecurityCountdown('fullscreen exit');
       } else {
         // returned to fullscreen: clear warning
+        assessments.logEvent(attemptId, 'RETURN').catch(() => {});
         setFsExitWarning(false);
         setFsWarningReason('');
         setFsWarningTimeLeft(0);
@@ -290,7 +298,7 @@ const AssessmentWorkspace = () => {
       document.removeEventListener('click', enterFS);
       if (fsIntervalRef.current) { clearInterval(fsIntervalRef.current); fsIntervalRef.current = null; }
     };
-  }, [attemptActive, attemptId, finishAttempt, recordSecurityViolation]);
+  }, [attemptActive, attemptId, finishAttempt, recordSecurityViolation, startSecurityCountdown]);
 
   useEffect(() => {
     if (!attemptActive) return;
@@ -309,7 +317,55 @@ const AssessmentWorkspace = () => {
     return () => clearInterval(timer);
   }, [attemptActive, finishAttempt]);
 
+  const assessmentId = assessment?._id;
+
+  useEffect(() => {
+    if (!assessmentId) return;
+
+    const fetchAnnouncements = async () => {
+      try {
+        const res = await api.get(`/api/v1/assessments/${assessmentId}/announcements`);
+        const list = res.data || [];
+        setAnnouncements(list);
+
+        // Check if there's any new announcement since lastSeenAnnouncementTime
+        const newAnnouncements = list.filter(a => new Date(a.sentAt) > new Date(lastSeenAnnouncementTime));
+        if (newAnnouncements.length > 0) {
+          const latest = newAnnouncements[newAnnouncements.length - 1];
+          setActiveNotification(latest);
+          
+          const timer = setTimeout(() => {
+            setActiveNotification(null);
+          }, 6000);
+          return () => clearTimeout(timer);
+        }
+      } catch (err) {
+        console.error("Failed to fetch announcements:", err);
+      }
+    };
+
+    fetchAnnouncements();
+    const interval = setInterval(fetchAnnouncements, 10000);
+    return () => clearInterval(interval);
+  }, [assessmentId, lastSeenAnnouncementTime]);
+
   const currentProblem = problems[currentProblemIndex];
+  const unreadAnnouncementsCount = announcements.filter(a => new Date(a.sentAt) > new Date(lastSeenAnnouncementTime)).length;
+
+  const dismissNotification = () => {
+    setActiveNotification(null);
+    const nowStr = new Date().toISOString();
+    setLastSeenAnnouncementTime(nowStr);
+    localStorage.setItem(`last-seen-announce:${attemptId}`, nowStr);
+  };
+
+  const openAnnouncements = () => {
+    setShowAnnouncementsModal(true);
+    const nowStr = new Date().toISOString();
+    setLastSeenAnnouncementTime(nowStr);
+    localStorage.setItem(`last-seen-announce:${attemptId}`, nowStr);
+    setActiveNotification(null);
+  };
 
   const handleLanguageChange = (problemId, lang) => {
     setLangMap(prev => ({ ...prev, [problemId]: lang }));
@@ -482,14 +538,145 @@ const AssessmentWorkspace = () => {
   const currentSubmission = submissionMap[currentProblem._id];
   const isJudging = currentSubmission && ['Submitting...', 'Pending', 'Running'].includes(currentSubmission.status);
   const currentRunResult = runResultMap[currentProblem._id];
-  
-  const [showInstructions, setShowInstructions] = useState(false);
 
   const currentTestCases = testCasesMap[currentProblem._id] || ['[]'];
   const currentActiveIdx = activeTestCaseIdxMap[currentProblem._id] || 0;
 
   return (
     <div className="ide-layout assessment-workspace fade-in">
+      {/* Floating Announcement Popup Notification */}
+      {activeNotification && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 99999,
+          width: '480px',
+          maxWidth: '90%',
+          background: 'var(--surface)',
+          borderRadius: 'var(--radius-md)',
+          border: '2px solid var(--success)',
+          boxShadow: '0 10px 30px rgba(16, 185, 129, 0.25), 0 0 20px rgba(16, 185, 129, 0.1)',
+          display: 'flex',
+          gap: '16px',
+          padding: '16px 20px',
+          alignItems: 'flex-start',
+          animation: 'slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+        }}>
+          <div style={{
+            background: 'rgba(16, 185, 129, 0.1)',
+            color: 'var(--success)',
+            padding: '8px',
+            borderRadius: '50%',
+            display: 'flex',
+            flexShrink: 0
+          }}>
+            <Megaphone size={18} />
+          </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--success)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>New Announcement</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {new Date(activeNotification.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text)', lineHeight: '1.4', fontWeight: '500' }}>
+              {activeNotification.message}
+            </p>
+          </div>
+          <button 
+            onClick={dismissNotification}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '1.1rem',
+              padding: '0 4px',
+              lineHeight: 1
+            }}
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
+      {/* Announcements History Modal */}
+      {showAnnouncementsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 10000,
+          background: 'rgba(2, 6, 23, 0.8)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px'
+        }} onClick={() => setShowAnnouncementsModal(false)}>
+          <div style={{
+            background: 'var(--surface)',
+            padding: '28px',
+            borderRadius: 'var(--radius-lg)',
+            maxWidth: '560px',
+            width: '100%',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-lg), 0 0 30px rgba(16, 185, 129, 0.05)',
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column'
+          }} onClick={e => e.stopPropagation()}>
+            <h2 className="mb-4 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
+              <Megaphone size={22} color="var(--success)" /> Exam Announcements
+            </h2>
+            
+            <div style={{
+              flex: 1,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              paddingRight: '4px'
+            }}>
+              {announcements.length > 0 ? (
+                [...announcements].reverse().map((announce, idx) => (
+                  <div key={idx} style={{
+                    padding: '14px 18px',
+                    background: 'var(--bg)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '6px' }}>
+                      <span style={{ fontWeight: '700', color: 'var(--success)' }}>OFFICIAL BROADCAST</span>
+                      <span>{new Date(announce.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text)', lineHeight: '1.5' }}>
+                      {announce.message}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                  No announcements broadcasted yet.
+                </div>
+              )}
+            </div>
+            
+            <button className="button button-primary w-full mt-6" onClick={() => setShowAnnouncementsModal(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes slideDown {
+          from { transform: translate(-50%, -40px); opacity: 0; }
+          to { transform: translate(-50%, 0); opacity: 1; }
+        }
+      `}</style>
+
       {/* Instructions Modal */}
       {showInstructions && (
         <div style={{
@@ -596,6 +783,35 @@ const AssessmentWorkspace = () => {
             </div>
           </div>
           <div className="flex-center gap-4">
+            <button 
+              className="button button-outline" 
+              style={{ 
+                padding: '6px 12px', 
+                fontSize: '0.8rem', 
+                borderColor: 'var(--success)', 
+                color: 'var(--success)',
+                position: 'relative'
+              }}
+              onClick={openAnnouncements}
+            >
+              <Megaphone size={14} /> Announcements
+              {unreadAnnouncementsCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-6px',
+                  right: '-6px',
+                  background: 'var(--error)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  padding: '2px 6px',
+                  fontSize: '0.7rem',
+                  fontWeight: '800',
+                  boxShadow: '0 0 10px var(--error)'
+                }}>
+                  {unreadAnnouncementsCount}
+                </span>
+              )}
+            </button>
             <button 
               className="button button-outline" 
               style={{ padding: '6px 12px', fontSize: '0.8rem', borderColor: 'var(--primary)', color: 'var(--primary)' }}

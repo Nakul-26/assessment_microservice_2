@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Play, Calendar, Clock, Code2, AlertTriangle, ChevronLeft, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Play, Calendar, Clock, Code2, AlertTriangle, ChevronLeft, CheckCircle2, ExternalLink, ShieldCheck, ListChecks, Award, Eye } from 'lucide-react';
 import { assessments } from '../api';
 
 const AssessmentDetailsPage = ({ user }) => {
@@ -11,6 +11,7 @@ const AssessmentDetailsPage = ({ user }) => {
   const [error, setError] = useState(null);
   const [starting, setStarting] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [showFsPrompt, setShowFsPrompt] = useState(false);
   const [fsPending, setFsPending] = useState(false);
   const [myAttempt, setMyAttempt] = useState(null);
@@ -51,6 +52,7 @@ const AssessmentDetailsPage = ({ user }) => {
   };
 
   const handleStart = () => {
+    setAgreed(false);
     // show instructions modal first
     setShowInstructions(true);
   };
@@ -261,20 +263,284 @@ const AssessmentDetailsPage = ({ user }) => {
 
       {/* Instructions Modal */}
       {showInstructions && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
-          <div style={{ width: '720px', maxWidth: '94%', background: 'var(--surface)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-            <h3 style={{ marginTop: 0 }}>Assessment Instructions</h3>
-            <div style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              <p>Please read the instructions carefully before starting. The assessment will run in fullscreen mode and the timer will begin only after you enter fullscreen.</p>
-              <ul style={{ marginLeft: '1.2rem' }}>
-                <li>Do not leave fullscreen during the assessment.</li>
-                <li>Switching tabs, copy/paste, or leaving fullscreen will be logged and may trigger warnings.</li>
-                <li>Your work is auto-submitted on a critical violation or if the fullscreen exit countdown expires.</li>
-              </ul>
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(2, 6, 23, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1200,
+          padding: '20px'
+        }}>
+          <div style={{
+            width: '800px',
+            maxWidth: '100%',
+            maxHeight: '90vh',
+            background: 'var(--surface)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-bright)',
+            boxShadow: 'var(--shadow-lg), 0 0 40px rgba(99, 102, 241, 0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '24px 32px',
+              borderBottom: '1px solid var(--border)',
+              background: 'linear-gradient(to right, rgba(99, 102, 241, 0.05), transparent)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px'
+            }}>
+              <div style={{
+                background: 'var(--primary-glow)',
+                color: 'var(--primary)',
+                padding: '10px',
+                borderRadius: 'var(--radius-md)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <ShieldCheck size={28} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.4rem' }}>Instructions & Anti-Cheating Policy</h3>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  Please review the rules carefully before starting.
+                </p>
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button className="button button-outline" onClick={() => setShowInstructions(false)}>Cancel</button>
-              <button className="button" onClick={handleBeginAfterInstructions}>I Understand & Continue</button>
+
+            {/* Scrollable Content */}
+            <div style={{
+              padding: '32px',
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '24px'
+            }}>
+              {/* Assessment Stats Row */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: '16px'
+              }}>
+                {/* Duration */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', color: 'var(--primary)', marginBottom: '8px' }}>
+                    <Clock size={20} />
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>Duration</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '700', marginTop: '4px' }}>{assessment.durationMinutes} Mins</div>
+                </div>
+
+                {/* Total Questions */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', color: 'var(--success)', marginBottom: '8px' }}>
+                    <ListChecks size={20} />
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>Questions</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '700', marginTop: '4px' }}>{assessment.problems?.length || 0} Total</div>
+                </div>
+
+                {/* Total Marks */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', color: 'var(--warning)', marginBottom: '8px' }}>
+                    <Award size={20} />
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Marks</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '700', marginTop: '4px' }}>
+                    {assessment.problems?.reduce((sum, p) => sum + p.maxScore, 0)} Marks
+                  </div>
+                </div>
+
+                {/* Negative Marking */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', color: 'var(--error)', marginBottom: '8px' }}>
+                    <AlertTriangle size={20} />
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>Negative Marks</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '700', marginTop: '4px', color: 'var(--text-secondary)' }}>None</div>
+                </div>
+              </div>
+
+              {/* Dynamic Languages Card */}
+              <div style={{
+                background: 'rgba(99, 102, 241, 0.03)',
+                border: '1px solid rgba(99, 102, 241, 0.1)',
+                borderRadius: 'var(--radius-md)',
+                padding: '16px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Code2 size={20} color="var(--primary)" />
+                  <span style={{ fontWeight: '600', fontSize: '0.95rem' }}>Allowed Coding Languages</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {assessment.allowedLanguages && assessment.allowedLanguages.length > 0 ? (
+                    assessment.allowedLanguages.map(lang => (
+                      <span key={lang} className="tag" style={{ textTransform: 'capitalize', fontSize: '0.8rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text)' }}>
+                        {lang}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="tag" style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text)' }}>All Platform Languages</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Anti-Cheating and Exam Conduct Rules */}
+              <div>
+                <h4 style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '4px', height: '16px', background: 'var(--primary)', display: 'inline-block', borderRadius: '2px' }}></span>
+                  Anti-Cheating & Exam Conduct Rules
+                </h4>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Rule 1: Fullscreen */}
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                    <div style={{ color: 'var(--warning)', marginTop: '2px', background: 'rgba(245, 158, 11, 0.1)', padding: '6px', borderRadius: '50%', display: 'flex' }}>
+                      <Eye size={18} />
+                    </div>
+                    <div>
+                      <strong style={{ fontSize: '0.95rem', display: 'block', color: 'var(--text)' }}>Mandatory Fullscreen Mode</strong>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        The exam will start and run in fullscreen mode. Any attempt to exit fullscreen will trigger warning dialogs and could result in auto-submission of your attempt.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Rule 2: Tab Switching */}
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                    <div style={{ color: 'var(--error)', marginTop: '2px', background: 'rgba(239, 68, 68, 0.1)', padding: '6px', borderRadius: '50%', display: 'flex' }}>
+                      <AlertTriangle size={18} />
+                    </div>
+                    <div>
+                      <strong style={{ fontSize: '0.95rem', display: 'block', color: 'var(--text)' }}>Tab & Window Switches Tracked</strong>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Navigating away from the exam tab (tab switches, opening browser tools, using chat/search apps) is tracked. Exceeding limit will result in immediate disqualification.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Rule 3: Copy/Paste Block */}
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                    <div style={{ color: 'var(--info)', marginTop: '2px', background: 'rgba(59, 130, 246, 0.1)', padding: '6px', borderRadius: '50%', display: 'flex' }}>
+                      <Code2 size={18} />
+                    </div>
+                    <div>
+                      <strong style={{ fontSize: '0.95rem', display: 'block', color: 'var(--text)' }}>Blocked Clipboard Activities</strong>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Copying text from the questions, or pasting external code into the code editor, is strictly blocked and logged in the system audit timeline.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Rule 4: Auto-Submit */}
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                    <div style={{ color: 'var(--success)', marginTop: '2px', background: 'rgba(16, 185, 205, 0.1)', padding: '6px', borderRadius: '50%', display: 'flex' }}>
+                      <Clock size={18} />
+                    </div>
+                    <div>
+                      <strong style={{ fontSize: '0.95rem', display: 'block', color: 'var(--text)' }}>Auto-Submission on Timeout</strong>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        The assessment timer runs continuously once started. If the time limit is reached, your current progress is auto-saved and submitted automatically.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer with Checkbox & Actions */}
+            <div style={{
+              padding: '24px 32px',
+              borderTop: '1px solid var(--border)',
+              background: 'rgba(255, 255, 255, 0.01)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}>
+              <label style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  style={{
+                    marginTop: '4px',
+                    width: '16px',
+                    height: '16px',
+                    accentColor: 'var(--primary)'
+                  }}
+                />
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                  I confirm that I am <strong>{user?.name || 'the registered student'}</strong>. I have read, understood, and agree to abide by all the assessment guidelines and the anti-cheating policies. I understand that violations will be logged for faculty review.
+                </span>
+              </label>
+
+              <div style={{ display: 'flex', gap: '16px', justifyContent: 'flex-end', marginTop: '4px' }}>
+                <button
+                  className="button button-outline"
+                  onClick={() => setShowInstructions(false)}
+                  style={{ padding: '10px 24px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="button"
+                  onClick={handleBeginAfterInstructions}
+                  disabled={!agreed}
+                  style={{
+                    padding: '10px 32px',
+                    background: agreed ? 'var(--primary-gradient)' : 'rgba(255,255,255,0.05)',
+                    color: agreed ? 'white' : 'var(--text-muted)',
+                    cursor: agreed ? 'pointer' : 'not-allowed',
+                    opacity: agreed ? 1 : 0.6,
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontWeight: '600'
+                  }}
+                >
+                  I Understand & Continue <Play size={16} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
