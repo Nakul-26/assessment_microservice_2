@@ -2,8 +2,18 @@ import express from "express";
 import mongoose from "mongoose";
 import { getRedis } from "../config/redis.js";
 import { getChannel } from "../config/rabbit.js";
+import { getIncidentBanner } from "../services/system.service.js";
 
 const router = express.Router();
+
+router.get("/banner", async (req, res) => {
+  try {
+    const banner = await getIncidentBanner();
+    res.json(banner);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 router.get("/", async (req, res) => {
   const health = {

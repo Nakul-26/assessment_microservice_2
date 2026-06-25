@@ -9,10 +9,11 @@ import { getRedis } from "../config/redis.js";
 import { verifyToken, authorizeRoles } from "../middleware/auth.mjs";
 import * as authService from "../services/auth.service.js";
 import * as auditService from "../services/audit.service.js";
+import * as systemService from "../services/system.service.js";
 
 const router = express.Router();
 
-router.get("/audit-logs", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+router.get("/audit-logs", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
   try {
     const logs = await auditService.listLogs(req.query);
     res.json(logs);
@@ -233,6 +234,66 @@ router.post("/rejudge/assessment/:assessmentId", verifyToken, authorizeRoles("ad
     res.json({ msg: `Rejudge scheduled successfully for ${result.count} submissions`, count: result.count });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+router.post("/banner", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
+  try {
+    const { active, message, type } = req.body;
+    const banner = await systemService.updateIncidentBanner({ active, message, type });
+    
+    // Log the event
+    await auditService.logEvent({
+      event: "UPDATE_INCIDENT_BANNER",
+      userId: req.user.id,
+      details: { active, message, type },
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    });
+
+    res.json({ msg: "Incident banner updated successfully", banner });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/backup", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+  try {
+    const data = await systemService.exportDatabase();
+    
+    // Log the event
+    await auditService.logEvent({
+      event: "DATABASE_BACKUP",
+      userId: req.user.id,
+      details: {},
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    });
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename=leetcode_clone_backup_${Date.now()}.json`);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post("/restore", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+  try {
+    const results = await systemService.importDatabase(req.body);
+    
+    // Log the event
+    await auditService.logEvent({
+      event: "DATABASE_RESTORE",
+      userId: req.user.id,
+      details: { restoredCollections: results },
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    });
+
+    res.json({ msg: "Database restored successfully", results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

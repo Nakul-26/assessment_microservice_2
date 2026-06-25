@@ -200,4 +200,77 @@ describe('Admin Routes, Bulk Import, and Rejudge API', () => {
       expect(audit.details.assessmentId.toString()).toBe(assessment._id.toString());
     });
   });
+
+  describe('System Settings, Incident Banner, and Backup/Restore APIs', () => {
+    it('POST /api/admin/banner should set the incident banner and GET /api/health/banner should retrieve it', async () => {
+      // 1. Set banner
+      const bannerPayload = {
+        active: true,
+        message: 'System upgrade in progress. Expect intermittent downtime.',
+        type: 'warning'
+      };
+
+      const setRes = await request(app)
+        .post('/api/admin/banner')
+        .set('Authorization', `Bearer ${superadminToken}`)
+        .send(bannerPayload);
+
+      expect(setRes.status).toBe(200);
+      expect(setRes.body.msg).toContain('Incident banner updated successfully');
+      expect(setRes.body.banner.active).toBe(true);
+      expect(setRes.body.banner.message).toBe(bannerPayload.message);
+      expect(setRes.body.banner.type).toBe('warning');
+
+      // 2. Get banner publicly (no token needed)
+      const getRes = await request(app)
+        .get('/api/health/banner');
+
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.active).toBe(true);
+      expect(getRes.body.message).toBe(bannerPayload.message);
+      expect(getRes.body.type).toBe('warning');
+    });
+
+    it('GET /api/admin/backup and POST /api/admin/restore should backup and restore the database state', async () => {
+      // Create a student in the DB so there is something to backup
+      await User.create({
+        name: 'Backup Student',
+        email: 'backup_student@test.com',
+        password: 'password123',
+        role: 'student'
+      });
+
+      // 1. Fetch Backup
+      const backupRes = await request(app)
+        .get('/api/admin/backup')
+        .set('Authorization', `Bearer ${superadminToken}`)
+        .send();
+
+      expect(backupRes.status).toBe(200);
+      expect(backupRes.headers['content-type']).toContain('application/json');
+      expect(backupRes.body.users).toBeDefined();
+      expect(backupRes.body.users.length).toBeGreaterThan(0);
+
+      const backupData = backupRes.body;
+
+      // 2. Clear users DB manually to simulate data loss
+      await User.deleteMany({});
+
+      // 3. Restore Backup
+      const restoreRes = await request(app)
+        .post('/api/admin/restore')
+        .set('Authorization', `Bearer ${superadminToken}`)
+        .send(backupData);
+
+      expect(restoreRes.status).toBe(200);
+      expect(restoreRes.body.msg).toContain('Database restored successfully');
+      expect(restoreRes.body.results.users).toBeDefined();
+
+      // Verify backup student is restored
+      const restoredStudent = await User.findOne({ email: 'backup_student@test.com' });
+      expect(restoredStudent).toBeDefined();
+      expect(restoredStudent.name).toBe('Backup Student');
+    });
+  });
 });
+

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users } from 'lucide-react';
+import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle } from 'lucide-react';
 import ProblemListPage from './pages/ProblemListPage';
 import AssessmentListPage from './pages/AssessmentListPage';
 import AssessmentManagementPage from './pages/AssessmentManagementPage';
@@ -22,7 +22,7 @@ import LoginPage from './pages/LoginPage';
 import MySubmissionsPage from './pages/MySubmissionsPage';
 import SystemDashboardPage from './pages/SystemDashboardPage';
 import UserManagementPage from './pages/UserManagementPage';
-import { setAuthToken } from './api';
+import { setAuthToken, system } from './api';
 
 function AppContent() {
     const navigate = useNavigate();
@@ -35,6 +35,31 @@ function AppContent() {
             return null;
         }
     });
+
+    const [banner, setBanner] = useState(null);
+
+    const fetchBanner = async () => {
+        try {
+            const res = await system.getBanner();
+            if (res.data && res.data.active) {
+                setBanner(res.data);
+            } else {
+                setBanner(null);
+            }
+        } catch (err) {
+            console.error("Failed to fetch system banner", err);
+        }
+    };
+
+    useEffect(() => {
+        fetchBanner();
+        const interval = setInterval(fetchBanner, 30000);
+        window.addEventListener("refresh-banner", fetchBanner);
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener("refresh-banner", fetchBanner);
+        };
+    }, []);
 
     useEffect(() => {
         const syncAuth = () => {
@@ -82,7 +107,6 @@ function AppContent() {
     };
 
     const canCreateProblem = user && (user.role === 'admin' || user.role === 'faculty' || user.role === 'superadmin');
-    const isSuperAdmin = user && user.role === 'superadmin';
 
     const NavLink = ({ to, children, icon: Icon }) => {
         const isActive = location.pathname === to;
@@ -116,6 +140,27 @@ function AppContent() {
 
     return (
         <>
+            {banner && (
+                <div className={`system-incident-banner banner-${banner.type}`} style={{
+                    backgroundColor: banner.type === 'error' ? 'var(--error)' : banner.type === 'warning' ? 'var(--warning)' : 'var(--primary)',
+                    color: '#fff',
+                    padding: '10px 20px',
+                    textAlign: 'center',
+                    fontWeight: 'bold',
+                    fontSize: '0.95rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '10px',
+                    zIndex: 9999,
+                    position: 'relative',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    borderBottom: '1px solid rgba(255,255,255,0.1)'
+                }}>
+                    <AlertTriangle size={18} />
+                    <span>{banner.message}</span>
+                </div>
+            )}
             <div className="header">
                 <h1>
                     <Code2 size={28} />
@@ -132,7 +177,7 @@ function AppContent() {
                         {canCreateProblem && (
                             <NavLink to="/admin/users" icon={Users}>Users</NavLink>
                         )}
-                        {isSuperAdmin && (
+                        {canCreateProblem && (
                             <NavLink to="/admin/system" icon={Database}>System</NavLink>
                         )}
                         {canCreateProblem && (
@@ -171,7 +216,7 @@ function AppContent() {
                 <Route path="/admin/assessments/:id/preview" element={<RequireStaff><AssessmentPreviewPage /></RequireStaff>} />
                 <Route path="/admin/assessments/:id/results" element={<RequireStaff><AssessmentResultsPage /></RequireStaff>} />
                 <Route path="/admin/assessment-attempt/:attemptId" element={<RequireStaff><AssessmentAttemptDetailPage /></RequireStaff>} />
-                <Route path="/admin/system" element={<RequireRole roles={['superadmin']}><SystemDashboardPage /></RequireRole>} />
+                <Route path="/admin/system" element={<RequireStaff><SystemDashboardPage /></RequireStaff>} />
                 <Route path="/admin/users" element={<RequireStaff><UserManagementPage /></RequireStaff>} />
 
                 <Route path="/problems/:_id" element={<ProblemPage user={user} />} />

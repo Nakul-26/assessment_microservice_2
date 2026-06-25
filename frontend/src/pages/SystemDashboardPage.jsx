@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Activity, Server, Database, Users, Code2, RefreshCw, AlertCircle, BookOpen, History, Target, TrendingUp, Trophy, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { admin, submissions } from '../api';
+import { admin, submissions, system } from '../api';
 
 function formatTimestamp(ts) {
   if (!ts) return 'N/A';
@@ -26,6 +26,102 @@ const SystemDashboardPage = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshInterval, setRefreshInterval] = useState(5000);
+
+  // System Settings state
+  const [bannerActive, setBannerActive] = useState(false);
+  const [bannerMessage, setBannerMessage] = useState("");
+  const [bannerType, setBannerType] = useState("info");
+  const [bannerSaving, setBannerSaving] = useState(false);
+
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [restoreError, setRestoreError] = useState(null);
+  const [restoreSuccess, setRestoreSuccess] = useState(null);
+
+  const fetchBannerStatus = async () => {
+    try {
+      const res = await system.getBanner();
+      if (res.data) {
+        setBannerActive(res.data.active || false);
+        setBannerMessage(res.data.message || "");
+        setBannerType(res.data.type || "info");
+      }
+    } catch (err) {
+      console.error("Failed to load banner status", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchBannerStatus();
+  }, []);
+
+  const handleSaveBanner = async (e) => {
+    e.preventDefault();
+    setBannerSaving(true);
+    try {
+      await admin.updateBanner({
+        active: bannerActive,
+        message: bannerMessage,
+        type: bannerType
+      });
+      alert("Incident banner updated successfully!");
+      window.dispatchEvent(new Event("refresh-banner"));
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to update incident banner");
+    } finally {
+      setBannerSaving(false);
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const response = await admin.downloadBackup();
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `leetcode_clone_backup_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error("Failed to download database backup", err);
+      alert("Failed to download database backup.");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleRestoreDatabase = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!window.confirm("WARNING: This will overwrite current database state with backup file. Are you sure you want to proceed?")) {
+      e.target.value = null;
+      return;
+    }
+
+    setRestoreLoading(true);
+    setRestoreError(null);
+    setRestoreSuccess(null);
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const backupData = JSON.parse(evt.target.result);
+        const res = await admin.restoreDatabase(backupData);
+        setRestoreSuccess(`Successfully restored: ${Object.entries(res.data.results).map(([k, v]) => `${k} (${v})`).join(", ")}`);
+        fetchStats();
+      } catch (err) {
+        console.error(err);
+        setRestoreError(err.response?.data?.error || err.message || "Failed to parse or restore backup file.");
+      } finally {
+        setRestoreLoading(false);
+        e.target.value = null;
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const fetchStats = useCallback(async () => {
     try {
@@ -258,6 +354,104 @@ const SystemDashboardPage = ({ user }) => {
                 </div>
               );
             })() : <p className="text-muted text-center py-4">Judge stats unavailable</p>}
+          </div>
+
+          {/* System Settings & Utilities */}
+          <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+            {/* Incident Banner Card */}
+            <div className="problem-card">
+              <h3 className="mb-4 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
+                <AlertTriangle size={20} color="var(--warning)" /> System Incident Banner
+              </h3>
+              <p className="text-muted mb-4" style={{ fontSize: '0.85rem' }}>
+                Display a global system-wide notice banner for outages or maintenance.
+              </p>
+              <form onSubmit={handleSaveBanner} style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    id="bannerActive"
+                    checked={bannerActive}
+                    onChange={(e) => setBannerActive(e.target.checked)}
+                    style={{ width: 'auto' }}
+                  />
+                  <label htmlFor="bannerActive" style={{ fontWeight: '600', cursor: 'pointer' }}>Active (Show Banner)</label>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: '600' }}>Banner Message</label>
+                  <input
+                    type="text"
+                    value={bannerMessage}
+                    onChange={(e) => setBannerMessage(e.target.value)}
+                    placeholder="e.g. Scheduled database maintenance at 6:00 PM UTC."
+                    disabled={!bannerActive}
+                    required={bannerActive}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: '600' }}>Banner Severity / Type</label>
+                  <select
+                    value={bannerType}
+                    onChange={(e) => setBannerType(e.target.value)}
+                    disabled={!bannerActive}
+                    style={{ padding: '8px 12px' }}
+                  >
+                    <option value="info">Info (Blue)</option>
+                    <option value="warning">Warning (Amber/Yellow)</option>
+                    <option value="error">Critical Incident (Red)</option>
+                  </select>
+                </div>
+
+                <button type="submit" className="button" disabled={bannerSaving} style={{ marginTop: '8px', alignSelf: 'flex-start' }}>
+                  {bannerSaving ? "Saving..." : "Save Banner Configuration"}
+                </button>
+              </form>
+            </div>
+
+            {/* Backup & Restore Card */}
+            <div className="problem-card">
+              <h3 className="mb-4 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
+                <Database size={20} color="var(--primary)" /> Database Backup & Restore
+              </h3>
+              <p className="text-muted mb-4" style={{ fontSize: '0.85rem' }}>
+                Export all collections to JSON or restore system state from a previous JSON backup file.
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
+                <div>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem' }}>Export Data</h4>
+                  <button 
+                    className="button button-outline" 
+                    onClick={handleDownloadBackup} 
+                    disabled={backupLoading}
+                    style={{ width: '100%', justifyContent: 'center' }}
+                  >
+                    {backupLoading ? "Generating Export..." : "Download Database JSON Backup"}
+                  </button>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem' }}>Restore Data</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label className="button button-outline" style={{ display: 'flex', justifyContent: 'center', cursor: 'pointer', margin: 0, borderColor: 'rgba(239, 68, 68, 0.2)', color: 'var(--error)' }}>
+                      <span>{restoreLoading ? "Restoring..." : "Upload JSON Backup to Restore"}</span>
+                      <input 
+                        type="file" 
+                        accept=".json" 
+                        onChange={handleRestoreDatabase} 
+                        disabled={restoreLoading}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                    {restoreSuccess && <div style={{ color: 'var(--success)', fontSize: '0.85rem', fontWeight: '600', marginTop: '4px' }}>{restoreSuccess}</div>}
+                    {restoreError && <div style={{ color: 'var(--error)', fontSize: '0.85rem', fontWeight: '600', marginTop: '4px' }}>{restoreError}</div>}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>

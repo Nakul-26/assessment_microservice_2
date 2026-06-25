@@ -108,7 +108,14 @@ export const admin = {
   getAuditLogs: (params) => api.get("/api/v1/admin/audit-logs", { params }),
   bulkImportStudents: (data) => api.post("/api/v1/admin/bulk-import-students", data),
   listUsers: (params) => api.get("/api/v1/admin/users", { params }),
-  resetPassword: (userId, newPassword) => api.post(`/api/v1/admin/users/${userId}/reset-password`, { newPassword })
+  resetPassword: (userId, newPassword) => api.post(`/api/v1/admin/users/${userId}/reset-password`, { newPassword }),
+  updateBanner: (data) => api.post("/api/v1/admin/banner", data),
+  downloadBackup: () => api.get("/api/v1/admin/backup", { responseType: 'blob' }),
+  restoreDatabase: (data) => api.post("/api/v1/admin/restore", data)
+};
+
+export const system = {
+  getBanner: () => api.get("/api/v1/health/banner")
 };
 
 export const questions = {
