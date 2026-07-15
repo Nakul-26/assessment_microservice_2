@@ -93,10 +93,13 @@ services:
       - MONGO_DB_NAME=${MONGO_DB_NAME:-assessment_db}
       - RABBITMQ_URL=${RABBITMQ_URI:-amqp://user:password@rabbitmq:5672}
       - REDIS_URI=${REDIS_URI:-redis://redis:6379}
-      - LOG_LEVEL=debug
+      - LOG_LEVEL=info
+      - DEFAULT_POOL_SIZE=4
       - JUDGE_CENTRAL_COMPARE_PY=true
       - JUDGE_CENTRAL_COMPARE_JS=true
       - JUDGE_CENTRAL_COMPARE_JAVA=true
+      - JUDGE_CENTRAL_COMPARE_CPP=true
+      - JUDGE_CENTRAL_COMPARE_C=true
     depends_on:
       rabbitmq:
         condition: service_healthy
