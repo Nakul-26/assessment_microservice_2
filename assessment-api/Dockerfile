@@ -18,11 +18,14 @@ RUN chown -R node:node /usr/src/app
 USER node
 
 # 4. Copy and install dependencies as the 'node' user
-COPY package*.json ./
+# --chown is required here: COPY ignores the active USER and copies as root
+# by default, which made `npm install` (running as node) fail with EACCES on
+# package-lock.json on a build with no prior cached layers to mask it.
+COPY --chown=node:node package*.json ./
 RUN npm install
 
 # 5. Copy the rest of the application files
-COPY . .
+COPY --chown=node:node . .
 
 # 6. Ensure local nodemon binary is executable (prevents “Permission denied”)
 RUN chmod +x ./node_modules/.bin/nodemon || true
