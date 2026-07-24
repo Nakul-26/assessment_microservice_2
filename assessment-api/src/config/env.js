@@ -10,7 +10,8 @@ export const env = {
   RABBITMQ_URI: process.env.RABBITMQ_URI || "amqp://localhost",
   JWT_SECRET: process.env.JWT_SECRET || "dev_secret_change_me",
   TESTING_PLATFORM_KEY: process.env.TESTING_PLATFORM_KEY || (process.env.NODE_ENV === "production" ? null : "testing_platform_secret"),
-  ARVENTIQ_SECRET: process.env.ARVENTIQ_SECRET || (process.env.NODE_ENV === "production" ? null : "arventiq_dev_secret")
+  ARVENTIQ_SECRET: process.env.ARVENTIQ_SECRET || (process.env.NODE_ENV === "production" ? null : "arventiq_dev_secret"),
+  JUDGE_SERVICE_URL: process.env.JUDGE_SERVICE_URL || "http://judge-service-go:8081"
 };
 
 if (process.env.NODE_ENV === "production" && !env.TESTING_PLATFORM_KEY) {

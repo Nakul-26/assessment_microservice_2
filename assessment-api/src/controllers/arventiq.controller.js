@@ -51,6 +51,23 @@ export async function submitSolution(req, res, next) {
   }
 }
 
+export async function runCode(req, res, next) {
+  const { questionId, code, codeLanguage, customInput } = req.body;
+
+  try {
+    const result = await arventiqService.runArventiqCode({ questionId, code, codeLanguage, customInput });
+    res.status(200).json(result);
+  } catch (err) {
+    if (err.status && err.body) {
+      return res.status(err.status).json({ success: false, ...err.body });
+    }
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
+    next(err);
+  }
+}
+
 export async function getSubmissionResult(req, res, next) {
   const { _id } = req.params;
   const userId = req.user && (req.user._id || req.user.id);

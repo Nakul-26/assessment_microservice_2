@@ -2,6 +2,7 @@ import * as problemsRepo from "../repositories/problems.repo.js";
 import * as submissionsService from "./submissions.service.js";
 import { HttpError } from "../utils/httpError.js";
 import { resolveArventiqLanguage } from "../config/arventiqLanguages.js";
+import { env } from "../config/env.js";
 
 // Translates Arventiq's native `questions` + `test_cases` schema (see
 // docs/arventiq-integration/history/04-arventiq-real-schema-and-payload.md)
@@ -196,4 +197,98 @@ export async function getArventiqSubmissionResult(submissionId, auth) {
   }
   const verdict = mapSubmissionToArventiqVerdict(result.submission);
   return { pending: verdict === null, verdict };
+}
+
+// "Run" (try code against arbitrary input) vs. "Submit" (judge against the
+// synced official test cases) — Run must not create a Submission doc, must
+// not go through RabbitMQ, and must not affect scores/history. It calls the
+// Go judge's synchronous /run HTTP endpoint directly, the same ephemeral path
+// problems.service.js::runProblem already uses for practice-mode "Run".
+// Only these errorType values represent a real execution failure. Run always
+// sends an empty `expected` (no notion of correctness), so the Go comparator
+// dutifully reports "wrong_answer" against essentially any non-empty stdout —
+// that's an artifact of the dummy comparison, not a real signal, and must not
+// leak into the Run response.
+const REAL_RUN_ERROR_TYPES = new Set(["timeout", "runtime", "memory_limit"]);
+
+function mapRunResult(judgeResult) {
+  const detail = Array.isArray(judgeResult?.details) && judgeResult.details.length > 0
+    ? judgeResult.details[0]
+    : null;
+  const isCompilationError = judgeResult?.status === "Compilation Error";
+  const isRealError = !isCompilationError && REAL_RUN_ERROR_TYPES.has(detail?.errorType);
+
+  return {
+    stdout: detail?.stdout ?? judgeResult?.stdout ?? "",
+    // compileOutput is the single place to look for a compile failure — avoid
+    // also duplicating that same text into stderr.
+    stderr: isCompilationError ? "" : (detail?.stderr ?? judgeResult?.stderr ?? ""),
+    compileOutput: isCompilationError ? (judgeResult?.stderr || null) : null,
+    error: isRealError ? (detail?.error || null) : null,
+    errorType: isCompilationError ? "compilation_error" : (isRealError ? detail.errorType : null),
+    timeMs: detail?.timeMs ?? judgeResult?.maxTimeMs ?? 0,
+    // Go's TestResult.ExitCode/MemoryKB are declared but not yet populated by any
+    // execution path — always null/0 today; passed through as-is so a future
+    // judge change starts showing real values with no Node-side change needed.
+    memoryKb: detail?.memoryKb ?? null,
+    exitCode: detail?.exitCode ?? null
+  };
+}
+
+export async function runArventiqCode({ questionId, code, codeLanguage, customInput }) {
+  if (questionId === undefined || questionId === null || questionId === "") {
+    throw new HttpError(400, "questionId is required");
+  }
+  if (typeof code !== "string" || !code) {
+    throw new HttpError(400, "code is required");
+  }
+
+  const language = resolveArventiqLanguage(codeLanguage);
+  if (!language) {
+    throw new HttpError(400, `Unsupported or missing codeLanguage: ${codeLanguage}`);
+  }
+
+  const problem = await problemsRepo.findByExternalId(String(questionId));
+  if (!problem) {
+    throw new HttpError(404, `Problem ${questionId} not found — sync it via POST /api/arventiq/problems first`);
+  }
+
+  const problemType = problem.problemType || "function";
+  const judgeMsg = {
+    schemaVersion: "1",
+    submissionId: "arventiq-run-" + Date.now(),
+    problemId: problem._id.toString(),
+    language,
+    code,
+    problemType,
+    // A single ephemeral test carrying the student's custom input. `expected`
+    // is intentionally empty — Run has no notion of correctness, it just
+    // returns raw stdout/stderr for the student to read themselves.
+    tests: [{
+      inputs: [typeof customInput === "string" ? customInput : ""],
+      expected: ""
+    }]
+  };
+  if (problemType !== "stdin") {
+    judgeMsg.functionName = problem.functionName || "solution";
+  }
+
+  let response;
+  try {
+    response = await fetch(`${env.JUDGE_SERVICE_URL}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(judgeMsg)
+    });
+  } catch (err) {
+    throw new HttpError(503, "Failed to connect to judge service: " + err.message);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new HttpError(response.status, "Judge service error: " + errorText);
+  }
+
+  const judgeResult = await response.json();
+  return mapRunResult(judgeResult);
 }

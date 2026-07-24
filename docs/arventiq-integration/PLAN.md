@@ -213,6 +213,16 @@ Guiding principle throughout: implement the subset required for the current inte
 - Submission Translator (not "Payload Mapper" — it resolves problems, maps languages, sets `problemType`, handles limits precedence, not just reshapes JSON): stored `Problem` limits win over any request-supplied limits.
 - Language-ID mapping table lives in config, not in controller code.
 - Response Mapper: translates the internal `Submission`/`testResult` shape into whatever Arventiq expects; becomes `problemType`-aware once Phase 3 lands, since function-mode and stdin-mode results carry different fields.
+- **Run, distinct from Submit**: Arventiq's "try it" UX (LeetCode-style Run vs. Submit) needs its own ephemeral path — no `Submission` doc, no RabbitMQ, no effect on score/history, a single execution against caller-supplied input rather than the synced test cases. This calls the Go judge's synchronous `/run` HTTP endpoint directly, the same ephemeral path `problems.service.js::runProblem` already uses for the platform's own practice-mode "Run" — not a new mechanism, just a second caller of an existing one. Fixed a latent bug in that existing function while touching it: it always sent `functionName` and never sent `problemType`, which would have broken for any `stdin`-type `Problem` (didn't exist before this integration).
+
+### Final API surface
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/arventiq/problems` | Problem Sync — upsert by `externalId` |
+| `POST /api/arventiq/run` | Run — ephemeral execution against custom input, no persistence |
+| `POST /api/arventiq/submissions` | Submit — judged against the synced official test cases, produces a scored verdict |
+| `GET /api/arventiq/submissions/:_id` | Poll a submission's verdict |
 
 ---
 

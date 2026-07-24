@@ -2,6 +2,7 @@ import * as problemsRepo from "../repositories/problems.repo.js";
 import Submission from "../../models/Submission.mjs";
 import { HttpError } from "../utils/httpError.js";
 import { validateProblemDefinition } from "./preview.service.js";
+import { env } from "../config/env.js";
 
 function isPrivilegedRole(role) {
   return role === "admin" || role === "faculty" || role === "superadmin";
@@ -349,18 +350,26 @@ export async function runProblem(id, payload) {
   if (!problem) throw new HttpError(404, "Problem not found");
 
   const { code, language, customTests } = payload;
-  
+  const problemType = problem.problemType || "function";
+
   const judgeMsg = {
     schemaVersion: "1",
     submissionId: "run-" + Date.now(), // Ephemeral ID
     problemId: id,
     language: language,
     code: code,
-    functionName: problem.functionName,
+    problemType,
     compareMode: problem.compareConfig?.mode || "STRUCTURAL",
     compareConfig: problem.compareConfig || {},
     tests: customTests || [] // Pass custom tests if provided
   };
+  // functionName is only meaningful for the named-function problem model — sending
+  // it unconditionally (as this used to) breaks stdin-type problems: with no
+  // problemType in the message, the Go judge defaulted to function-mode and
+  // rejected the request for missing functionName.
+  if (problemType !== "stdin") {
+    judgeMsg.functionName = problem.functionName;
+  }
 
   // If custom tests were provided without expected values, try to fill expected
   // from the problem's sample test cases (match by inputs JSON) so the judge and UI
@@ -396,7 +405,7 @@ export async function runProblem(id, payload) {
   }
 
   try {
-    const response = await fetch("http://judge-service-go:8081/run", {
+    const response = await fetch(`${env.JUDGE_SERVICE_URL}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(judgeMsg)
