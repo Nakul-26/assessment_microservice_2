@@ -38,6 +38,7 @@ type Problem struct {
 	Title         string             `json:"title" bson:"title"`
 	Description   string             `json:"description" bson:"description"`
 	Difficulty    string             `json:"difficulty" bson:"difficulty"`
+	Type          ProblemType        `json:"problemType,omitempty" bson:"problemType,omitempty"`
 	FunctionName  string             `json:"functionName" bson:"functionName"`
 	Parameters    []Parameter        `json:"parameters,omitempty" bson:"parameters,omitempty"`
 	ReturnType    string             `json:"returnType,omitempty" bson:"returnType,omitempty"`
@@ -173,21 +174,23 @@ func (p *Problem) ValidateBasic() error {
 	if p.Description == "" {
 		return errors.New("description is required")
 	}
-	if p.FunctionName == "" {
-		return errors.New("functionName is required")
-	}
-	if p.ReturnType == "" {
-		return errors.New("returnType is required")
-	}
-	if !types.IsValid(p.ReturnType) {
-		return fmt.Errorf("invalid returnType: %s", p.ReturnType)
-	}
-	for _, param := range p.Parameters {
-		if param.Name == "" || param.Type == "" {
-			return fmt.Errorf("invalid parameter: %+v", param)
+	if p.EffectiveType() != StdinProblem {
+		if p.FunctionName == "" {
+			return errors.New("functionName is required")
 		}
-		if !types.IsValid(param.Type) {
-			return fmt.Errorf("invalid type for parameter %s: %s", param.Name, param.Type)
+		if p.ReturnType == "" {
+			return errors.New("returnType is required")
+		}
+		if !types.IsValid(p.ReturnType) {
+			return fmt.Errorf("invalid returnType: %s", p.ReturnType)
+		}
+		for _, param := range p.Parameters {
+			if param.Name == "" || param.Type == "" {
+				return fmt.Errorf("invalid parameter: %+v", param)
+			}
+			if !types.IsValid(param.Type) {
+				return fmt.Errorf("invalid type for parameter %s: %s", param.Name, param.Type)
+			}
 		}
 	}
 	// Parse tests if needed
@@ -202,6 +205,25 @@ func (p *Problem) ValidateBasic() error {
 		for i, tc := range p.TestCases {
 			if len(tc.Input) != len(p.Parameters) {
 				return fmt.Errorf("test %d: input length %d does not match expected params %d", i, len(tc.Input), len(p.Parameters))
+			}
+		}
+	}
+
+	// Stdin-mode test cases carry raw stdin/stdout text rather than typed
+	// parameter values: Input holds exactly one string element (the full
+	// stdin blob), Expected is the expected stdout text. Enforced here so a
+	// malformed test case fails as bad problem data, not as a runtime type
+	// assertion panic in the stdin runner.
+	if p.EffectiveType() == StdinProblem {
+		for i, tc := range p.TestCases {
+			if len(tc.Input) != 1 {
+				return fmt.Errorf("test %d: stdin problems require exactly one input element (the stdin text), got %d", i, len(tc.Input))
+			}
+			if _, ok := tc.Input[0].(string); !ok {
+				return fmt.Errorf("test %d: stdin input must be a string", i)
+			}
+			if _, ok := tc.Expected.(string); !ok {
+				return fmt.Errorf("test %d: stdin expected output must be a string", i)
 			}
 		}
 	}

@@ -1,0 +1,207 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"judge-service-go/pkg/central/adapters"
+	"judge-service-go/pkg/comparator"
+	"judge-service-go/pkg/executor"
+	"judge-service-go/pkg/models"
+	"judge-service-go/pkg/pool"
+	"judge-service-go/pkg/util"
+	"judge-service-go/pkg/workspace"
+)
+
+// runSubmissionStdinDetailed executes a ProblemType: stdin submission
+// (pkg/models/problem_type.go): one exec per test case, piping the test's
+// raw stdin text into the user's program and exact-text comparing raw stdout
+// via comparator.CompareText. No wrapper, no batching — structurally
+// modeled on runSubmissionCentralPerTest (central_runner.go), which has the
+// function-mode equivalent of every step here; see
+// docs/arventiq-integration/PLAN.md §3.3's stage table for why the two
+// diverge at each one.
+func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionMsg models.SubmissionMessage, problem models.Problem) (result *models.SubmissionResult, cleanupFailed bool, err error) {
+	stdinAdapter, ok := adapters.GetStdinAdapter(submissionMsg.Language)
+	if !ok {
+		return nil, false, fmt.Errorf("language %q is not supported for stdin-mode problems", submissionMsg.Language)
+	}
+
+	submissionWorkspace, err := workspace.NewSubmissionWorkspace(pooledContainer.WorkDir, submissionMsg.SubmissionID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() {
+		if cleanupErr := workspace.CleanupSubmissionWorkspace(submissionWorkspace.HostPath); cleanupErr != nil {
+			cleanupFailed = true
+			slog.Error("failed to cleanup workspace", "submissionId", submissionMsg.SubmissionID, "path", submissionWorkspace.HostPath, "error", cleanupErr)
+		}
+	}()
+
+	baseFiles, err := stdinAdapter.PrepareFiles(submissionWorkspace.HostPath, util.UnescapeCode(submissionMsg.Code))
+	if err != nil {
+		return nil, cleanupFailed, err
+	}
+
+	result = startedResult(problem)
+
+	var compileCmd []string
+	if compilingAdapter, ok := stdinAdapter.(adapters.CompilingStdinLanguageAdapter); ok {
+		compileCmd = compilingAdapter.CompileCommand()
+		if err := compileStdinSubmission(ctx, exec, pooledContainer, submissionWorkspace, compileCmd, baseFiles, problem); err != nil {
+			return finalizeExecutionFailure(result, err), cleanupFailed, nil
+		}
+	}
+	compiled := len(compileCmd) > 0
+
+	testTimeout := perTestTimeout(problem)
+	runCmd := stdinAdapter.RunCommand()
+
+	for i, tc := range problem.TestCases {
+		testStart := time.Now()
+		tr := models.TestResult{
+			Test:     i + 1,
+			Input:    tc.Input,
+			Expected: tc.Expected,
+		}
+
+		// ValidateBasic already enforces this shape for stdin problems (see
+		// pkg/models/problem.go); re-checked here so a caller that skipped
+		// validation (e.g. a future direct-call path) fails a single test
+		// cleanly instead of panicking the whole submission.
+		stdinText, inputOk := stdinTestInput(tc)
+		expectedText, expectedOk := stdinTestExpected(tc)
+		if !inputOk || !expectedOk {
+			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
+			tr.Error = "invalid stdin test case shape (expected string input/expected)"
+			tr.TimeMs = time.Since(testStart).Milliseconds()
+			result.AddTestResult(tr)
+			continue
+		}
+
+		// Interpreted languages re-copy source into the workspace on every
+		// call (matching runSubmissionCentralPerTest's non-compiling path);
+		// compiled languages copy nothing here since compileStdinSubmission
+		// already uploaded the source and the compiled binary persists on
+		// the container across execs.
+		var filesToCopy []string
+		if !compiled {
+			filesToCopy = baseFiles
+		}
+
+		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
+		stdout, stderr, runErr := exec.RunInContainerWithStdin(
+			testCtx,
+			pooledContainer.ID,
+			filesToCopy,
+			submissionWorkspace.HostPath,
+			submissionWorkspace.ContainerPath,
+			nil,
+			runCmd,
+			stdinText,
+			testTimeout,
+			problem.MemoryLimitMb,
+		)
+		cancel()
+
+		stdoutForResult, stdoutTruncated := truncateString(stdout, maxTestOutputBytes)
+		stderrForLog, stderrTruncated := truncateString(strings.TrimSpace(stderr), maxLogOutputBytes)
+		tr.Stdout = stdoutForResult
+		tr.Stderr = stderrForLog
+
+		if runErr != nil {
+			errStr := strings.ToLower(runErr.Error())
+			switch {
+			case errors.Is(runErr, executor.ErrTimeLimitExceeded) || errors.Is(runErr, context.DeadlineExceeded) || strings.Contains(errStr, "deadline exceeded") || strings.Contains(errStr, "timed out"):
+				markTestFailed(&tr, models.SubmissionStatusTimeLimitExceeded)
+			case errors.Is(runErr, executor.ErrMemoryLimitExceeded) || strings.Contains(errStr, "memory limit exceeded"):
+				markTestFailed(&tr, models.SubmissionStatusMemoryLimitExceeded)
+			default:
+				// Unlike function mode, a non-zero exit here is the user's own
+				// program failing — there's no wrapper to blame, so
+				// result.InternalError stays unset.
+				markTestFailed(&tr, models.SubmissionStatusRuntimeError)
+				if stderrForLog != "" {
+					tr.Error = "Runtime Error"
+					tr.Traceback = stderrForLog
+				}
+			}
+			slog.Error("stdin runtime error", "submissionId", submissionMsg.SubmissionID, "test", i+1, "error", runErr)
+			if stderrForLog != "" {
+				slog.Error("stdin runtime stderr", "submissionId", submissionMsg.SubmissionID, "test", i+1, "stderr", stderrForLog, "truncated", stderrTruncated)
+			}
+			tr.TimeMs = time.Since(testStart).Milliseconds()
+			result.AddTestResult(tr)
+			continue
+		}
+
+		if stdoutTruncated {
+			markTestFailed(&tr, models.SubmissionStatusWrongAnswer)
+			tr.Error = "Output Limit Exceeded"
+			tr.TimeMs = time.Since(testStart).Milliseconds()
+			result.AddTestResult(tr)
+			continue
+		}
+
+		tr.Output = stdout
+		tr.Passed = comparator.CompareText(stdout, expectedText)
+		tr.Ok = tr.Passed
+		if !tr.Passed {
+			tr.ErrorType = models.ErrorTypeWrongAnswer
+		}
+		tr.TimeMs = time.Since(testStart).Milliseconds()
+		result.AddTestResult(tr)
+	}
+
+	finished := time.Now().UTC()
+	result.FinishedAt = &finished
+	result.ElapsedMs = finished.Sub(*result.StartedAt).Milliseconds()
+	result.UpdateStatus()
+
+	return result, cleanupFailed, nil
+}
+
+// compileStdinSubmission mirrors compileCentralSubmission (central_runner.go)
+// for the StdinLanguageAdapter type — same behavior, different adapter
+// interface, so it can't share the same function without a common
+// compile-command supertype that doesn't otherwise exist.
+func compileStdinSubmission(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionWorkspace *workspace.SubmissionWorkspace, compileCmd []string, files []string, problem models.Problem) error {
+	stdout, stderr, err := exec.CompileInContainer(
+		ctx,
+		pooledContainer.ID,
+		files,
+		submissionWorkspace.HostPath,
+		submissionWorkspace.ContainerPath,
+		compileCmd,
+		120*time.Second,
+		problem.MemoryLimitMb,
+	)
+	if err != nil {
+		msg := err.Error()
+		if strings.TrimSpace(stdout) != "" {
+			msg += " | stdout=" + strings.TrimSpace(stdout)
+		}
+		if strings.TrimSpace(stderr) != "" {
+			msg += " | stderr=" + strings.TrimSpace(stderr)
+		}
+		return fmt.Errorf("%w | %s", err, msg)
+	}
+	return nil
+}
+
+func stdinTestInput(tc models.TestCase) (string, bool) {
+	if len(tc.Input) != 1 {
+		return "", false
+	}
+	s, ok := tc.Input[0].(string)
+	return s, ok
+}
+
+func stdinTestExpected(tc models.TestCase) (string, bool) {
+	s, ok := tc.Expected.(string)
+	return s, ok
+}

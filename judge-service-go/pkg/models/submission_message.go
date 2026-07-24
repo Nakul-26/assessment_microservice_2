@@ -13,6 +13,7 @@ type SubmissionMessage struct {
 	Language      string      `json:"language"`
 	Code          string      `json:"code"`
 	Tests         []TestCase  `json:"tests"`
+	ProblemType   ProblemType `json:"problemType,omitempty"`
 	FunctionName  string      `json:"functionName"`
 	Parameters    []Parameter `json:"parameters,omitempty"`
 	ReturnType    string      `json:"returnType,omitempty"`
@@ -63,12 +64,14 @@ func (sm *SubmissionMessage) Validate() error {
 			return errors.New("too many test cases")
 		}
 	}
-	if sm.FunctionName == "" {
-		return errors.New("functionName is required")
-	}
-	// If function name looks too long or invalid, reject — provider can sanitize instead.
-	if len(sm.FunctionName) > MaxFuncNameLen {
-		return errors.New("functionName too long")
+	if sm.EffectiveType() != StdinProblem {
+		if sm.FunctionName == "" {
+			return errors.New("functionName is required")
+		}
+		// If function name looks too long or invalid, reject — provider can sanitize instead.
+		if len(sm.FunctionName) > MaxFuncNameLen {
+			return errors.New("functionName too long")
+		}
 	}
 	return nil
 }

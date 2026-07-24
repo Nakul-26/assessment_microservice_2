@@ -175,6 +175,101 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
 }
 
+// runExecWithStdinTimeout is runExecWithTimeout's sibling for stdin-mode
+// execution: it attaches stdin and streams stdinInput into the process
+// instead of passing input as a CLI argument. Kept as a separate function
+// (rather than adding a stdin parameter to runExecWithTimeout) so the
+// function-mode path — covered by the existing test suite — is provably
+// untouched.
+func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, stdinInput string, timeout time.Duration) (string, string, int, error) {
+	var stdoutBuf, stderrBuf bytes.Buffer
+
+	execOpts := docker.CreateExecOptions{
+		Container:    containerID,
+		User:         user,
+		Cmd:          cmd,
+		WorkingDir:   workDir,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		Context:      ctx,
+	}
+	execObj, err := e.cli.CreateExec(execOpts)
+	if err != nil {
+		return "", "", -1, fmt.Errorf("failed to create exec: %w", err)
+	}
+
+	childCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	startExecOptions := docker.StartExecOptions{
+		InputStream:  strings.NewReader(stdinInput),
+		OutputStream: &stdoutBuf,
+		ErrorStream:  &stderrBuf,
+		Context:      childCtx,
+	}
+	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
+	if err != nil {
+		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to start exec: %w", err)
+	}
+	var closeOnce sync.Once
+	closeExec := func() {
+		closeOnce.Do(func() {
+			_ = closeWaiter.Close()
+		})
+	}
+	defer closeExec()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- closeWaiter.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || childCtx.Err() == context.DeadlineExceeded || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded") {
+				return stdoutBuf.String(), stderrBuf.String(), -1, NewExecutionError(ErrTimeLimitExceeded, fmt.Sprintf("execution timed out after %v", timeout), -1)
+			}
+			return stdoutBuf.String(), stderrBuf.String(), -1, err
+		}
+	case <-childCtx.Done():
+		closeExec()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			slog.Warn("stdin exec waiter did not exit promptly after cancellation", "containerId", containerID, "cmd", cmd)
+		}
+		if childCtx.Err() == context.DeadlineExceeded {
+			slog.Warn("stdin exec timed out", "containerId", containerID, "timeout", timeout, "cmd", cmd)
+			return stdoutBuf.String(), stderrBuf.String(), -1, NewExecutionError(ErrTimeLimitExceeded, fmt.Sprintf("execution timed out after %v", timeout), -1)
+		}
+		return stdoutBuf.String(), stderrBuf.String(), -1, childCtx.Err()
+	case <-ctx.Done():
+		closeExec()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			slog.Warn("stdin exec waiter did not exit promptly after caller cancellation", "containerId", containerID, "cmd", cmd)
+		}
+		return stdoutBuf.String(), stderrBuf.String(), -1, ctx.Err()
+	}
+
+	inspect, err := e.cli.InspectExec(execObj.ID)
+	if err != nil {
+		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to inspect exec: %w", err)
+	}
+
+	if inspect.ExitCode != 0 {
+		if inspect.ExitCode == 137 {
+			return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrMemoryLimitExceeded, "process killed (possibly OOM)", inspect.ExitCode)
+		}
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrRuntimeError, fmt.Sprintf("exit code %d", inspect.ExitCode), inspect.ExitCode)
+	}
+
+	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
+}
+
 func (e *Executor) copyFilesToContainer(containerID string, hostWorkDir string, containerWorkDir string, files []string) error {
 	if len(files) == 0 {
 		return nil
@@ -394,6 +489,69 @@ func (e *Executor) RunInContainer(ctx context.Context, containerID string, files
 		return "", "", err
 	}
 	runStdout, runStderr, _, err := e.collectStream(stream)
+	return runStdout, runStderr, err
+}
+
+// RunInContainerWithStdin is RunInContainer's sibling for ProblemType: stdin
+// (see pkg/models/problem_type.go) — instead of taking test input as a CLI
+// argument, it pipes stdinInput to the process's stdin via
+// runExecWithStdinTimeout, and returns raw stdout/stderr for the caller to
+// exact-text compare (see pkg/comparator.CompareText). RunInContainer itself
+// is untouched, so the function-mode path is provably unaffected by this
+// addition.
+func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, stdinInput string, timeout time.Duration, memoryLimitMb int64) (string, string, error) {
+	submissionTimeout := timeout * 3
+	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
+	defer cancel()
+
+	if len(files) > 0 {
+		if err := e.copyFilesToContainer(containerID, hostWorkDir, containerWorkDir, files); err != nil {
+			return "", "", err
+		}
+	}
+
+	if memoryLimitMb > 0 {
+		compilationLimit := memoryLimitMb
+		if compilationLimit < 1024 {
+			compilationLimit = 1024
+		}
+		if err := e.UpdateContainerResources(subCtx, containerID, compilationLimit); err != nil {
+			slog.Warn("failed to apply compilation memory limit", "containerId", containerID, "error", err)
+		}
+	}
+
+	if len(compileCmd) > 0 {
+		slog.Info("Compiling in container (stdin mode)", "containerId", containerID, "cmd", compileCmd)
+		compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
+		if err != nil {
+			return "", "", NewExecutionError(ErrCompilationFailed, fmt.Sprintf("%v | stdout=%s stderr=%s", err, compileStdout, compileStderr), -1)
+		}
+	}
+
+	if memoryLimitMb > 0 {
+		if err := e.UpdateContainerResources(subCtx, containerID, memoryLimitMb); err != nil {
+			slog.Warn("failed to apply execution memory limit", "containerId", containerID, "error", err)
+		}
+	}
+
+	runStdout, runStderr, _, err := e.runExecWithStdinTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), stdinInput, timeout)
+
+	if memoryLimitMb > 0 {
+		if resetErr := e.UpdateContainerResources(context.Background(), containerID, 1024); resetErr != nil {
+			slog.Error("failed to reset memory limit", "containerId", containerID, "error", resetErr)
+			if err == nil {
+				err = NewExecutionError(ErrContainerUnhealthy, fmt.Sprintf("failed to reset memory limit: %v", resetErr), -1)
+			}
+		}
+	}
+
+	// Clear /tmp and kill leftover processes to prevent contamination between reused containers,
+	// mirroring the cleanup RunInContainerStream performs after each run.
+	cStdout, cStderr, cExit, cErr := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", "rm -rf /tmp/* && (pkill -9 -u judge || true)"}, 5*time.Second)
+	if cErr != nil && cExit != 137 {
+		slog.Error("failed to cleanup container", "containerId", containerID, "error", cErr, "stdout", cStdout, "stderr", cStderr, "exitCode", cExit)
+	}
+
 	return runStdout, runStderr, err
 }
 

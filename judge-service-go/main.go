@@ -584,6 +584,17 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 		return
 	}
 
+	// Resolve the execution strategy for this problem's type up front. The
+	// legacy wrapper-based fallback further below only supports function-mode
+	// problems, so a non-function problem with no registered strategy must
+	// fail cleanly here rather than silently falling through to it.
+	strategy, hasStrategy := ResolveStrategy(problem.EffectiveType())
+	if !hasStrategy && problem.EffectiveType() != models.FunctionProblem {
+		slog.Error("No execution strategy registered for problem type", "submissionId", submissionMsg.SubmissionID, "problemType", problem.EffectiveType())
+		d.Nack(false, false)
+		return
+	}
+
 	// Acquire a container from the pool with a timeout
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer acquireCancel()
@@ -620,11 +631,11 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 		finishWithContainer(containerPool, pooledContainer, discardContainer, discardReason)
 	}()
 
-	if adapter, ok := adapters.GetAdapter(lang.ID); ok && isCentralCompareEnabled(lang.ID) {
+	if adapter, ok := adapters.GetAdapter(lang.ID); ok && isCentralCompareEnabled(lang.ID) && hasStrategy {
 		execCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
 
-		result, cleanupFailed, err := runSubmissionCentralDetailed(execCtx, executor, pooledContainer, submissionMsg, problem, adapter)
+		result, cleanupFailed, err := strategy.Run(execCtx, executor, pooledContainer, submissionMsg, problem, adapter)
 		if err != nil {
 			slog.Error("Central execution setup failed", "submissionId", submissionMsg.SubmissionID, "adapter", adapter.Name(), "error", err)
 			if discard, reason := shouldDiscardContainer(err, result, cleanupFailed); discard {
@@ -786,14 +797,16 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 					ID:            primitive.NewObjectID(), // Dummy ID
 					Title:         "Ephemeral Problem",
 					Description:   "Temporary problem for validation",
+					Type:          msg.EffectiveType(),
 					TestCases:     msg.Tests,
 					FunctionName:  msg.FunctionName,
 					Parameters:    msg.Parameters,
 					ReturnType:    msg.ReturnType,
 					CompareConfig: msg.CompareConfig,
 				}
-				// Default return type if missing to pass ValidateBasic
-				if problem.ReturnType == "" {
+				// Default return type if missing to pass ValidateBasic (function-mode only —
+				// stdin problems don't use ReturnType).
+				if problem.EffectiveType() != models.StdinProblem && problem.ReturnType == "" {
 					problem.ReturnType = "void"
 				}
 			} else {
@@ -835,6 +848,12 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 			return
 		}
 
+		strategy, hasStrategy := ResolveStrategy(problem.EffectiveType())
+		if !hasStrategy && problem.EffectiveType() != models.FunctionProblem {
+			http.Error(w, "No execution strategy registered for problem type: "+string(problem.EffectiveType()), http.StatusBadRequest)
+			return
+		}
+
 		acquireCtx, acquireCancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer acquireCancel()
 
@@ -852,11 +871,11 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		var result *models.SubmissionResult
 		var runErr error
 
-		if adapter, ok := adapters.GetAdapter(lang.ID); ok && isCentralCompareEnabled(lang.ID) {
+		if adapter, ok := adapters.GetAdapter(lang.ID); ok && isCentralCompareEnabled(lang.ID) && hasStrategy {
 			execCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 			defer cancel()
 			var cleanupFailed bool
-			result, cleanupFailed, runErr = runSubmissionCentralDetailed(execCtx, executor, pooledContainer, msg, problem, adapter)
+			result, cleanupFailed, runErr = strategy.Run(execCtx, executor, pooledContainer, msg, problem, adapter)
 			if discard, reason := shouldDiscardContainer(runErr, result, cleanupFailed); discard {
 				discardContainer = true
 				discardReason = reason
