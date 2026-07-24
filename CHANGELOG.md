@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `POST /api/arventiq/run` — ephemeral "Run" (LeetCode-style Run vs. Submit), execution against caller-supplied input with no `Submission` doc, no RabbitMQ, and no effect on score/history. Calls the Go judge's synchronous `/run` HTTP endpoint directly, the same ephemeral path `problems.service.js::runProblem` already used for the platform's own practice-mode Run.
+
+### Fixed
+- `problems.service.js::runProblem` (pre-existing, unrelated to Arventiq) always sent `functionName` and never sent `problemType` to the Go judge — harmless until a `stdin`-type `Problem` existed, which it now does. Made `problemType`-aware.
+- The new Run endpoint's `errorType` field was leaking the Go comparator's `wrong_answer` classification even for correct output — Run sends an empty `expected` (no notion of correctness), so the comparator flags any non-empty stdout as a mismatch. Filtered to only surface real execution failures.
+
 ## v1.0.1 — 2026-07-24
 
 ### Fixed
