@@ -8,6 +8,7 @@ import healthRoutes from "./health.routes.js";
 import adminRoutes from "./admin.routes.js";
 import integrationRoutes from "./integration.routes.js";
 import questionsRoutes from "./questions.routes.js";
+import arventiqRoutes from "./arventiq.routes.js";
 
 const router = express.Router();
 
@@ -20,5 +21,6 @@ router.use("/health", healthRoutes);
 router.use("/admin", adminRoutes);
 router.use("/integration", integrationRoutes);
 router.use("/questions", questionsRoutes);
+router.use("/arventiq", arventiqRoutes);
 
 export default router;

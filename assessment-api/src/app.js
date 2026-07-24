@@ -33,6 +33,14 @@ const integrationLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const arventiqLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 10000, // High limit — same rationale as integrationLimiter
+  message: "Too many Arventiq requests, applying backpressure",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use((req, res, next) => {
   req.id = req.headers["x-request-id"] || uuidv4();
   res.setHeader("x-request-id", req.id);
@@ -60,6 +68,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Versioned Routes
 app.use("/api/v1/auth", authLimiter);
 app.use("/api/v1/integration", integrationLimiter);
+app.use("/api/v1/arventiq", arventiqLimiter);
 app.use("/api/v1", generalLimiter);
 app.use("/api/v1", routes);
 

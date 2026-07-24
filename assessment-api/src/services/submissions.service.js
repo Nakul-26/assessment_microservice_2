@@ -8,7 +8,11 @@ import { HttpError } from "../utils/httpError.js";
 
 function validateSubmissionMessage(msg) {
   if (!msg || typeof msg !== "object") return false;
-  if (!msg.submissionId || !msg.problemId || !msg.language || !msg.code || !msg.functionName) return false;
+  if (!msg.submissionId || !msg.problemId || !msg.language || !msg.code) return false;
+  // functionName is only required for the named-function problem model — stdin
+  // problems have no wrapper/function to name. Mirrors the same conditional check
+  // on the Go side (pkg/models/submission_message.go), see PLAN.md §3.7.
+  if (msg.problemType !== "stdin" && !msg.functionName) return false;
   if (msg.tests && !Array.isArray(msg.tests)) return false;
   if (Array.isArray(msg.tests)) {
     for (const t of msg.tests) {
@@ -17,6 +21,37 @@ function validateSubmissionMessage(msg) {
     }
   }
   return true;
+}
+
+// Shared by submitSolution/rejudge* below so problemType-aware envelope logic
+// lives in exactly one place — see PLAN.md §3.7 (the one real shared-code touch
+// point between the two problem models).
+function buildJudgeTests(problem) {
+  return problem.testCases.map((tc) => ({
+    inputs: tc.inputs,
+    expected: tc.expected,
+    isHidden: !isSampleTestCase(tc),
+    isSample: isSampleTestCase(tc)
+  }));
+}
+
+function buildJudgeMessageBody({ submissionId, problem, language, code, requestId }) {
+  const problemType = problem.problemType || "function";
+  const body = {
+    schemaVersion: "v2",
+    submissionId,
+    problemId: problem._id.toString(),
+    language,
+    code,
+    tests: buildJudgeTests(problem),
+    problemType,
+    compareMode: problem.compareConfig?.mode || "EXACT",
+    requestId: requestId || undefined
+  };
+  if (problemType !== "stdin") {
+    body.functionName = problem.functionName || "solution";
+  }
+  return body;
 }
 
 function canAccessSubmission(submission, { userId, role }) {
@@ -171,7 +206,7 @@ export function sanitizeSubmissionForStudent(submission, problem) {
   return normalized;
 }
 
-export async function submitSolution({ problemId, code, language, userId, assessmentId = null, attemptId = null, requestId = null }) {
+export async function submitSolution({ problemId, code, language, userId, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
 
   const problem = await problemsRepo.findById(problemId);
@@ -189,6 +224,8 @@ export async function submitSolution({ problemId, code, language, userId, assess
 
   if (assessmentId) submissionData.assessmentId = assessmentId;
   if (attemptId) submissionData.attemptId = attemptId;
+  if (externalStudentId) submissionData.externalStudentId = externalStudentId;
+  if (externalAssessmentId) submissionData.externalAssessmentId = externalAssessmentId;
 
   const submission = await submissionsRepo.create(submissionData);
 
@@ -212,26 +249,13 @@ export async function submitSolution({ problemId, code, language, userId, assess
     }
   }
 
-  const tests = problem.testCases.map((tc) => ({
-    inputs: tc.inputs,
-    expected: tc.expected,
-    isHidden: !isSampleTestCase(tc),
-    isSample: isSampleTestCase(tc)
-  }));
-
-  const functionName = problem.functionName || "solution";
-
-  const messageBody = {
-    schemaVersion: "v2",
+  const messageBody = buildJudgeMessageBody({
     submissionId: submission._id.toString(),
-    problemId: problem._id.toString(),
+    problem,
     language,
     code,
-    tests: tests,
-    functionName: functionName,
-    compareMode: problem.compareConfig?.mode || "EXACT",
-    requestId: requestId
-  };
+    requestId
+  });
 
   if (!validateSubmissionMessage(messageBody)) {
     throw new HttpError(500, "Invalid submission message", { msg: "Internal server error: invalid submission message" });
@@ -405,25 +429,12 @@ export async function rejudgeSubmission(submissionId) {
   submission.testResult = undefined;
   await submission.save();
 
-  const tests = problem.testCases.map((tc) => ({
-    inputs: tc.inputs,
-    expected: tc.expected,
-    isHidden: !isSampleTestCase(tc),
-    isSample: isSampleTestCase(tc)
-  }));
-
-  const functionName = problem.functionName || "solution";
-
-  const messageBody = {
-    schemaVersion: "v2",
+  const messageBody = buildJudgeMessageBody({
     submissionId: submission._id.toString(),
-    problemId: problem._id.toString(),
+    problem,
     language: submission.language,
-    code: submission.code,
-    tests: tests,
-    functionName: functionName,
-    compareMode: problem.compareConfig?.mode || "EXACT"
-  };
+    code: submission.code
+  });
 
   if (!validateSubmissionMessage(messageBody)) {
     throw new HttpError(500, "Invalid submission message configuration");
@@ -446,13 +457,6 @@ export async function rejudgeProblemSubmissions(problemId, assessmentId = null) 
   }
 
   const submissions = await Submission.find(filter);
-  const tests = problem.testCases.map((tc) => ({
-    inputs: tc.inputs,
-    expected: tc.expected,
-    isHidden: !isSampleTestCase(tc),
-    isSample: isSampleTestCase(tc)
-  }));
-  const functionName = problem.functionName || "solution";
 
   for (const submission of submissions) {
     submission.status = "Pending";
@@ -461,16 +465,12 @@ export async function rejudgeProblemSubmissions(problemId, assessmentId = null) 
     submission.testResult = undefined;
     await submission.save();
 
-    const messageBody = {
-      schemaVersion: "v2",
+    const messageBody = buildJudgeMessageBody({
       submissionId: submission._id.toString(),
-      problemId: problem._id.toString(),
+      problem,
       language: submission.language,
-      code: submission.code,
-      tests: tests,
-      functionName: functionName,
-      compareMode: problem.compareConfig?.mode || "EXACT"
-    };
+      code: submission.code
+    });
 
     await publishSubmissionMessage(messageBody);
   }
@@ -489,24 +489,12 @@ export async function rejudgeAssessmentSubmissions(assessmentId) {
 
   for (const submission of submissions) {
     const pId = submission.problemId.toString();
-    if (!problemsCache[pId]) {
-      const problem = await problemsRepo.findById(pId);
-      if (problem) {
-        problemsCache[pId] = {
-          tests: problem.testCases.map((tc) => ({
-            inputs: tc.inputs,
-            expected: tc.expected,
-            isHidden: !isSampleTestCase(tc),
-            isSample: isSampleTestCase(tc)
-          })),
-          functionName: problem.functionName || "solution",
-          compareMode: problem.compareConfig?.mode || "EXACT"
-        };
-      }
+    if (!(pId in problemsCache)) {
+      problemsCache[pId] = await problemsRepo.findById(pId);
     }
 
-    const problemData = problemsCache[pId];
-    if (!problemData) continue;
+    const problem = problemsCache[pId];
+    if (!problem) continue;
 
     submission.status = "Pending";
     submission.score = 0;
@@ -514,16 +502,12 @@ export async function rejudgeAssessmentSubmissions(assessmentId) {
     submission.testResult = undefined;
     await submission.save();
 
-    const messageBody = {
-      schemaVersion: "v2",
+    const messageBody = buildJudgeMessageBody({
       submissionId: submission._id.toString(),
-      problemId: pId,
+      problem,
       language: submission.language,
-      code: submission.code,
-      tests: problemData.tests,
-      functionName: problemData.functionName,
-      compareMode: problemData.compareMode
-    };
+      code: submission.code
+    });
 
     await publishSubmissionMessage(messageBody);
   }

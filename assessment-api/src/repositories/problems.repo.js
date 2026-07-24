@@ -12,6 +12,10 @@ export async function findById(id) {
   return Problem.findById(id);
 }
 
+export async function findByExternalId(externalId) {
+  return Problem.findOne({ externalId: String(externalId) });
+}
+
 export async function create(data) {
   const problem = new Problem(data);
   return problem.save();

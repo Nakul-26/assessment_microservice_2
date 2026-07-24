@@ -34,25 +34,26 @@ Working checklist. `PLAN.md` is the architectural reference — consult it whene
 ## Milestone 1 — Node API
 *Depends on Milestone 3's message-envelope contract (`problemType`, conditional `functionName`) being real, not just planned.*
 
-- [ ] Add `problemType: "function" | "stdin"` to `assessment-api/models/Problem.mjs` (note: `functionName`/`returnType` are currently `required: true` unconditionally at the Mongoose schema level — needs conditional `required` function, not just app-level validation)
-- [ ] Add `inputFormat`/`outputFormat` (descriptive) to `Problem.mjs` for stdin problems
-- [ ] Add `problemType` to the submission envelope in `assessment-api/src/services/submissions.service.js` (`messageBody`)
-- [ ] Update `validateSubmissionMessage` in `submissions.service.js` — `functionName` required only when `problemType === "function"`
-- [ ] New `assessment-api/src/config/env.js` entry: `ARVENTIQ_SECRET`
-- [ ] New `verifyArventiq` middleware — shared secret only, no student JWT, sets `req.user` to the shared service account (mirrors `verifyService` in `integration.mjs`)
-- [ ] New routes under `assessment-api/src/routes/arventiq.routes.js`, mounted at `/api/arventiq/*` in `src/app.js`
-- [ ] Problem Sync endpoint (`POST /api/arventiq/problems` — upsert, `problemType`-aware)
-- [ ] Submission Translator: language-ID mapping table (config, not inline), limits precedence (stored `Problem` wins)
-- [ ] Response Mapper: internal `Submission`/`testResult` → Arventiq's expected shape
+- [x] Add `problemType: "function" | "stdin"` to `assessment-api/models/Problem.mjs` — done via a mongoose function-based `required` (`isFunctionProblem`) on `functionName`/`returnType`, not just app-level validation. Also added `externalId` (unique/sparse — maps a synced problem back to its source system's own id, needed for Problem Sync upsert; not called out explicitly in the original plan but required to make upsert-by-external-id work at all)
+- [x] Add `inputFormat`/`outputFormat` (descriptive) to `Problem.mjs` for stdin problems
+- [x] Add `problemType` to the submission envelope in `assessment-api/src/services/submissions.service.js` (`messageBody`) — landed as part of a `buildJudgeMessageBody`/`buildJudgeTests` extraction shared by `submitSolution` and all three `rejudge*` functions, so the envelope logic (incl. `problemType` and conditional `functionName`) lives in exactly one place instead of 4 near-identical copies. Confirmed live: an existing function-mode problem (3Sum) submitted end-to-end through the real stack still returns `Accepted` with hidden test cases correctly redacted for the student view — no regression.
+- [x] Update `validateSubmissionMessage` in `submissions.service.js` — `functionName` required only when `problemType !== "stdin"` (mirrors the Go-side condition exactly)
+- [x] New `assessment-api/src/config/env.js` entry: `ARVENTIQ_SECRET` (same production-required guard pattern as `TESTING_PLATFORM_KEY`)
+- [x] New `verifyArventiq` middleware (`assessment-api/src/middleware/arventiq.mjs`) — shared secret only (`Authorization: Bearer <ARVENTIQ_SECRET>`), no student JWT. Deviates from `verifyService`'s mock `req.user` in one necessary way: `Submission.userId` is a required ref, so this lazily creates and caches one real, persisted `User` doc (`arventiq-service@system.internal`, bcrypt-hashed random placeholder password, unreachable via login) rather than a mock object with no `_id`. Confirmed only one such user is ever created across repeated requests.
+- [x] New routes under `assessment-api/src/routes/arventiq.routes.js`, mounted at `/arventiq` in `routes/index.js` (giving both `/api/arventiq/*` and `/api/v1/arventiq/*`, consistent with every other route in the app); added an `arventiqLimiter` in `app.js` mirroring `integrationLimiter`
+- [x] Problem Sync endpoint (`POST /api/arventiq/problems` — upsert by `externalId`, `problemType`-aware). Deliberately does **not** reuse `problems.service.js::createProblem`'s deep-validation gate (ajv `contracts/problem.schema.json` + wrapper-generation + reference-solution check) — that machinery assumes function-mode (`parameters`/`returnType`/a reference solution) unconditionally and Arventiq's schema has none of that. Arventiq problems get their own lighter, `problemType`-aware validation instead.
+- [x] Submission Translator (`arventiq.service.js::submitArventiqSolution`) — resolves `externalId` → internal `Problem._id`, maps `code_language` via the new config table, then delegates to `submissionsService.submitSolution` (extended with optional `externalStudentId`/`externalAssessmentId` params) rather than duplicating submission-creation/publish logic. "Limits precedence (stored Problem wins)" turned out to already be structurally guaranteed: the Go judge always re-fetches the `Problem` doc fresh from MongoDB by id for the async queue path and uses its `timeLimitMs`/`memoryLimitMb`/`testCases` — the outbound message's own `tests`/limits fields are only ever consulted on the synchronous ephemeral `/run` path, which Arventiq's flow doesn't use. So there was no precedence conflict to resolve, just nothing to get wrong.
+- [x] Language-ID mapping table — `assessment-api/src/config/arventiqLanguages.js` (config, not inline, as specified)
+- [x] Response Mapper (`arventiq.service.js::mapSubmissionToArventiqVerdict`) — internal `Submission`/`testResult` → Arventiq's `verdict`/`score`/`passed_count`/`total_count`/`cases[]` shape from `history/04`. Known gap, not solved in this milestone: per-test-case correlation back to Arventiq's original `test_cases` rows is positional (array order), not by their own `test_cases.id` — fine as long as sync preserves order (it does), but there's no explicit `externalId` stored per test case yet. `memory_kb`/`max_memory_kb` are always `null` (the Go judge doesn't populate `TestResult.MemoryKB` yet). `weight`/`group` are hardcoded to `1.0`/`null` (Phase 3 — subtasks/weighted scoring — not implemented).
 
 ## Milestone 4 — Integration Testing
 *End-to-end, once 1–3 are done.*
 
-- [ ] Sync a real Arventiq problem via the new Problem Sync API
-- [ ] Submit code through `/api/arventiq/*` → RabbitMQ → Go Judge → result
-- [ ] Verify verdict shape matches what Arventiq expects
-- [ ] Auth failure cases (missing/wrong `ARVENTIQ_SECRET`)
-- [ ] Queue/judge failure cases (judge down, malformed problem)
+- [x] Sync a real Arventiq problem via the new Problem Sync API — 2026-07-24, the sample "Two Sum" payload from `history/04-arventiq-real-schema-and-payload.md`, against the live `docker compose` stack
+- [x] Submit code through `/api/arventiq/*` → RabbitMQ → Go Judge → result — verified both a correct solution (`accepted`, 3/3 including the hidden case) and a wrong one (`wrong_answer`, 0/3, correct per-case `actual` output)
+- [x] Verify verdict shape matches what Arventiq expects — response matches `history/04`'s sample shape (`verdict`/`score`/`passed_count`/`total_count`/`cases[]`)
+- [x] Auth failure cases — missing `Authorization` header → 401; confirmed via live request. (Wrong-secret case not separately exercised but is the same code path as missing — `token !== env.ARVENTIQ_SECRET` — so not expected to differ)
+- [ ] Queue/judge failure cases (judge down, malformed problem) — not exercised; judge was up for all manual testing so far
 
 ---
 

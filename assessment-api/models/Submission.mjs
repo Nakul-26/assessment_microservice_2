@@ -46,6 +46,15 @@ const SubmissionSchema = new Schema({
     },
     tests: {
         type: Array
+    },
+    // Opaque traceability metadata for submissions that originate from an external
+    // system (Arventiq) via the shared service account — not used for auth or
+    // ownership checks, see docs/arventiq-integration/PLAN.md §6.
+    externalStudentId: {
+        type: String
+    },
+    externalAssessmentId: {
+        type: String
     }
 }, { timestamps: true });
 

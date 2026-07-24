@@ -9,9 +9,14 @@ export const env = {
   REDIS_URI: process.env.REDIS_URI || "redis://localhost:6379",
   RABBITMQ_URI: process.env.RABBITMQ_URI || "amqp://localhost",
   JWT_SECRET: process.env.JWT_SECRET || "dev_secret_change_me",
-  TESTING_PLATFORM_KEY: process.env.TESTING_PLATFORM_KEY || (process.env.NODE_ENV === "production" ? null : "testing_platform_secret")
+  TESTING_PLATFORM_KEY: process.env.TESTING_PLATFORM_KEY || (process.env.NODE_ENV === "production" ? null : "testing_platform_secret"),
+  ARVENTIQ_SECRET: process.env.ARVENTIQ_SECRET || (process.env.NODE_ENV === "production" ? null : "arventiq_dev_secret")
 };
 
 if (process.env.NODE_ENV === "production" && !env.TESTING_PLATFORM_KEY) {
   throw new Error("FATAL: TESTING_PLATFORM_KEY is required in production environment");
+}
+
+if (process.env.NODE_ENV === "production" && !env.ARVENTIQ_SECRET) {
+  throw new Error("FATAL: ARVENTIQ_SECRET is required in production environment");
 }
