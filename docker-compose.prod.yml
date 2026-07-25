@@ -1,0 +1,191 @@
+# docker-compose.prod.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Dokploy production deployment — BACKEND ONLY (no frontend).
+#
+# Before deploying, set these required env vars in Dokploy:
+#   RABBITMQ_PASS     strong password for RabbitMQ
+#   MONGO_ROOT_PASS   strong password for MongoDB root user
+#   REDIS_PASS        strong password for Redis
+#   JWT_SECRET        long random secret for JWT signing
+#
+# Optional tuning vars (have sensible defaults):
+#   MONGO_DB_NAME          (default: assessment_db)
+#   ASSESSMENT_API_PORT    (default: 3000)
+#   JUDGE_LOG_LEVEL        (default: info)
+#   JUDGE_POOL_SIZE        (default: 2)
+#   JUDGE_MAX_EXECS        (default: 100)
+#   DOCKER_GROUP_GID       run: stat -c '%g' /var/run/docker.sock on your host
+#                          and set this to whatever it returns (commonly 999/998/995/103)
+#
+# Health endpoints confirmed from source:
+#   assessment-api  → GET /api/health          (returns 200 or 503)
+#   assessment-api  → GET /api/health/ready     (lightweight, always 200 when up)
+#   judge-service-go → GET /health              (returns {"status":"healthy"})
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── 1. MongoDB ──────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:?MONGO_ROOT_PASS is required}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-assessment_db}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Internal only — no ports exposed
+    networks:
+      - assessment-net
+
+  # ── 2. Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASS:?REDIS_PASS is required}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASS}", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Internal only — no ports exposed
+    networks:
+      - assessment-net
+
+  # ── 3. RabbitMQ ──────────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS is required}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    # Management UI intentionally not exposed. Uncomment only for debugging:
+    # ports:
+    #   - "15672:15672"
+    networks:
+      - assessment-net
+
+  # ── 4. Assessment API (Node.js) ───────────────────────────────────────────────
+  # Health: GET /api/health (deep check) or GET /api/health/ready (lightweight)
+  assessment-api:
+    build:
+      context: ./assessment-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: npm start    # runs: node src/server.js  (confirmed in package.json)
+    ports:
+      - "${ASSESSMENT_API_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS}@mongo:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
+      REDIS_URI: redis://:${REDIS_PASS}@redis:6379
+      RABBITMQ_URI: amqp://user:${RABBITMQ_PASS}@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JUDGE_SERVICE_URL: http://judge-service-go:8081
+    healthcheck:
+      # Uses node (always available) instead of wget (not on node:20-alpine by default)
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # NOTE: server.js calls initRabbit() synchronously at startup — if RabbitMQ
+    # isn't ready, the process exits (process.exit(1)). The healthcheck + restart
+    # policy handles recovery. If you want more resilience, add retry logic in rabbit.js.
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - assessment-net
+
+  # ── 5. Judge Service (Go) ─────────────────────────────────────────────────────
+  # Health: GET /health → {"status":"healthy"}
+  judge-service-go:
+    build:
+      context: ./judge-service-go
+      dockerfile: Dockerfile    # multi-stage build → slim alpine runtime image
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Required: judge spawns sandboxed containers
+      - /tmp:/tmp
+    group_add:
+      # The GID of the docker group on your host.
+      # Run: stat -c '%g' /var/run/docker.sock
+      # Then set DOCKER_GROUP_GID in Dokploy env vars.
+      - "${DOCKER_GROUP_GID:-999}"
+    environment:
+      RABBITMQ_URL: amqp://user:${RABBITMQ_PASS}@rabbitmq:5672
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS}@mongo:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
+      REDIS_URI: redis://:${REDIS_PASS}@redis:6379
+      HEALTH_PORT: "8081"
+      LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
+      DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-2}
+      MAX_EXECUTIONS_PER_CONTAINER: ${JUDGE_MAX_EXECS:-100}
+      JUDGE_CENTRAL_COMPARE_PY: "true"
+      JUDGE_CENTRAL_COMPARE_JS: "true"
+      JUDGE_CENTRAL_COMPARE_JAVA: "true"
+      JUDGE_CENTRAL_COMPARE_CPP: "true"
+      JUDGE_CENTRAL_COMPARE_C: "true"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s    # pool warmup takes time — give it a minute
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Internal only — never exposed publicly
+    deploy:
+      resources:
+        limits:
+          memory: 2G    # Judge compiles/runs code — cap memory to protect the host
+    networks:
+      - assessment-net
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  mongo_data:
+  redis_data:
+  rabbitmq_data:
+
+# ── Network ───────────────────────────────────────────────────────────────────
+networks:
+  assessment-net:
+    driver: bridge
