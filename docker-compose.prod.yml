@@ -90,8 +90,8 @@ services:
   # Health: GET /api/health (deep check) or GET /api/health/ready (lightweight)
   assessment-api:
     build:
-      context: ./assessment-api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: assessment-api/Dockerfile
     restart: unless-stopped
     command: npm start    # runs: node src/server.js  (confirmed in package.json)
     ports:
@@ -133,6 +133,7 @@ services:
   # ── 5. Judge Service (Go) ─────────────────────────────────────────────────────
   # Health: GET /health → {"status":"healthy"}
   judge-service-go:
+    user: root
     build:
       context: ./judge-service-go
       dockerfile: Dockerfile    # multi-stage build → slim alpine runtime image

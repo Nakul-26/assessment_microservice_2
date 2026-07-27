@@ -1017,21 +1017,20 @@ func main() {
 	}
 	startHealthServer(ctx, containerPool, healthPort, problemsCollection, executor)
 
-	// Normalize Redis address
-	redisAddr := redisURI
+	// Initialize Redis Client
+	var redisOpt *redis.Options
 	if strings.HasPrefix(redisURI, "redis://") {
-		if u, err := url.Parse(redisURI); err == nil {
-			redisAddr = u.Host
-		} else {
-			redisAddr = strings.TrimPrefix(redisURI, "redis://")
+		var parseErr error
+		redisOpt, parseErr = redis.ParseURL(redisURI)
+		if parseErr != nil {
+			slog.Warn("Failed to parse REDIS_URI with ParseURL, falling back", "error", parseErr)
+			redisOpt = &redis.Options{Addr: strings.TrimPrefix(redisURI, "redis://")}
 		}
+	} else {
+		redisOpt = &redis.Options{Addr: redisURI}
 	}
 
-	// Initialize Redis Client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
-		DB:   0, // use default DB
-	})
+	redisClient := redis.NewClient(redisOpt)
 	_, err = redisClient.Ping(ctx).Result()
 	failOnError(err, "Failed to connect to Redis")
 

@@ -8,13 +8,18 @@ const ajv = new Ajv({ allErrors: true });
 addFormats(ajv);
 
 function loadSchema(schemaName) {
-  const schemaPath = path.resolve(`./contracts/${schemaName}.schema.json`);
-  if (!fs.existsSync(schemaPath)) {
-    // Fallback for different working directories
-    const altPath = path.resolve(`../contracts/${schemaName}.schema.json`);
-    return JSON.parse(fs.readFileSync(altPath, 'utf8'));
+  const possiblePaths = [
+    path.resolve(`./contracts/${schemaName}.schema.json`),
+    path.resolve(`../contracts/${schemaName}.schema.json`),
+    `/usr/src/contracts/${schemaName}.schema.json`,
+    `/usr/src/app/contracts/${schemaName}.schema.json`
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
   }
-  return JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+  throw new Error(`Schema ${schemaName} not found in any expected location`);
 }
 
 const problemSchema = loadSchema('problem');
