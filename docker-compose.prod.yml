@@ -94,8 +94,8 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     command: npm start    # runs: node src/server.js  (confirmed in package.json)
-    ports:
-      - "${ASSESSMENT_API_PORT:-5000}:3000"
+    expose:
+      - "3000"
     environment:
       NODE_ENV: production
       PORT: "3000"
