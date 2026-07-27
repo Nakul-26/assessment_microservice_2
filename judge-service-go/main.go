@@ -258,6 +258,209 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 	return filesToCopy, compileCmd, runCmd, nil
 }
 
+// rawRunFilesAndCommands returns the file(s) to write, compile command, and run command
+// for RAW (unwrapped) execution of a single source file against stdin — no function
+// wrapper, no test harness, no structural comparison. The run command for each language
+// is intentionally the SAME command the wrapper-based flow already uses (languages.go),
+// so the sandbox images don't need to change; only the source is written straight into
+// the file that command already expects, instead of being merged into a wrapper.
+//
+// Java is the one case that constrains the student's code: RunCmd always invokes class
+// "Main", so raw Java submissions must declare `public class Main`. C# raw execution is
+// not supported yet (its wrapper flow depends on a fixed StartupObject in app.csproj).
+func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir string) ([]string, []string, []string, error) {
+	switch lang.ID {
+	case "python":
+		if err := workspace.WriteFile(tempDir, "wrapper.py", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.py"}, nil, lang.RunCmd, nil
+	case "javascript":
+		if err := workspace.WriteFile(tempDir, "wrapper.js", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.js"}, nil, lang.RunCmd, nil
+	case "typescript":
+		if err := workspace.WriteFile(tempDir, "wrapper.ts", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.ts"}, nil, lang.RunCmd, nil
+	case "c":
+		if err := workspace.WriteFile(tempDir, "main.c", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"main.c"}, lang.CompileCmd, lang.RunCmd, nil
+	case "cpp":
+		if err := workspace.WriteFile(tempDir, "main.cpp", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"main.cpp"}, lang.CompileCmd, lang.RunCmd, nil
+	case "go":
+		if err := workspace.WriteFile(tempDir, "main.go", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"main.go"}, lang.CompileCmd, lang.RunCmd, nil
+	case "java":
+		if err := workspace.WriteFile(tempDir, "Main.java", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		compileCmd := []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"}
+		return []string{"Main.java"}, compileCmd, lang.RunCmd, nil
+	default:
+		return nil, nil, nil, fmt.Errorf("raw execution is not supported for language %q yet", lang.ID)
+	}
+}
+
+type rawRunRequest struct {
+	Language      string `json:"language"`
+	Code          string `json:"code"`
+	Stdin         string `json:"stdin"`
+	TimeoutMs     int64  `json:"timeoutMs"`
+	MemoryLimitMb int64  `json:"memoryLimitMb"`
+}
+
+type rawRunResponse struct {
+	Stdout        string `json:"stdout"`
+	Stderr        string `json:"stderr"`
+	CompileOutput string `json:"compileOutput,omitempty"`
+	ExitCode      int    `json:"exitCode"`
+	TimedOut      bool   `json:"timedOut"`
+	OomKilled     bool   `json:"oomKilled"`
+	CompileError  bool   `json:"compileError"`
+	TimeMs        int64  `json:"timeMs"`
+	Error         string `json:"error,omitempty"`
+}
+
+// handleRawRun serves POST /raw-run: compile (if needed) and execute a single raw source
+// file against a single stdin payload, with no problem/test-case/wrapper concept at all.
+// This is the primitive the public Judge0-compatible shim in assessment-api calls into —
+// judge-service-go itself is never exposed publicly (see docker-compose.prod.yml), so this
+// endpoint intentionally has no auth of its own; the network boundary is the control.
+func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req rawRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		lang := languages.GetLanguage(req.Language)
+		if lang == nil {
+			http.Error(w, "Unsupported language", http.StatusBadRequest)
+			return
+		}
+
+		// Clamp caller-supplied limits defensively — this endpoint trusts assessment-api,
+		// but a bug or misconfiguration there shouldn't be able to pin a container forever
+		// or starve the sandbox's own memory ceiling.
+		timeoutMs := req.TimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = int64(defaultSandboxTimeout / time.Millisecond)
+		}
+		if timeoutMs > 60000 {
+			timeoutMs = 60000
+		}
+		timeout := time.Duration(timeoutMs) * time.Millisecond
+
+		memoryLimitMb := req.MemoryLimitMb
+		if memoryLimitMb <= 0 {
+			memoryLimitMb = 256
+		}
+		if memoryLimitMb > 2048 {
+			memoryLimitMb = 2048
+		}
+
+		acquireCtx, acquireCancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer acquireCancel()
+
+		pooledContainer := containerPool.Acquire(acquireCtx, lang.ID)
+		if pooledContainer == nil {
+			http.Error(w, "No available containers (request timed out waiting for resource)", http.StatusServiceUnavailable)
+			return
+		}
+		discardContainer := false
+		discardReason := ""
+		defer func() {
+			finishWithContainer(containerPool, pooledContainer, discardContainer, discardReason)
+		}()
+
+		reqID := fmt.Sprintf("raw-%d", time.Now().UnixNano())
+		subWorkspace, err := workspace.NewSubmissionWorkspace(pooledContainer.WorkDir, reqID)
+		if err != nil {
+			http.Error(w, "Failed to create submission workspace", http.StatusInternalServerError)
+			return
+		}
+		defer func() {
+			if cleanupErr := workspace.CleanupSubmissionWorkspace(subWorkspace.HostPath); cleanupErr != nil {
+				discardContainer = true
+				discardReason = "raw-run workspace cleanup failed"
+				slog.Error("Failed to cleanup raw-run workspace", "path", subWorkspace.HostPath, "error", cleanupErr)
+			}
+		}()
+
+		filesToCopy, compileCmd, runCmd, err := rawRunFilesAndCommands(lang, req.Code, subWorkspace.HostPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		execCtx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+		defer cancel()
+
+		start := time.Now()
+		stdout, stderr, compileOutput, exitCode, execErr := ex.RunRawWithStdin(
+			execCtx, pooledContainer.ID, filesToCopy, subWorkspace.HostPath, subWorkspace.ContainerPath,
+			compileCmd, runCmd, timeout, memoryLimitMb, []byte(req.Stdin),
+		)
+		elapsedMs := time.Since(start).Milliseconds()
+
+		resp := rawRunResponse{
+			Stdout:        stdout,
+			Stderr:        stderr,
+			CompileOutput: compileOutput,
+			ExitCode:      exitCode,
+			TimeMs:        elapsedMs,
+		}
+
+		if execErr != nil {
+			var execErrObj *executor.ExecutionError
+			if errors.As(execErr, &execErrObj) {
+				switch execErrObj.Type {
+				case executor.ErrCompilationFailed:
+					resp.CompileError = true
+					if resp.CompileOutput == "" {
+						resp.CompileOutput = execErrObj.Message
+					}
+				case executor.ErrTimeLimitExceeded:
+					resp.TimedOut = true
+				case executor.ErrMemoryLimitExceeded:
+					resp.OomKilled = true
+					// Echo back the requested limit so the caller's own
+					// "memory >= limit => reclassify as MLE" heuristic fires
+					// even though we don't meter actual peak usage here.
+				default:
+					resp.Error = execErr.Error()
+				}
+			} else {
+				resp.Error = execErr.Error()
+			}
+
+			if discard, reason := shouldDiscardContainer(execErr, nil, false); discard {
+				discardContainer = true
+				discardReason = reason
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
 // processAndStoreResults processes the executor output and updates the database and cache.
 func fallbackResultForExecutionFailure(executionPath string, execErr error, stdout string) *models.SubmissionResult {
 	result := models.NewSubmissionResult()
@@ -877,6 +1080,8 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	})
+
+	mux.HandleFunc("/raw-run", handleRawRun(containerPool, executor))
 
 	server := &http.Server{
 		Addr:    ":" + port,

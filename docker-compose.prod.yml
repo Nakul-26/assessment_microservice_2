@@ -8,6 +8,12 @@
 #   REDIS_PASS        strong password for Redis
 #   JWT_SECRET        long random secret for JWT signing
 #
+# Required for the Arventiq/exam-platform integration:
+#   JUDGE0_SHIM_KEY   shared secret for the Judge0-compatible shim at /api/judge0/submissions.
+#                     exam-platform sends this back as the `x-rapidapi-key` header (it's
+#                     built to talk to a Judge0 instance) — set the SAME value as that
+#                     platform's JUDGE0_API_KEY Worker secret.
+#
 # Optional tuning vars (have sensible defaults):
 #   MONGO_DB_NAME          (default: assessment_db)
 #   ASSESSMENT_API_PORT    (default: 3000)
@@ -111,6 +117,7 @@ services:
       RABBITMQ_PORT: "5672"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TESTING_PLATFORM_KEY: ${TESTING_PLATFORM_KEY:-arventiq_secret_key}
+      JUDGE0_SHIM_KEY: ${JUDGE0_SHIM_KEY:?JUDGE0_SHIM_KEY is required}
       JUDGE_SERVICE_URL: http://judge-service-go:8081
     healthcheck:
       # Uses node (always available) instead of wget (not on node:20-alpine by default)

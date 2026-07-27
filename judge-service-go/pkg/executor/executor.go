@@ -510,3 +510,160 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 
 	return wrapped, nil
 }
+
+// runExecWithStdin is like runExecWithTimeout but attaches stdin and feeds stdinData
+// to the process, then signals EOF so blocking readers (input()/scanf/Scanner...)
+// unblock once all bytes have been consumed.
+func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration, stdinData []byte) (string, string, int, error) {
+	var stdoutBuf, stderrBuf bytes.Buffer
+
+	execOpts := docker.CreateExecOptions{
+		Container:    containerID,
+		User:         user,
+		Cmd:          cmd,
+		WorkingDir:   workDir,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		Context:      ctx,
+	}
+	execObj, err := e.cli.CreateExec(execOpts)
+	if err != nil {
+		return "", "", -1, fmt.Errorf("failed to create exec: %w", err)
+	}
+
+	childCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	startExecOptions := docker.StartExecOptions{
+		InputStream:  bytes.NewReader(stdinData),
+		OutputStream: &stdoutBuf,
+		ErrorStream:  &stderrBuf,
+		Context:      childCtx,
+	}
+	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
+	if err != nil {
+		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to start exec: %w", err)
+	}
+	var closeOnce sync.Once
+	closeExec := func() {
+		closeOnce.Do(func() {
+			_ = closeWaiter.Close()
+		})
+	}
+	defer closeExec()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- closeWaiter.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || childCtx.Err() == context.DeadlineExceeded || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded") {
+				return stdoutBuf.String(), stderrBuf.String(), -1, NewExecutionError(ErrTimeLimitExceeded, fmt.Sprintf("execution timed out after %v", timeout), -1)
+			}
+			return stdoutBuf.String(), stderrBuf.String(), -1, err
+		}
+	case <-childCtx.Done():
+		closeExec()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			slog.Warn("exec waiter did not exit promptly after cancellation", "containerId", containerID, "cmd", cmd)
+		}
+		if childCtx.Err() == context.DeadlineExceeded {
+			slog.Warn("exec timed out", "containerId", containerID, "timeout", timeout, "cmd", cmd)
+			return stdoutBuf.String(), stderrBuf.String(), -1, NewExecutionError(ErrTimeLimitExceeded, fmt.Sprintf("execution timed out after %v", timeout), -1)
+		}
+		return stdoutBuf.String(), stderrBuf.String(), -1, childCtx.Err()
+	case <-ctx.Done():
+		closeExec()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			slog.Warn("exec waiter did not exit promptly after caller cancellation", "containerId", containerID, "cmd", cmd)
+		}
+		return stdoutBuf.String(), stderrBuf.String(), -1, ctx.Err()
+	}
+
+	inspect, err := e.cli.InspectExec(execObj.ID)
+	if err != nil {
+		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to inspect exec: %w", err)
+	}
+
+	if inspect.ExitCode != 0 {
+		if inspect.ExitCode == 137 {
+			return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrMemoryLimitExceeded, "process killed (possibly OOM)", inspect.ExitCode)
+		}
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrRuntimeError, fmt.Sprintf("exit code %d", inspect.ExitCode), inspect.ExitCode)
+	}
+
+	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
+}
+
+// RunRawWithStdin compiles (if needed) and runs raw, unwrapped source code against a
+// single stdin payload, returning stdout/stderr/exit code directly — no wrapper
+// generation, no test-case harness, no structural comparison. This is the primitive
+// behind the Judge0-compatible /raw-run endpoint: the caller (assessment-api) decides
+// AC/WA itself by comparing stdout against an expected value it never sends here.
+func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, timeout time.Duration, memoryLimitMb int64, stdinData []byte) (stdout string, stderr string, compileOutput string, exitCode int, execErr error) {
+	submissionTimeout := timeout * 3
+	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
+	defer cancel()
+
+	if len(files) > 0 {
+		if err := e.copyFilesToContainer(containerID, hostWorkDir, containerWorkDir, files); err != nil {
+			return "", "", "", -1, err
+		}
+	}
+
+	if memoryLimitMb > 0 {
+		compilationLimit := memoryLimitMb
+		if compilationLimit < 1024 {
+			compilationLimit = 1024
+		}
+		if err := e.UpdateContainerResources(subCtx, containerID, compilationLimit); err != nil {
+			slog.Warn("failed to apply compilation memory limit", "containerId", containerID, "error", err)
+		}
+	}
+
+	if len(compileCmd) > 0 {
+		slog.Info("Compiling raw submission in container", "containerId", containerID, "cmd", compileCmd)
+		compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
+		if err != nil {
+			combined := compileStdout
+			if compileStderr != "" {
+				if combined != "" {
+					combined += "\n"
+				}
+				combined += compileStderr
+			}
+			return "", "", combined, -1, NewExecutionError(ErrCompilationFailed, fmt.Sprintf("%v | stdout=%s stderr=%s", err, compileStdout, compileStderr), -1)
+		}
+	}
+
+	if memoryLimitMb > 0 {
+		if err := e.UpdateContainerResources(subCtx, containerID, memoryLimitMb); err != nil {
+			slog.Warn("failed to apply execution memory limit", "containerId", containerID, "error", err)
+		}
+	}
+
+	runStdout, runStderr, runExit, runErr := e.runExecWithStdin(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), timeout, stdinData)
+
+	// Reset limit AFTER execution completes.
+	if memoryLimitMb > 0 {
+		if err := e.UpdateContainerResources(context.Background(), containerID, 1024); err != nil {
+			slog.Error("failed to reset memory limit", "containerId", containerID, "error", err)
+		}
+	}
+
+	// Clear /tmp and kill leftover processes to prevent contamination between reused containers.
+	cStdout, cStderr, cExit, cErr := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", "rm -rf /tmp/* && (pkill -9 -u judge || true)"}, 5*time.Second)
+	if cErr != nil && cExit != 137 {
+		slog.Error("failed to cleanup raw-run container", "containerId", containerID, "error", cErr, "stdout", cStdout, "stderr", cStderr, "exitCode", cExit)
+	}
+
+	return runStdout, runStderr, "", runExit, runErr
+}

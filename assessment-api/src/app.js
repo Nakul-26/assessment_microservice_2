@@ -51,6 +51,11 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+// The Judge0 shim carries base64 source+stdin payloads that can comfortably exceed
+// the platform's normal 100kb request cap; give it its own, larger limit before the
+// general parser below runs (body-parser skips re-parsing an already-consumed body).
+app.use("/api/judge0", express.json({ limit: "2mb" }));
+app.use("/api/v1/judge0", express.json({ limit: "2mb" }));
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
