@@ -1017,8 +1017,18 @@ func main() {
 	startHealthServer(ctx, containerPool, healthPort, problemsCollection, executor)
 
 	// Initialize Redis Client
+	redisPass := os.Getenv("REDIS_PASS")
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "redis:6379"
+	}
 	var redisOpt *redis.Options
-	if strings.HasPrefix(redisURI, "redis://") {
+	if redisPass != "" {
+		redisOpt = &redis.Options{
+			Addr:     redisHost,
+			Password: redisPass,
+		}
+	} else if strings.HasPrefix(redisURI, "redis://") {
 		var parseErr error
 		redisOpt, parseErr = redis.ParseURL(redisURI)
 		if parseErr != nil {
