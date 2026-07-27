@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -919,7 +921,29 @@ func main() {
 
 	// Load environment variables or use defaults
 	rabbitmqURL := os.Getenv("RABBITMQ_URL")
-	if rabbitmqURL == "" {
+	if rabbitmqPass := os.Getenv("RABBITMQ_PASS"); rabbitmqPass != "" {
+		// Build the URI ourselves and let net/url percent-encode the credentials —
+		// passwords with reserved characters (%, $, ^, @, ...) break naive
+		// "amqp://user:pass@host" string interpolation (net/url: invalid userinfo).
+		rabbitmqHost := os.Getenv("RABBITMQ_HOST")
+		if rabbitmqHost == "" {
+			rabbitmqHost = "rabbitmq"
+		}
+		rabbitmqPort := os.Getenv("RABBITMQ_PORT")
+		if rabbitmqPort == "" {
+			rabbitmqPort = "5672"
+		}
+		rabbitmqUser := os.Getenv("RABBITMQ_USER")
+		if rabbitmqUser == "" {
+			rabbitmqUser = "user"
+		}
+		u := &url.URL{
+			Scheme: "amqp",
+			User:   url.UserPassword(rabbitmqUser, rabbitmqPass),
+			Host:   net.JoinHostPort(rabbitmqHost, rabbitmqPort),
+		}
+		rabbitmqURL = u.String()
+	} else if rabbitmqURL == "" {
 		rabbitmqURL = defaultRabbitMQURL
 	}
 	submissionQueueName := os.Getenv("SUBMISSION_QUEUE")

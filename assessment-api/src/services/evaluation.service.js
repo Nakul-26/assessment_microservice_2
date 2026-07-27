@@ -1,6 +1,5 @@
 import amqp from "amqplib";
-import { getChannel } from "../config/rabbit.js";
-import { env } from "../config/env.js";
+import { getChannel, getRabbitConnectionTarget } from "../config/rabbit.js";
 
 const QUEUE_NAME = "submission_queue";
 const DLX_NAME = "submission_dlx";
@@ -14,7 +13,7 @@ export async function publishSubmissionMessage(messageBody) {
   let existingChannel = getChannel();
 
   try {
-    connection = existingChannel ? null : await amqp.connect(env.RABBITMQ_URI);
+    connection = existingChannel ? null : await amqp.connect(getRabbitConnectionTarget());
     channel = existingChannel || await connection.createChannel();
 
     // Setup DLQ

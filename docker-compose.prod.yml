@@ -103,7 +103,12 @@ services:
       MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
       REDIS_URI: redis://:${REDIS_PASS}@redis:6379
       REDIS_PASS: ${REDIS_PASS:?REDIS_PASS is required}
-      RABBITMQ_URI: amqp://user:${RABBITMQ_PASS}@rabbitmq:5672
+      # Passed as separate fields (not a pre-built amqp:// URI) so passwords
+      # with reserved URL characters (%, $, ^, @, ...) don't break URL parsing.
+      RABBITMQ_USER: user
+      RABBITMQ_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS is required}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TESTING_PLATFORM_KEY: ${TESTING_PLATFORM_KEY:-arventiq_secret_key}
       JUDGE_SERVICE_URL: http://judge-service-go:8081
@@ -148,7 +153,12 @@ services:
       # Then set DOCKER_GROUP_GID in Dokploy env vars.
       - "${DOCKER_GROUP_GID:-999}"
     environment:
-      RABBITMQ_URL: amqp://user:${RABBITMQ_PASS}@rabbitmq:5672
+      # Passed as separate fields (not a pre-built amqp:// URL) so passwords
+      # with reserved URL characters (%, $, ^, @, ...) don't break URL parsing.
+      RABBITMQ_USER: user
+      RABBITMQ_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS is required}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
       MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS}@mongo:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
       MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
       REDIS_URI: redis://:${REDIS_PASS}@redis:6379
