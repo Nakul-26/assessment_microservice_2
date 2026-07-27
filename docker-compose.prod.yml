@@ -94,20 +94,21 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     command: npm start    # runs: node src/server.js  (confirmed in package.json)
-    expose:
-      - "3000"
+    ports:
+      - "5000:5000"
     environment:
       NODE_ENV: production
-      PORT: "3000"
+      PORT: "5000"
       MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS}@mongo:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
       MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
       REDIS_URI: redis://:${REDIS_PASS}@redis:6379
       RABBITMQ_URI: amqp://user:${RABBITMQ_PASS}@rabbitmq:5672
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      TESTING_PLATFORM_KEY: ${TESTING_PLATFORM_KEY:-arventiq_secret_key}
       JUDGE_SERVICE_URL: http://judge-service-go:8081
     healthcheck:
       # Uses node (always available) instead of wget (not on node:20-alpine by default)
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/api/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 5
