@@ -299,7 +299,18 @@ func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir strin
 		if err := workspace.WriteFile(tempDir, "main.go", []byte(code), 0644); err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
 		}
-		return []string{"main.go"}, lang.CompileCmd, lang.RunCmd, nil
+		// lang.CompileCmd's plain "go mod init; go build" hangs for the full sandbox
+		// timeout here: with network disabled, an unconfigured `go build` can still
+		// try to reach the module proxy/checksum db (or check for a toolchain
+		// switch) and never gets a fast failure. The wrapper-based flow apparently
+		// never hits this (production Go submissions go through the central-compare
+		// adapter, not this CompileCmd), so it was never exercised until now.
+		// Force everything local/offline explicitly instead of relying on image env.
+		rawGoCompileCmd := []string{"sh", "-c",
+			"export GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GO111MODULE=on GOTOOLCHAIN=local; " +
+				"go mod init solution 2>/dev/null || true; go build -o main .",
+		}
+		return []string{"main.go"}, rawGoCompileCmd, lang.RunCmd, nil
 	case "java":
 		if err := workspace.WriteFile(tempDir, "Main.java", []byte(code), 0644); err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
