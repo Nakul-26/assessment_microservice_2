@@ -420,7 +420,10 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 			return
 		}
 
-		execCtx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+		// Must comfortably exceed RunRawWithStdin's own budget (120s fixed compile +
+		// up to 2x the run timeout) or this context cancels the request before the
+		// compile step's dedicated allowance even runs out.
+		execCtx, cancel := context.WithTimeout(r.Context(), 150*time.Second+2*timeout)
 		defer cancel()
 
 		start := time.Now()

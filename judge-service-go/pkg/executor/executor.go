@@ -609,7 +609,14 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 // behind the Judge0-compatible /raw-run endpoint: the caller (assessment-api) decides
 // AC/WA itself by comparing stdout against an expected value it never sends here.
 func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, timeout time.Duration, memoryLimitMb int64, stdinData []byte) (stdout string, stderr string, compileOutput string, exitCode int, execErr error) {
-	submissionTimeout := timeout * 3
+	// Compilation gets its own generous, FIXED budget — matching central_runner.go's
+	// compileCentralSubmission (120s), which real production submissions rely on.
+	// It must NOT share the caller's short per-run `timeout`: Go builds in particular
+	// (cold GOCACHE) routinely take longer than any reasonable algorithm time limit,
+	// and that's expected/fine — only the student's own run should be bounded tightly.
+	const rawCompileTimeout = 120 * time.Second
+
+	submissionTimeout := rawCompileTimeout + timeout*2
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
@@ -631,7 +638,7 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 
 	if len(compileCmd) > 0 {
 		slog.Info("Compiling raw submission in container", "containerId", containerID, "cmd", compileCmd)
-		compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
+		compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), rawCompileTimeout)
 		if err != nil {
 			combined := compileStdout
 			if compileStderr != "" {
