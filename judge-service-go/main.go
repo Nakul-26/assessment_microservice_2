@@ -266,8 +266,11 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 // the file that command already expects, instead of being merged into a wrapper.
 //
 // Java is the one case that constrains the student's code: RunCmd always invokes class
-// "Main", so raw Java submissions must declare `public class Main`. C# raw execution is
-// not supported yet (its wrapper flow depends on a fixed StartupObject in app.csproj).
+// "Main", so raw Java submissions must declare `public class Main`. C# raw execution
+// compiles the student's Program.cs as the project's sole entry point — unlike the
+// wrapper flow, which forces StartupObject=Harness to make the fixed test-harness class
+// win over the (also present) Solution class, raw mode has no Harness in the mix, so no
+// override is needed.
 func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir string) ([]string, []string, []string, error) {
 	switch lang.ID {
 	case "python":
@@ -341,6 +344,16 @@ func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir strin
 		compileCmd := []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"}
 		runCmd := []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"}
 		return []string{"Main.kt"}, compileCmd, runCmd, nil
+	case "csharp":
+		if err := workspace.WriteFile(tempDir, "Program.cs", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		// The image pre-warms a "dotnet new console" project at /home/judge/app so the
+		// first real build isn't paying SDK/restore cold-start cost; app.csproj is
+		// copied in fresh per run, same as the wrapper adapter does.
+		compileCmd := []string{"sh", "-c", "cp /home/judge/app/app.csproj . && dotnet build -c Release -o out"}
+		runCmd := []string{"dotnet", "out/app.dll"}
+		return []string{"Program.cs"}, compileCmd, runCmd, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("raw execution is not supported for language %q yet", lang.ID)
 	}
