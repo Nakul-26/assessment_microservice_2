@@ -5,9 +5,9 @@ import { env } from "../config/env.js";
 
 // Judge0 CE numeric language IDs -> judge-service-go's internal language keys
 // (pkg/languages/languages.go). Only languages judge-service-go actually runs are
-// listed; anything else (rust, kotlin, ruby, php, csharp/c#) is reported unsupported —
-// csharp exists in judge-service-go's wrapper flow but its raw/unwrapped execution
-// mode isn't implemented yet (its wrapper depends on a fixed StartupObject).
+// listed; anything else (e.g. csharp/c#) is reported unsupported — csharp exists in
+// judge-service-go's wrapper flow but its raw/unwrapped execution mode isn't
+// implemented yet (its wrapper depends on a fixed StartupObject).
 const LANGUAGE_ID_MAP = {
   71: "python",
   63: "javascript",
@@ -16,6 +16,10 @@ const LANGUAGE_ID_MAP = {
   50: "c",
   54: "cpp",
   60: "go",
+  73: "rust",
+  72: "ruby",
+  68: "php",
+  78: "kotlin",
 };
 
 // Judge0 status ids judge.js understands (see exam-platform/workers/student-workerjs/src/judge.js).

@@ -317,6 +317,30 @@ func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir strin
 		}
 		compileCmd := []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"}
 		return []string{"Main.java"}, compileCmd, lang.RunCmd, nil
+	case "ruby":
+		if err := workspace.WriteFile(tempDir, "wrapper.rb", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.rb"}, nil, lang.RunCmd, nil
+	case "php":
+		if err := workspace.WriteFile(tempDir, "wrapper.php", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.php"}, nil, lang.RunCmd, nil
+	case "rust":
+		if err := workspace.WriteFile(tempDir, "main.rs", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"main.rs"}, lang.CompileCmd, lang.RunCmd, nil
+	case "kotlin":
+		// Unlike the wrapper-based flow (Solution.kt + Harness.kt), raw execution
+		// compiles a single self-contained file the student's own `fun main()` lives in.
+		if err := workspace.WriteFile(tempDir, "Main.kt", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		compileCmd := []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"}
+		runCmd := []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"}
+		return []string{"Main.kt"}, compileCmd, runCmd, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("raw execution is not supported for language %q yet", lang.ID)
 	}
@@ -943,7 +967,7 @@ func isCentralCompareEnabled(language string) bool {
 			return isTruthyEnv(raw)
 		}
 		return true
-	case "go", "csharp", "typescript":
+	case "go", "csharp", "typescript", "rust", "ruby", "php", "kotlin":
 		return true
 	default:
 		return false

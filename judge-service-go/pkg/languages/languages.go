@@ -81,9 +81,44 @@ var Languages = map[string]*Language{
 		ID:              "typescript",
 		Name:            "TypeScript",
 		FileExt:         ".ts",
-		Image:           "judge-js-env", // We'll add ts-node to this image
-		RunCmd:          []string{"ts-node", "/app/wrapper.ts"},
+		Image:           "judge-js-env",
+		RunCmd:          []string{"tsx", "/app/wrapper.ts"},
 		WrapperTemplate: "ts_wrapper.tpl",
+	},
+	"rust": {
+		ID:              "rust",
+		Name:            "Rust",
+		FileExt:         ".rs",
+		Image:           "judge-rust-env",
+		CompileCmd:      []string{"rustc", "--edition", "2021", "-O", "-o", "/app/main", "/app/main.rs"},
+		RunCmd:          []string{"/app/main"},
+		WrapperTemplate: "rust_wrapper.tpl",
+	},
+	"ruby": {
+		ID:              "ruby",
+		Name:            "Ruby",
+		FileExt:         ".rb",
+		Image:           "judge-ruby-env",
+		RunCmd:          []string{"ruby", "/app/wrapper.rb"},
+		WrapperTemplate: "ruby_single_wrapper.tpl",
+	},
+	"php": {
+		ID:              "php",
+		Name:            "PHP",
+		FileExt:         ".php",
+		Image:           "judge-php-env",
+		RunCmd:          []string{"php", "/app/wrapper.php"},
+		WrapperTemplate: "php_wrapper.tpl",
+	},
+	"kotlin": {
+		ID:   "kotlin",
+		Name: "Kotlin",
+		// User submissions are written to Solution.kt and wrapper to Harness.kt
+		FileExt:         ".kt",
+		Image:           "judge-kotlin-env",
+		CompileCmd:      []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Solution.kt", "/app/Harness.kt"},
+		RunCmd:          []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "HarnessKt"},
+		WrapperTemplate: "kotlin_wrapper.tpl",
 	},
 }
 

@@ -107,6 +107,13 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 		return tpl, nil
 	}
 
+	if lang.ID == "rust" {
+		tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
+		rustCall := buildRustCall(p, sanitizedFuncName)
+		tpl = strings.ReplaceAll(tpl, "// GENERATED_CALL_MARKER", rustCall)
+		return tpl, nil
+	}
+
 	// For other languages (JS, Python, etc.), use simple string replacement.
 	tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
 
@@ -614,4 +621,133 @@ func jsonAddOutput(sb *strings.Builder, returnType string, varName string) {
 	}
 }
 
+// rustJSONHelpers returns the (fromJSON, toJSON) helper function names (defined
+// statically in rust_wrapper.tpl) for a given parsed type. Only number, string,
+// boolean, array<...> and matrix<...> of those are supported for Rust — the Rust
+// judge intentionally does not support linkedlist/tree/graph types.
+func rustJSONHelpers(t types.ParsedType) (fromJSON string, toJSON string, ok bool) {
+	switch t.Kind {
+	case types.NumberKind:
+		return "json_to_i32", "i32_to_json", true
+	case types.StringKind:
+		return "json_to_string", "string_to_json", true
+	case types.BooleanKind:
+		return "json_to_bool", "bool_to_json", true
+	case types.ArrayKind:
+		if t.Element == nil {
+			return "", "", false
+		}
+		switch t.Element.Kind {
+		case types.NumberKind:
+			return "json_to_vec_i32", "vec_i32_to_json", true
+		case types.StringKind:
+			return "json_to_vec_string", "vec_string_to_json", true
+		case types.BooleanKind:
+			return "json_to_vec_bool", "vec_bool_to_json", true
+		default:
+			return "", "", false
+		}
+	case types.MatrixKind:
+		if t.Element == nil {
+			return "", "", false
+		}
+		switch t.Element.Kind {
+		case types.NumberKind:
+			return "json_to_matrix_i32", "matrix_i32_to_json", true
+		case types.StringKind:
+			return "json_to_matrix_string", "matrix_string_to_json", true
+		case types.BooleanKind:
+			return "json_to_matrix_bool", "matrix_bool_to_json", true
+		default:
+			return "", "", false
+		}
+	default:
+		return "", "", false
+	}
+}
+
+// buildRustCall generates the body that replaces // GENERATED_CALL_MARKER in
+// rust_wrapper.tpl: it converts each JSON input to its typed Rust value, calls
+// the user's Solution method, and prints the {"output": ...} judge line.
+func buildRustCall(p models.Problem, funcName string) string {
+	var sb strings.Builder
+
+	type paramInfo struct {
+		fromJSON string
+		toJSON   string
+	}
+	params := make([]paramInfo, len(p.Parameters))
+
+	unsupported := false
+	for i, param := range p.Parameters {
+		parsed, err := types.ParseType(param.Type)
+		if err != nil {
+			unsupported = true
+			break
+		}
+		fromJSON, toJSON, ok := rustJSONHelpers(parsed)
+		if !ok {
+			unsupported = true
+			break
+		}
+		params[i] = paramInfo{fromJSON: fromJSON, toJSON: toJSON}
+	}
+
+	var returnToJSON string
+	if !unsupported && p.ReturnType != "void" {
+		returnParsed, err := types.ParseType(p.ReturnType)
+		if err != nil {
+			unsupported = true
+		} else {
+			_, toJSON, ok := rustJSONHelpers(returnParsed)
+			if !ok {
+				unsupported = true
+			} else {
+				returnToJSON = toJSON
+			}
+		}
+	}
+
+	if unsupported {
+		sb.WriteString("    compile_error!(\"this problem uses a type not supported by the Rust judge (only number/string/boolean/array/matrix are supported)\");\n")
+		return sb.String()
+	}
+
+	for i, info := range params {
+		sb.WriteString(fmt.Sprintf("    let mut arg%d = %s(&inputs[%d]);\n", i, info.fromJSON, i))
+	}
+	sb.WriteString("    let sol = Solution;\n")
+
+	if p.ReturnType == "void" {
+		sb.WriteString(fmt.Sprintf("    sol.%s(", funcName))
+		for i := range params {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			if i == 0 {
+				sb.WriteString("&mut arg0")
+			} else {
+				sb.WriteString(fmt.Sprintf("arg%d", i))
+			}
+		}
+		sb.WriteString(");\n")
+		if len(params) > 0 {
+			sb.WriteString(fmt.Sprintf("    eprintln!(\"{{\\\"output\\\": {}}}\", %s(&arg0));\n", params[0].toJSON))
+		} else {
+			sb.WriteString("    eprintln!(\"{{\\\"output\\\": null}}\");\n")
+		}
+	} else {
+		sb.WriteString(fmt.Sprintf("    let output = sol.%s(", funcName))
+		for i := range params {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("arg%d", i))
+		}
+		sb.WriteString(");\n")
+		sb.WriteString(fmt.Sprintf("    eprintln!(\"{{\\\"output\\\": {}}}\", %s(&output));\n", returnToJSON))
+	}
+
+	return sb.String()
+}
 

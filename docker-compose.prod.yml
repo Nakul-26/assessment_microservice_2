@@ -257,6 +257,38 @@ services:
     networks:
       - assessment-net
 
+  judge-rust:
+    build:
+      context: ./judge-service-go/environments/rust
+      dockerfile: Dockerfile
+    image: judge-rust-env
+    networks:
+      - assessment-net
+
+  judge-ruby:
+    build:
+      context: ./judge-service-go/environments/ruby
+      dockerfile: Dockerfile
+    image: judge-ruby-env
+    networks:
+      - assessment-net
+
+  judge-php:
+    build:
+      context: ./judge-service-go/environments/php
+      dockerfile: Dockerfile
+    image: judge-php-env
+    networks:
+      - assessment-net
+
+  judge-kotlin:
+    build:
+      context: ./judge-service-go/environments/kotlin
+      dockerfile: Dockerfile
+    image: judge-kotlin-env
+    networks:
+      - assessment-net
+
 # ── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
   mongo_data:

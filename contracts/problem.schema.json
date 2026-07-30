@@ -100,7 +100,7 @@
     },
     "solutionLanguage": {
       "type": "string",
-      "enum": ["javascript", "typescript", "python", "java", "go", "cpp", "c", "csharp"]
+      "enum": ["javascript", "typescript", "python", "java", "go", "cpp", "c", "csharp", "rust", "ruby", "php", "kotlin"]
     },
     "createdAt": {
       "type": "string",
