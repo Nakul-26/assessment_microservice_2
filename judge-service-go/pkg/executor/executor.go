@@ -487,12 +487,18 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 		exitCode, waitErr := stream.Wait()
 		cancel()
 
-		// Reset limit AFTER execution completes
+		// Reset limit AFTER execution completes. Bounded on its own timeout — this must
+		// never be context.Background() unbounded: a stalled Docker daemon call here would
+		// otherwise hang forever, and since the container is only released back to the
+		// pool once this goroutine returns, one hang permanently strands a pooled container.
 		if memoryLimitMb > 0 {
-			if err := e.UpdateContainerResources(context.Background(), containerID, 1024); err != nil {
-				slog.Error("failed to reset memory limit", "containerId", containerID, "error", err)
+			resetCtx, resetCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			resetErr := e.UpdateContainerResources(resetCtx, containerID, 1024)
+			resetCancel()
+			if resetErr != nil {
+				slog.Error("failed to reset memory limit", "containerId", containerID, "error", resetErr)
 				if waitErr == nil {
-					waitErr = NewExecutionError(ErrContainerUnhealthy, fmt.Sprintf("failed to reset memory limit: %v", err), -1)
+					waitErr = NewExecutionError(ErrContainerUnhealthy, fmt.Sprintf("failed to reset memory limit: %v", resetErr), -1)
 				}
 			}
 		}
@@ -659,10 +665,14 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 
 	runStdout, runStderr, runExit, runErr := e.runExecWithStdin(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), timeout, stdinData)
 
-	// Reset limit AFTER execution completes.
+	// Reset limit AFTER execution completes. Bounded on its own timeout for the same
+	// reason as RunInContainerStream's equivalent reset — see comment there.
 	if memoryLimitMb > 0 {
-		if err := e.UpdateContainerResources(context.Background(), containerID, 1024); err != nil {
-			slog.Error("failed to reset memory limit", "containerId", containerID, "error", err)
+		resetCtx, resetCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		resetErr := e.UpdateContainerResources(resetCtx, containerID, 1024)
+		resetCancel()
+		if resetErr != nil {
+			slog.Error("failed to reset memory limit", "containerId", containerID, "error", resetErr)
 		}
 	}
 

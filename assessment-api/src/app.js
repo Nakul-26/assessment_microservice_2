@@ -69,6 +69,9 @@ app.use("/api/v1", generalLimiter);
 app.use("/api/v1", routes);
 
 // Backward Compatibility / Default Prefix
+app.use("/api/auth", authLimiter);
+app.use("/api/integration", integrationLimiter);
+app.use("/api", generalLimiter);
 app.use("/api", routes);
 
 app.get("/", (req, res) => {

@@ -143,8 +143,11 @@ export async function updateQuestion(id, payload, user) {
   const q = await questionsRepo.findById(id);
   if (!q) throw new HttpError(404, 'Question not found');
 
-  // Only author or admin/faculty can update
-  if (String(q.author) !== String(user._id) && !(user.role === 'admin' || user.role === 'superadmin' || user.role === 'faculty')) {
+  const isOwner = String(q.author) === String(user._id);
+  const isPrivileged = user.role === 'admin' || user.role === 'superadmin';
+  const isSameCollegeFaculty = user.role === 'faculty' && String(q.collegeId) === String(user.collegeId);
+
+  if (!isOwner && !isPrivileged && !isSameCollegeFaculty) {
     throw new HttpError(403, 'Forbidden');
   }
 
