@@ -19,6 +19,7 @@ type SubmissionMessage struct {
 	CompareMode   string      `json:"compareMode,omitempty"`
 	CompareConfig CompareConfig `json:"compareConfig,omitempty"`
 	RequestID     string      `json:"requestId,omitempty"`
+	RetryCount    int         `json:"retryCount,omitempty"`
 }
 
 // Limits — tweak as needed
@@ -27,6 +28,10 @@ const (
 	MaxTestsBytes    = 1 * 1024 * 1024 // 1MB max tests JSON when marshalled
 	MaxFuncNameLen   = 128
 	MinSchemaVersion = "1"
+	// MaxSubmissionRetries bounds how many times a submission can bounce through the
+	// retry queue (e.g. waiting for a free pool container) before it's surfaced as a
+	// failure instead of looping forever. At the retry queue's 5s TTL, this is a ~60s window.
+	MaxSubmissionRetries = 12
 )
 
 // valid identifier for function/class names: starts with letter or underscore, then letters/digits/underscores

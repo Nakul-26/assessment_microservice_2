@@ -16,6 +16,7 @@ const AssessmentSchema = new Schema(
       }
     ],
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    collegeId: { type: Schema.Types.ObjectId, ref: "College" },
     status: {
       type: String,
       enum: ["Draft", "Published", "Completed"],
@@ -34,5 +35,6 @@ const AssessmentSchema = new Schema(
 
 AssessmentSchema.index({ createdBy: 1 });
 AssessmentSchema.index({ status: 1 });
+AssessmentSchema.index({ collegeId: 1 });
 
 export default mongoose.model("Assessment", AssessmentSchema);

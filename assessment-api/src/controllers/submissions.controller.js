@@ -10,11 +10,12 @@ export async function submitSolution(req, res, next) {
       return res.status(401).json({ msg: "Unauthorized" });
     }
 
-    const result = await submissionsService.submitSolution({ 
-      problemId, 
-      code, 
-      language, 
+    const result = await submissionsService.submitSolution({
+      problemId,
+      code,
+      language,
       userId: finalUserId,
+      collegeId: req.user && req.user.collegeId,
       assessmentId,
       attemptId,
       requestId: req.id
@@ -35,9 +36,10 @@ export async function getSubmissionById(req, res, next) {
   const { _id } = req.params;
   const userId = req.user && req.user.id;
   const role = req.user && req.user.role;
+  const collegeId = req.user && req.user.collegeId;
 
   try {
-    const result = await submissionsService.getSubmissionById(_id, { userId, role });
+    const result = await submissionsService.getSubmissionById(_id, { userId, role, collegeId });
     if (result.notFound) {
       return res.status(404).json({ msg: "Submission not found" });
     }

@@ -807,6 +807,27 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 	}
 }
 
+// markSubmissionExecutionFailed records a terminal failure for a submission that never
+// reached execution (e.g. it exhausted its retry budget waiting for a pool container),
+// so it surfaces to the user instead of silently vanishing from the queue.
+func markSubmissionExecutionFailed(ctx context.Context, submissionsCollection *mongo.Collection, submissionMsg models.SubmissionMessage, reason string) {
+	submissionObjID, err := primitive.ObjectIDFromHex(submissionMsg.SubmissionID)
+	if err != nil {
+		slog.Error("Invalid SubmissionID while marking submission failed", "submissionId", submissionMsg.SubmissionID, "error", err)
+		return
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"status":    models.StatusError,
+			"output":    reason,
+			"updatedAt": time.Now(),
+		},
+	}
+	if _, err := submissionsCollection.UpdateByID(ctx, submissionObjID, update); err != nil {
+		slog.Error("Failed to mark submission as failed", "submissionId", submissionMsg.SubmissionID, "error", err)
+	}
+}
+
 // processSubmission is the main coordinator for handling a submission message.
 func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
@@ -845,12 +866,29 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 
 	pooledContainer := containerPool.Acquire(acquireCtx, lang.ID)
 	if pooledContainer == nil {
-		slog.Warn("No available containers for language, routing to retry queue", "submissionId", submissionMsg.SubmissionID, "language", lang.ID)
+		if submissionMsg.RetryCount >= models.MaxSubmissionRetries {
+			slog.Error("Submission exceeded max retries waiting for a container; marking as failed",
+				"submissionId", submissionMsg.SubmissionID, "language", lang.ID, "retryCount", submissionMsg.RetryCount)
+			markSubmissionExecutionFailed(ctx, submissionsCollection, submissionMsg,
+				fmt.Sprintf("No available %s execution containers after %d retries", lang.ID, submissionMsg.RetryCount))
+			d.Ack(false)
+			return
+		}
+
+		submissionMsg.RetryCount++
+		retryBody, err := json.Marshal(submissionMsg)
+		if err != nil {
+			slog.Error("Failed to marshal submission for retry, using original body", "submissionId", submissionMsg.SubmissionID, "error", err)
+			retryBody = d.Body
+		}
+
+		slog.Warn("No available containers for language, routing to retry queue",
+			"submissionId", submissionMsg.SubmissionID, "language", lang.ID, "retryCount", submissionMsg.RetryCount)
 
 		// To avoid hot-requeue loop, we publish to a retry queue with TTL
-		err := ch.PublishWithContext(ctx, "", retryQueueName, false, false, amqp.Publishing{
+		err = ch.PublishWithContext(ctx, "", retryQueueName, false, false, amqp.Publishing{
 			ContentType:  d.ContentType,
-			Body:         d.Body,
+			Body:         retryBody,
 			DeliveryMode: amqp.Persistent,
 		})
 		if err != nil {

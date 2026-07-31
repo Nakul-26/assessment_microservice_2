@@ -5,15 +5,25 @@ import User from "../../models/User.mjs";
 import { HttpError } from "../utils/httpError.js";
 import * as auditService from "./audit.service.js";
 
+// superadmin operates across colleges; everyone else is scoped to their own.
+// Returns undefined/null for "no scoping" (repo layer treats a falsy collegeId as unscoped).
+function collegeScopeFor(user) {
+  if (!user || user.role === 'superadmin') return undefined;
+  return user.collegeId || undefined;
+}
+
 export async function listAssessments(query = {}, user) {
   const page = Math.max(1, Number(query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(query.limit || 50)));
   const filter = {};
-  
+
   // If guest or student, only show Published or Completed assessments
   if (!user || user.role === 'student') {
     filter.status = { $in: ['Published', 'Completed'] };
   }
+
+  const collegeId = collegeScopeFor(user);
+  if (collegeId) filter.collegeId = collegeId;
 
   const options = {
     sort: { startTime: -1 },
@@ -25,7 +35,7 @@ export async function listAssessments(query = {}, user) {
 }
 
 export async function getAssessmentById(id, user) {
-  const assessment = await assessmentsRepo.findById(id);
+  const assessment = await assessmentsRepo.findById(id, collegeScopeFor(user));
   if (!assessment) return null;
 
   // Student can only see if it's not Draft
@@ -40,26 +50,35 @@ export async function getMyAssessmentAttempt(assessmentId, userId) {
   return attemptsRepo.findOne({ assessmentId, studentId: userId });
 }
 
-export async function createAssessment(payload, userId) {
+export async function createAssessment(payload, user) {
   validateAssessmentPayload(payload);
   const data = {
     ...payload,
-    createdBy: userId
+    createdBy: user._id,
+    // collegeId always comes from the authenticated user's own token claim, never the
+    // request body, so a faculty/admin can't stamp another tenant's id onto their own data.
+    collegeId: user.role === 'superadmin' ? (payload.collegeId || undefined) : (user.collegeId || undefined)
   };
   return assessmentsRepo.create(data);
 }
 
-export async function updateAssessment(id, payload) {
+export async function updateAssessment(id, payload, user) {
   validateAssessmentPayload(payload);
-  return assessmentsRepo.updateById(id, payload);
+  const { collegeId, ...safePayload } = payload; // collegeId is immutable post-creation via this path
+  const assessment = await assessmentsRepo.updateById(id, safePayload, collegeScopeFor(user));
+  if (!assessment) throw new HttpError(404, "Assessment not found");
+  return assessment;
 }
 
-export async function deleteAssessment(id) {
-  return assessmentsRepo.deleteById(id);
+export async function deleteAssessment(id, user) {
+  const assessment = await assessmentsRepo.deleteById(id, collegeScopeFor(user));
+  if (!assessment) throw new HttpError(404, "Assessment not found");
+  return assessment;
 }
 
-export async function startAssessment(assessmentId, userId, auditInfo = {}) {
-  const assessment = await assessmentsRepo.findById(assessmentId);
+export async function startAssessment(assessmentId, user, auditInfo = {}) {
+  const userId = user._id;
+  const assessment = await assessmentsRepo.findById(assessmentId, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
   if (assessment.status !== 'Published') throw new HttpError(400, "Assessment is not active");
   if (assessment.locked) throw new HttpError(409, "Assessment is locked by the faculty");
@@ -80,6 +99,7 @@ export async function startAssessment(assessmentId, userId, auditInfo = {}) {
     attempt = await attemptsRepo.create({
       assessmentId,
       studentId: userId,
+      collegeId: assessment.collegeId || user.collegeId || undefined,
       startedAt: now,
       status: 'Active',
       problemOrder: shuffledOrder,
@@ -104,7 +124,7 @@ export async function startAssessment(assessmentId, userId, auditInfo = {}) {
 }
 
 export async function logAntiCheatingEvent(attemptId, eventType, user) {
-  const attempt = await attemptsRepo.findById(attemptId);
+  const attempt = await attemptsRepo.findById(attemptId, collegeScopeFor(user));
   if (!attempt) throw new HttpError(404, "Attempt not found");
 
   const studentId = attempt.studentId._id || attempt.studentId;
@@ -146,10 +166,10 @@ export async function logAntiCheatingEvent(attemptId, eventType, user) {
 }
 
 export async function getAssessmentAttemptById(attemptId, user) {
-  const attempt = await attemptsRepo.findById(attemptId);
+  const attempt = await attemptsRepo.findById(attemptId, collegeScopeFor(user));
   if (!attempt) return null;
 
-  const assessment = await assessmentsRepo.findById(attempt.assessmentId);
+  const assessment = await assessmentsRepo.findById(attempt.assessmentId, collegeScopeFor(user));
   if (!assessment) return null;
 
   // Auto-timeout check
@@ -231,7 +251,14 @@ export async function listAssessmentAttempts(assessmentId, user, query = {}) {
     limit: limit
   };
 
-  return attemptsRepo.findAll({ assessmentId }, options);
+  // Scoped by the attempt's own collegeId rather than pre-checking the assessment's
+  // existence, so this keeps returning [] (not a 404) for an out-of-scope/unknown
+  // assessmentId — the integration /results/:_id contract already relies on that shape.
+  const filter = { assessmentId };
+  const collegeId = collegeScopeFor(user);
+  if (collegeId) filter.collegeId = collegeId;
+
+  return attemptsRepo.findAll(filter, options);
 }
 
 export async function getAssessmentAttendance(assessmentId, user) {
@@ -240,13 +267,14 @@ export async function getAssessmentAttendance(assessmentId, user) {
     throw new HttpError(403, "Forbidden");
   }
 
-  const assessment = await assessmentsRepo.findById(assessmentId);
+  const assessment = await assessmentsRepo.findById(assessmentId, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
 
-  // Get all students
-  // For now, let's get all users with role 'student'
-  // In a real multi-college setup, we'd filter by collegeId
-  const students = await User.find({ role: 'student' }).select('name email usn section');
+  // Get all students in the same college as the assessment (falls back to every student
+  // only for legacy/superadmin-created data with no collegeId yet).
+  const studentFilter = { role: 'student' };
+  if (assessment.collegeId) studentFilter.collegeId = assessment.collegeId;
+  const students = await User.find(studentFilter).select('name email usn section');
 
   // Get all attempts for this assessment
   const attempts = await attemptsRepo.findAll({ assessmentId });
@@ -277,10 +305,10 @@ export async function getAssessmentAttendance(assessmentId, user) {
 }
 
 export async function submitAssessment(attemptId, user, auditInfo = {}) {
-  const attempt = await attemptsRepo.findById(attemptId);
+  const attempt = await attemptsRepo.findById(attemptId, collegeScopeFor(user));
   if (!attempt) throw new HttpError(404, "Attempt not found");
 
-  const assessment = await assessmentsRepo.findById(attempt.assessmentId);
+  const assessment = await assessmentsRepo.findById(attempt.assessmentId, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
 
   // Permission check
@@ -361,7 +389,7 @@ export async function getAttemptSubmissions(attemptId, user, query = {}) {
   const page = Math.max(1, Number(query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(query.limit || 50)));
 
-  const attempt = await attemptsRepo.findById(attemptId);
+  const attempt = await attemptsRepo.findById(attemptId, collegeScopeFor(user));
   if (!attempt) throw new HttpError(404, "Attempt not found");
 
   // Permission check: Faculty/Admin or the Student who owns the attempt
@@ -406,17 +434,17 @@ function validateAssessmentPayload(payload) {
   }
 }
 
-export async function getAnnouncements(assessmentId) {
-  const assessment = await assessmentsRepo.findById(assessmentId);
+export async function getAnnouncements(assessmentId, user) {
+  const assessment = await assessmentsRepo.findById(assessmentId, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
   return assessment.announcements || [];
 }
 
-export async function createAnnouncement(assessmentId, message) {
+export async function createAnnouncement(assessmentId, message, user) {
   if (!message || typeof message !== 'string' || message.trim() === '') {
     throw new HttpError(400, "Message must be a non-empty string");
   }
-  const assessment = await assessmentsRepo.findById(assessmentId);
+  const assessment = await assessmentsRepo.findById(assessmentId, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
 
   const announcement = {
@@ -426,7 +454,7 @@ export async function createAnnouncement(assessmentId, message) {
 
   await assessmentsRepo.updateById(assessmentId, {
     $push: { announcements: announcement }
-  });
+  }, collegeScopeFor(user));
 
   return announcement;
 }
@@ -437,10 +465,12 @@ export async function getAssessmentAnalytics(assessmentId, user) {
     throw new HttpError(403, "Forbidden");
   }
 
-  const assessment = await assessmentsRepo.findById(assessmentId);
+  const assessment = await assessmentsRepo.findById(assessmentId, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
 
-  const students = await User.find({ role: 'student' }).select('name email usn section');
+  const studentFilter = { role: 'student' };
+  if (assessment.collegeId) studentFilter.collegeId = assessment.collegeId;
+  const students = await User.find(studentFilter).select('name email usn section');
   const attempts = await attemptsRepo.findAll({ assessmentId });
   const submissions = await Submission.find({ assessmentId });
 
@@ -579,7 +609,7 @@ export async function getAssessmentAnalytics(assessmentId, user) {
 }
 
 export async function saveDraft(attemptId, codeDrafts, user) {
-  const attempt = await attemptsRepo.findById(attemptId);
+  const attempt = await attemptsRepo.findById(attemptId, collegeScopeFor(user));
   if (!attempt) throw new HttpError(404, "Attempt not found");
 
   if (attempt.status !== 'Active') {
@@ -599,27 +629,27 @@ export async function lockAssessment(assessmentId, user) {
   if (user.role === 'student') {
     throw new HttpError(403, "Forbidden");
   }
-  const assessment = await assessmentsRepo.findById(assessmentId);
+  const assessment = await assessmentsRepo.updateById(assessmentId, { locked: true }, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
 
-  return assessmentsRepo.updateById(assessmentId, { locked: true });
+  return assessment;
 }
 
 export async function unlockAssessment(assessmentId, user) {
   if (user.role === 'student') {
     throw new HttpError(403, "Forbidden");
   }
-  const assessment = await assessmentsRepo.findById(assessmentId);
+  const assessment = await assessmentsRepo.updateById(assessmentId, { locked: false }, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
 
-  return assessmentsRepo.updateById(assessmentId, { locked: false });
+  return assessment;
 }
 
 export async function addGraceTime(attemptId, graceMinutes, user) {
   if (user.role === 'student') {
     throw new HttpError(403, "Forbidden");
   }
-  const attempt = await attemptsRepo.findById(attemptId);
+  const attempt = await attemptsRepo.findById(attemptId, collegeScopeFor(user));
   if (!attempt) throw new HttpError(404, "Attempt not found");
 
   const newGraceMinutes = (attempt.graceMinutes || 0) + Number(graceMinutes);
@@ -680,7 +710,7 @@ export async function raiseChallenge(attemptId, reason, user) {
 }
 
 export async function resolveChallenge(attemptId, status, facultyComment, user) {
-  const attempt = await attemptsRepo.findById(attemptId);
+  const attempt = await attemptsRepo.findById(attemptId, collegeScopeFor(user));
   if (!attempt) throw new HttpError(404, "Attempt not found");
 
   if (!attempt.challenge || attempt.challenge.status !== 'Raised') {

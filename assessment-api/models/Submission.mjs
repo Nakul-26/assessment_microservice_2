@@ -21,6 +21,10 @@ const SubmissionSchema = new Schema({
         type: Schema.Types.ObjectId,
         ref: 'AssessmentAttempt'
     },
+    collegeId: {
+        type: Schema.Types.ObjectId,
+        ref: 'College'
+    },
     score: {
         type: Number,
         default: 0
@@ -55,5 +59,6 @@ SubmissionSchema.index({ userId: 1 });
 SubmissionSchema.index({ assessmentId: 1 });
 SubmissionSchema.index({ attemptId: 1 });
 SubmissionSchema.index({ assessmentId: 1, userId: 1 });
+SubmissionSchema.index({ collegeId: 1 });
 
 export default mongoose.model('Submission', SubmissionSchema);

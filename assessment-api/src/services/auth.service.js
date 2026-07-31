@@ -51,7 +51,7 @@ export async function register({ name, email, password, role, collegeId, usn, se
   });
 
   const token = jwt.sign(
-    { id: user._id.toString(), role: user.role, email: user.email, name: user.name },
+    { id: user._id.toString(), role: user.role, email: user.email, name: user.name, collegeId: user.collegeId || null },
     env.JWT_SECRET,
     { expiresIn: "7d" }
   );
@@ -192,7 +192,7 @@ export async function login({ email, password }, auditInfo = {}) {
   }
 
   const token = jwt.sign(
-    { id: user._id.toString(), role: user.role, email: user.email, name: user.name },
+    { id: user._id.toString(), role: user.role, email: user.email, name: user.name, collegeId: user.collegeId || null },
     env.JWT_SECRET,
     { expiresIn: "7d" }
   );

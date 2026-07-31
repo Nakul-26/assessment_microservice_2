@@ -202,9 +202,9 @@ function AppContent() {
             <Routes>
                 <Route path="/" element={<ProblemListPage user={user} />} />
                 <Route path="/assessments" element={user ? <AssessmentListPage user={user} /> : <Navigate to="/login" replace />} />
-                <Route path="/questions" element={user ? <QuestionBankPage user={user} /> : <Navigate to="/login" replace />} />
-                <Route path="/questions/add" element={user ? <AddQuestionPage user={user} /> : <Navigate to="/login" replace />} />
-                <Route path="/questions/:id/edit" element={user ? <EditQuestionPage user={user} /> : <Navigate to="/login" replace />} />
+                <Route path="/questions" element={<RequireStaff><QuestionBankPage user={user} /></RequireStaff>} />
+                <Route path="/questions/add" element={<RequireStaff><AddQuestionPage user={user} /></RequireStaff>} />
+                <Route path="/questions/:id/edit" element={<RequireStaff><EditQuestionPage user={user} /></RequireStaff>} />
                 <Route path="/assessments/:id" element={<RequireAuth><AssessmentDetailsPage user={user} /></RequireAuth>} />
                 <Route path="/assessment-attempt/:attemptId" element={<RequireStudent><AssessmentWorkspace user={user} /></RequireStudent>} />
                 <Route path="/assessment-attempt/:attemptId/result" element={<RequireStudent><AssessmentResultPage user={user} /></RequireStudent>} />

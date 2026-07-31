@@ -5,6 +5,7 @@ const AssessmentAttemptSchema = new Schema(
   {
     assessmentId: { type: Schema.Types.ObjectId, ref: "Assessment", required: true },
     studentId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    collegeId: { type: Schema.Types.ObjectId, ref: "College" },
     startedAt: { type: Date, default: Date.now },
     submittedAt: { type: Date },
     score: { type: Number, default: 0 },
@@ -42,6 +43,7 @@ const AssessmentAttemptSchema = new Schema(
 // Add indexes for scalability
 AssessmentAttemptSchema.index({ assessmentId: 1 });
 AssessmentAttemptSchema.index({ studentId: 1 });
+AssessmentAttemptSchema.index({ collegeId: 1 });
 // Compound index for unique attempts and faster lookups
 AssessmentAttemptSchema.index({ assessmentId: 1, studentId: 1 }, { unique: true });
 

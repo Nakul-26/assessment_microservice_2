@@ -19,9 +19,15 @@ function validateSubmissionMessage(msg) {
   return true;
 }
 
-function canAccessSubmission(submission, { userId, role }) {
+function canAccessSubmission(submission, { userId, role, collegeId }) {
   if (!submission || !userId) return false;
-  if (role === "admin" || role === "faculty" || role === "superadmin") return true;
+  if (role === "superadmin") return true;
+  if (role === "admin" || role === "faculty") {
+    // Legacy submissions from before collegeId was stamped stay visible during the
+    // migration window; once backfilled this always requires a same-college match.
+    if (!submission.collegeId) return true;
+    return String(submission.collegeId) === String(collegeId);
+  }
   return String(submission.userId) === String(userId);
 }
 
@@ -171,7 +177,7 @@ export function sanitizeSubmissionForStudent(submission, problem) {
   return normalized;
 }
 
-export async function submitSolution({ problemId, code, language, userId, assessmentId = null, attemptId = null, requestId = null }) {
+export async function submitSolution({ problemId, code, language, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
 
   const problem = await problemsRepo.findById(problemId);
@@ -187,6 +193,7 @@ export async function submitSolution({ problemId, code, language, userId, assess
     status: "Pending"
   };
 
+  if (collegeId) submissionData.collegeId = collegeId;
   if (assessmentId) submissionData.assessmentId = assessmentId;
   if (attemptId) submissionData.attemptId = attemptId;
 
