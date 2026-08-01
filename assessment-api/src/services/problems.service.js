@@ -2,6 +2,7 @@ import * as problemsRepo from "../repositories/problems.repo.js";
 import Submission from "../../models/Submission.mjs";
 import { HttpError } from "../utils/httpError.js";
 import { validateProblemDefinition } from "./preview.service.js";
+import { collegeAllowsPremium } from "./billing.service.js";
 
 function isPrivilegedRole(role) {
   return role === "admin" || role === "faculty" || role === "superadmin";
@@ -244,10 +245,23 @@ function buildProblemFilter(query) {
   return filter;
 }
 
-export async function listProblems(query = {}) {
+export async function listProblems(query = {}, user = null) {
   const filter = buildProblemFilter(query);
   const options = parsePagination(query);
-  return problemsRepo.findAllWithoutTests(filter, options);
+  const problems = await problemsRepo.findAllWithoutTests(filter, options);
+
+  // Phase 2: isPremium was previously set on Problem but never consumed anywhere —
+  // this is what wires it to the college's plan. Privileged roles always see
+  // everything (they're managing the content, not consuming it as a student would).
+  if (isPrivilegedRole(user && user.role)) {
+    return problems.map((p) => ({ ...(typeof p.toObject === "function" ? p.toObject() : p), locked: false }));
+  }
+
+  const allowsPremium = await collegeAllowsPremium(user && user.collegeId);
+  return problems.map((p) => {
+    const problem = typeof p.toObject === "function" ? p.toObject() : { ...p };
+    return { ...problem, locked: Boolean(problem.isPremium) && !allowsPremium };
+  });
 }
 
 export async function getProblemById(id, user = null) {
@@ -255,10 +269,12 @@ export async function getProblemById(id, user = null) {
   if (!problem) return null;
 
   if (isPrivilegedRole(user && user.role)) {
-    return problem;
+    return { ...(typeof problem.toObject === "function" ? problem.toObject() : problem), locked: false };
   }
 
-  return sanitizeProblemForStudent(problem);
+  const sanitized = sanitizeProblemForStudent(problem);
+  const allowsPremium = await collegeAllowsPremium(user && user.collegeId);
+  return { ...sanitized, locked: Boolean(problem.isPremium) && !allowsPremium };
 }
 
 export async function getProblemStats(problemId) {

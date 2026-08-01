@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
-import { Play, Send, ChevronLeft, Info, History, Settings2, Terminal, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, CheckCircle2, X, Edit2 } from 'lucide-react';
+import { Play, Send, ChevronLeft, Info, History, Settings2, Terminal, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, CheckCircle2, X, Edit2, Lock } from 'lucide-react';
 import api, { problems } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import buildTemplate from '../utils/buildTemplate';
@@ -33,6 +33,7 @@ const ProblemPage = ({ user }) => {
   const intervalRef = useRef(null);
   const isAuthed = !!user;
   const canManage = user && (user.role === 'admin' || user.role === 'faculty' || user.role === 'superadmin');
+  const isCollegeAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
 
   useEffect(() => {
     if (activeTab === 'submissions' && isAuthed && mySubmissions.length === 0) {
@@ -193,6 +194,29 @@ const ProblemPage = ({ user }) => {
   };
 
   if (!problem) return <div className="container flex-center" style={{ height: '100vh' }}><Loader2 className="spin" size={48} color="var(--primary)" /></div>;
+
+  if (problem.locked) {
+    return (
+      <div className="container fade-in" style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="problem-card text-center" style={{ maxWidth: '480px', padding: '48px 40px' }}>
+          <div style={{ padding: '16px', background: 'rgba(99, 102, 241, 0.1)', borderRadius: '50%', width: 'fit-content', margin: '0 auto 24px' }}>
+            <Lock size={32} color="var(--primary)" />
+          </div>
+          <h2 className="mb-2">This is a Premium Problem</h2>
+          <p className="text-muted mb-6">
+            {isCollegeAdmin
+              ? "Upgrade your college's plan to unlock this problem for your students."
+              : 'Ask your admin to upgrade the plan to unlock this problem.'}
+          </p>
+          {isCollegeAdmin ? (
+            <Link to="/admin/billing" className="button">View Plans</Link>
+          ) : (
+            <Link to="/" className="button button-outline">Back to Problems</Link>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>

@@ -56,6 +56,10 @@ app.use(cors(corsOptions));
 // general parser below runs (body-parser skips re-parsing an already-consumed body).
 app.use("/api/judge0", express.json({ limit: "2mb" }));
 app.use("/api/v1/judge0", express.json({ limit: "2mb" }));
+// Stripe webhook signature verification needs the raw, unparsed body — mounted ahead
+// of the general express.json() below for the same reason as the judge0 shim above.
+app.use("/api/billing/webhook", express.raw({ type: "application/json" }));
+app.use("/api/v1/billing/webhook", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 

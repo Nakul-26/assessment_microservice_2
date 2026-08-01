@@ -5,6 +5,7 @@ import * as assessmentsRepo from "../repositories/assessments.repo.js";
 import { publishSubmissionMessage } from "./evaluation.service.js";
 import { getCacheJSON, setCacheJSON } from "./cache.service.js";
 import { checkCollegeSubmissionQuota } from "./quota.service.js";
+import { checkPlanUsageLimit, collegeAllowsPremium } from "./billing.service.js";
 import { HttpError } from "../utils/httpError.js";
 
 function validateSubmissionMessage(msg) {
@@ -190,11 +191,27 @@ export async function submitSolution({ problemId, code, language, userId, colleg
         msg: `Submission quota exceeded for this college (${quota.limit} per ${quota.windowSeconds}s). Please try again shortly.`
       });
     }
+
+    // Phase 2 billing hard cap — separate from the fairness quota above (that one
+    // throttles bursts within a short window; this one enforces the plan's monthly
+    // submission allowance).
+    const planUsage = await checkPlanUsageLimit(collegeId);
+    if (!planUsage.allowed) {
+      throw new HttpError(402, "Plan usage limit exceeded", {
+        msg: `This college has used its plan's monthly submission allowance (${planUsage.limit}). Upgrade to continue.`
+      });
+    }
   }
 
   const problem = await problemsRepo.findById(problemId);
   if (!problem) {
     return { notFound: true };
+  }
+
+  if (problem.isPremium && collegeId && !(await collegeAllowsPremium(collegeId))) {
+    throw new HttpError(402, "Upgrade required for premium problems", {
+      msg: "This problem is only available on a paid plan."
+    });
   }
 
   const submissionData = {

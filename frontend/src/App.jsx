@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle } from 'lucide-react';
+import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle, CreditCard } from 'lucide-react';
 import ProblemListPage from './pages/ProblemListPage';
 import AssessmentListPage from './pages/AssessmentListPage';
 import AssessmentManagementPage from './pages/AssessmentManagementPage';
@@ -19,6 +19,8 @@ import ProblemPage from './pages/ProblemPage';
 import AddProblemPage from './pages/AddProblemPage';
 import EditProblemPage from './pages/EditProblemPage';
 import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
+import BillingPage from './pages/BillingPage';
 import MySubmissionsPage from './pages/MySubmissionsPage';
 import SystemDashboardPage from './pages/SystemDashboardPage';
 import UserManagementPage from './pages/UserManagementPage';
@@ -107,6 +109,7 @@ function AppContent() {
     };
 
     const canCreateProblem = user && (user.role === 'admin' || user.role === 'faculty' || user.role === 'superadmin');
+    const isCollegeAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
 
     const NavLink = ({ to, children, icon: Icon }) => {
         const isActive = location.pathname === to;
@@ -180,6 +183,9 @@ function AppContent() {
                         {canCreateProblem && (
                             <NavLink to="/admin/system" icon={Database}>System</NavLink>
                         )}
+                        {isCollegeAdmin && (
+                            <NavLink to="/admin/billing" icon={CreditCard}>Billing</NavLink>
+                        )}
                         {canCreateProblem && (
                             <NavLink to="/add-problem" icon={PlusCircle}>Add Problem</NavLink>
                         )}
@@ -218,11 +224,13 @@ function AppContent() {
                 <Route path="/admin/assessment-attempt/:attemptId" element={<RequireStaff><AssessmentAttemptDetailPage /></RequireStaff>} />
                 <Route path="/admin/system" element={<RequireStaff><SystemDashboardPage /></RequireStaff>} />
                 <Route path="/admin/users" element={<RequireStaff><UserManagementPage /></RequireStaff>} />
+                <Route path="/admin/billing" element={<RequireRole roles={['admin', 'superadmin']}><BillingPage /></RequireRole>} />
 
                 <Route path="/problems/:_id" element={<ProblemPage user={user} />} />
                 <Route path="/add-problem" element={<RequireStaff><AddProblemPage /></RequireStaff>} />
                 <Route path="/problems/:_id/edit" element={<RequireStaff><EditProblemPage /></RequireStaff>} />
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
                 <Route path="/my-submissions" element={<RequireAuth><MySubmissionsPage /></RequireAuth>} />
             </Routes>
         </>

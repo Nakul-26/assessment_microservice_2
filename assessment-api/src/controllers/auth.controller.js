@@ -1,4 +1,18 @@
 import * as authService from "../services/auth.service.js";
+import * as collegeService from "../services/college.service.js";
+
+export async function signup(req, res, next) {
+  const { collegeName, name, email, password } = req.body || {};
+  try {
+    const result = await collegeService.signup({ collegeName, name, email, password });
+    return res.status(201).json(result);
+  } catch (err) {
+    if (err.status && err.body) {
+      return res.status(err.status).json(err.body);
+    }
+    next(err);
+  }
+}
 
 export async function register(req, res, next) {
   const { name, email, password, role, collegeId } = req.body || {};

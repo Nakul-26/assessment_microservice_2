@@ -45,3 +45,27 @@ account doesn't exist yet, `registerOrLogin()` should fall back to registering i
 open-registration fallback may need a superadmin bootstrap token to work at all in any
 environment where public registration is disabled. Worth deciding whether the harness needs
 updating for the C2 world, or whether a seeded harness user/college should exist ahead of time.
+
+## 3. C6 remainder — scope the Docker socket via docker-socket-proxy
+
+`judge-service-go` no longer runs as `root` (fixed — now `group_add: DOCKER_GROUP_GID` against
+the Dockerfile's non-root `app` user), which closes the worst part of C6 (any RCE in the judge
+service escalating straight to a root process with full Docker daemon control). What's still
+open: the raw Docker socket (`/var/run/docker.sock`) is still bind-mounted directly into the
+container with unscoped access to the whole Docker API, rather than going through something
+like Tecnativa's `docker-socket-proxy` that only allow-lists the specific endpoints actually
+needed (container create/start/stop/remove, exec create/start/attach, copy-to-container,
+container update for the resource-limit reset in `executor.go`).
+
+Deliberately not implemented yet: getting the proxy's allow-list wrong would silently break
+code execution for every tenant in production, and there's no way to exercise
+container-spawn/exec/upload/resource-update behavior against a proxied socket without a real
+Docker environment — not testable from this Windows/no-Docker environment.
+
+**To do in Codespace**: stand up `docker-compose.prod.yml` locally with Docker available, add
+a `docker-socket-proxy` service scoped to just the endpoints judge-service-go actually calls
+(grep `judge-service-go/pkg/pool/pool.go` and `pkg/executor/executor.go` for the exact Docker
+client calls in use), point judge-service-go's Docker client at the proxy instead of the raw
+socket via `DOCKER_HOST`, and run the full integration test suite (`go test ./...` in
+`judge-service-go`, which includes real container-spawning tests) against it before ever
+deploying the change to coding.fortifyhub.net.

@@ -25,6 +25,18 @@
 #   DOCKER_GROUP_GID       run: stat -c '%g' /var/run/docker.sock on your host
 #                          and set this to whatever it returns (commonly 999/998/995/103)
 #
+# Phase 2 billing (all optional — unset until a real Stripe account exists):
+#   STRIPE_SECRET_KEY      Stripe secret key. Billing routes soft-fail with 503 while unset —
+#                          deliberately no fail-fast guard here, unlike JWT_SECRET/etc, since
+#                          billing isn't live yet and this must not crash the whole deploy.
+#   STRIPE_WEBHOOK_SECRET  Signing secret for the /api/billing/webhook endpoint.
+#   STRIPE_PRICE_ID_PRO    Stripe Price ID backing the "pro" plan in
+#                          assessment-api/src/config/plans.js.
+#   BILLING_SUCCESS_URL / BILLING_CANCEL_URL   Where Stripe Checkout redirects back to
+#                          (defaults to a localhost dev URL — set these to the real frontend
+#                          origin, e.g. https://coding.fortifyhub.net/admin/billing, before
+#                          billing ever goes live).
+#
 # Health endpoints confirmed from source:
 #   assessment-api  → GET /api/health          (returns 200 or 503)
 #   assessment-api  → GET /api/health/ready     (lightweight, always 200 when up)
@@ -124,6 +136,12 @@ services:
       # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if unset.
       COLLEGE_SUBMISSION_QUOTA: ${COLLEGE_SUBMISSION_QUOTA:-}
       COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS: ${COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS:-}
+      # Phase 2 billing — all optional, see the comment block at the top of this file.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_ID_PRO: ${STRIPE_PRICE_ID_PRO:-}
+      BILLING_SUCCESS_URL: ${BILLING_SUCCESS_URL:-}
+      BILLING_CANCEL_URL: ${BILLING_CANCEL_URL:-}
     healthcheck:
       # Uses node (always available) instead of wget (not on node:20-alpine by default)
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/api/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]

@@ -127,4 +127,10 @@ export const questions = {
   delete: (id) => api.delete(`/api/v1/questions/${id}`)
 };
 
+export const billing = {
+  getStatus: () => api.get("/api/v1/billing/status"),
+  createCheckout: (planId) => api.post("/api/v1/billing/checkout", { planId }),
+  createPortal: () => api.post("/api/v1/billing/portal")
+};
+
 export default api;

@@ -2,9 +2,30 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import User from "../../models/User.mjs";
+import College from "../../models/College.mjs";
 import { env } from "../config/env.js";
+import { getPlan } from "../config/plans.js";
 import { HttpError } from "../utils/httpError.js";
 import * as auditService from "./audit.service.js";
+
+// Phase 2 billing seat limit — no-op for plans with an unbounded seat count (Infinity),
+// and fails open if the college doesn't exist yet (e.g. legacy/unscoped data) so this
+// never blocks account creation for reasons unrelated to billing.
+async function assertSeatCapacity(collegeId, incomingSeats) {
+  if (!collegeId) return;
+  const college = await College.findById(collegeId);
+  if (!college) return;
+
+  const plan = getPlan(college.planId);
+  if (!Number.isFinite(plan.seatLimit)) return;
+
+  const currentSeats = await User.countDocuments({ collegeId });
+  if (currentSeats + incomingSeats > plan.seatLimit) {
+    throw new HttpError(402, "Seat limit reached for your plan", {
+      message: `Seat limit reached for your plan (${plan.seatLimit} seats). Upgrade to add more users.`
+    });
+  }
+}
 
 function toPublicUser(user) {
   return {
@@ -38,6 +59,8 @@ export async function register({ name, email, password, role, collegeId, usn, se
       throw new HttpError(409, "USN already registered", { message: "USN already registered" });
     }
   }
+
+  await assertSeatCapacity(normalizedCollegeId, 1);
 
   const hashed = await bcrypt.hash(password, 10);
   const user = await User.create({
@@ -135,6 +158,10 @@ export async function bulkRegister(users, defaultPassword, collegeId) {
     } catch (err) {
       results.errors.push({ row: i + 1, email, usn, error: `Validation error: ${err.message}` });
     }
+  }
+
+  if (verifiedUsersToCreate.length > 0) {
+    await assertSeatCapacity(collegeId, verifiedUsersToCreate.length);
   }
 
   const createdIds = [];

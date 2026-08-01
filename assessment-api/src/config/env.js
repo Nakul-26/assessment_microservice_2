@@ -19,7 +19,15 @@ export const env = {
   // H5 fair-scheduling quota: submissions per college allowed within the rolling
   // window below, enforced in quota.service.js before a submission is queued.
   COLLEGE_SUBMISSION_QUOTA: Number(process.env.COLLEGE_SUBMISSION_QUOTA) || 30,
-  COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS: Number(process.env.COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS) || 60
+  COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS: Number(process.env.COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS) || 60,
+  // Phase 2 billing (Stripe). Unlike the secrets above, these have no production
+  // fail-fast guard on purpose: billing isn't live yet, so a missing key must not crash
+  // the whole API. billing.service.js/stripe.js soft-fail (503) at call time instead.
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || null,
+  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || null,
+  STRIPE_PRICE_ID_PRO: process.env.STRIPE_PRICE_ID_PRO || null,
+  BILLING_SUCCESS_URL: process.env.BILLING_SUCCESS_URL || null,
+  BILLING_CANCEL_URL: process.env.BILLING_CANCEL_URL || null
 };
 
 if (process.env.NODE_ENV === "production" && !env.JWT_SECRET) {

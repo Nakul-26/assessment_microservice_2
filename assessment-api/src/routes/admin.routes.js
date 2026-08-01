@@ -69,6 +69,9 @@ router.post("/bulk-import-students", verifyToken, authorizeRoles("admin", "super
     res.json(results);
   } catch (error) {
     console.error("Bulk import error:", error);
+    if (error.status && error.body) {
+      return res.status(error.status).json(error.body);
+    }
     res.status(500).json({ error: error.message });
   }
 });
