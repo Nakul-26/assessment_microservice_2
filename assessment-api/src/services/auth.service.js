@@ -197,7 +197,7 @@ export async function bulkRegister(users, defaultPassword, collegeId) {
     if (createdIds.length > 0) {
       await User.deleteMany({ _id: { $in: createdIds } });
     }
-    throw new HttpError(500, `Catastrophic import error: ${creationError.message}. All modifications in this batch have been rolled back.`);
+    throw new HttpError(500, "Catastrophic error during bulk import. All modifications in this batch have been rolled back.");
   }
 
   return results;

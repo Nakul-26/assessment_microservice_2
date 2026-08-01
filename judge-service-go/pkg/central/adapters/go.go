@@ -45,8 +45,9 @@ func (GoAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionMes
 }
 
 func (GoAdapter) CompileCommand() []string {
-	// Build the binary as 'main' in the current directory (which is the workspace)
-	return []string{"sh", "-c", "go mod init solution 2>/dev/null || true; go build -o main ."}
+	// Delegate to languages.go's CompileCmd (the offline-safe, single source of truth) —
+	// don't hand-roll a second copy that can drift out of sync with it.
+	return languages.GetLanguage("go").CompileCmd
 }
 
 func (GoAdapter) RunCommand(inputB64 string) []string {

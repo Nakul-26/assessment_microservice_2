@@ -2,11 +2,10 @@ import * as submissionsService from "../services/submissions.service.js";
 
 export async function submitSolution(req, res, next) {
   const { problemId, code, language, assessmentId, attemptId } = req.body;
-  const userId = req.user && req.user._id; // User model uses _id, but middleware might set .id
-  const finalUserId = userId || (req.user && req.user.id);
-  
+  const userId = req.user && req.user._id;
+
   try {
-    if (!finalUserId) {
+    if (!userId) {
       return res.status(401).json({ msg: "Unauthorized" });
     }
 
@@ -14,7 +13,7 @@ export async function submitSolution(req, res, next) {
       problemId,
       code,
       language,
-      userId: finalUserId,
+      userId,
       collegeId: req.user && req.user.collegeId,
       assessmentId,
       attemptId,
@@ -34,7 +33,7 @@ export async function submitSolution(req, res, next) {
 
 export async function getSubmissionById(req, res, next) {
   const { _id } = req.params;
-  const userId = req.user && req.user.id;
+  const userId = req.user && req.user._id;
   const role = req.user && req.user.role;
   const collegeId = req.user && req.user.collegeId;
 
@@ -53,7 +52,7 @@ export async function getSubmissionById(req, res, next) {
 }
 
 export async function getMySubmissions(req, res, next) {
-  const userId = req.user && req.user.id;
+  const userId = req.user && req.user._id;
 
   try {
     if (!userId) {
@@ -68,7 +67,7 @@ export async function getMySubmissions(req, res, next) {
 }
 
 export async function getMyAnalytics(req, res, next) {
-  const userId = req.user && req.user.id;
+  const userId = req.user && req.user._id;
 
   try {
     if (!userId) {

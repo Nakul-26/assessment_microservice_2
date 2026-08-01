@@ -447,6 +447,7 @@ export async function runProblem(id, payload) {
     return judgeResult;
   } catch (err) {
     if (err instanceof HttpError) throw err;
-    throw new HttpError(500, "Failed to connect to judge service: " + err.message);
+    console.error("Failed to connect to judge service:", err);
+    throw new HttpError(500, "Failed to connect to judge service");
   }
 }

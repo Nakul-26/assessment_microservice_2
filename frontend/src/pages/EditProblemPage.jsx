@@ -41,7 +41,7 @@ const EditProblemPage = () => {
   useEffect(() => {
     const fetchProblem = async () => {
       try {
-        const res = await api.get(`/api/problems/${_id}`);
+        const res = await api.get(`/api/v1/problems/${_id}`);
         const problem = res.data;
 
         const transformedData = {
@@ -148,7 +148,7 @@ const EditProblemPage = () => {
     setFormErrors({});
 
     try {
-      await api.put(`/api/problems/${_id}`, payload);
+      await api.put(`/api/v1/problems/${_id}`, payload);
       navigate(`/problems/${_id}`, { state: { successMessage: 'Problem updated successfully!' } });
     } catch (err) {
       const data = err.response?.data;

@@ -26,6 +26,11 @@ func (JavaAdapter) PrepareBatchFiles(workDir string, submissionMsg models.Submis
 	return prepareJavaWrapper(workDir, submissionMsg, tplPath)
 }
 
+// Deliberately doesn't call wrapper.GenerateWrapper: Java's wrapper templates
+// (java_single_wrapper.tpl / java_batch_wrapper.tpl) only use the plain
+// {{FUNCTION_NAME}} marker, so a direct read + string replace is all that's
+// needed here — no test-case literal injection, unlike GenerateWrapper's other
+// per-language branches.
 func prepareJavaWrapper(workDir string, submissionMsg models.SubmissionMessage, tplPath string) ([]string, error) {
 	b, err := os.ReadFile(tplPath)
 	if err != nil {

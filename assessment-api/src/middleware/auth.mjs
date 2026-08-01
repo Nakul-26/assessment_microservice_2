@@ -10,16 +10,22 @@ function extractToken(req) {
   return authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
 }
 
+// jwt.sign payloads (auth.service.js) key the user id as `id`, but every downstream
+// consumer (services, repos, controllers) reads Mongoose's native `_id` for consistency
+// with DB documents. This is the single place that bridges the two — all app code
+// should read req.user._id, never req.user.id.
+function normalizeUser(user) {
+  if (user.id && !user._id) user._id = user.id;
+  return user;
+}
+
 export function verifyToken(req, res, next) {
   const token = extractToken(req);
   if (!token) return res.status(401).json({ message: "No token" });
 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    req.user = decoded;
-    if (req.user.id && !req.user._id) {
-      req.user._id = req.user.id;
-    }
+    req.user = normalizeUser(decoded);
     next();
   } catch (err) {
     return res.status(401).json({ message: "Invalid token" });
@@ -32,10 +38,7 @@ export function optionalVerifyToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    req.user = decoded;
-    if (req.user.id && !req.user._id) {
-      req.user._id = req.user.id;
-    }
+    req.user = normalizeUser(decoded);
   } catch (err) {
     // Ignore invalid optional token and proceed as anonymous.
   }

@@ -88,7 +88,7 @@ const ProblemPage = ({ user }) => {
 
   const checkStatus = async (submissionId) => {
     try {
-      const res = await api.get(`/api/submissions/${submissionId}`);
+      const res = await api.get(`/api/v1/submissions/${submissionId}`);
       const currentSubmission = res.data;
       setSubmission(currentSubmission);
 

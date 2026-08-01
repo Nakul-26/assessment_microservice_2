@@ -69,11 +69,16 @@ var Languages = map[string]*Language{
 		WrapperTemplate: "cpp_single_wrapper.tpl",
 	},
 	"go": {
-		ID:              "go",
-		Name:            "Go",
-		FileExt:         ".go",
-		Image:           "judge-go-env",
-		CompileCmd:      []string{"sh", "-c", "go mod init solution 2>/dev/null || true; go build -o main ."},
+		ID:      "go",
+		Name:    "Go",
+		FileExt: ".go",
+		Image:   "judge-go-env",
+		// With network disabled, an unconfigured `go build` can still try to reach the
+		// module proxy/checksum db (or check for a toolchain switch) and hang for the
+		// full sandbox timeout instead of failing fast — force everything local/offline
+		// explicitly instead of relying on image env (see main.go's rawRunFilesAndCommands,
+		// where this was first found and fixed for the raw-run path).
+		CompileCmd:      []string{"sh", "-c", "export GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GO111MODULE=on GOTOOLCHAIN=local; go mod init solution 2>/dev/null || true; go build -o main ."},
 		RunCmd:          []string{"./main"},
 		WrapperTemplate: "go_wrapper.tpl",
 	},

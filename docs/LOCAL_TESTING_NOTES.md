@@ -92,3 +92,34 @@ stood up (locally or in the Codespace):
 
 **To check in Codespace/locally**: `docker-compose up` (or `npm run dev` in `frontend/` against
 a local `assessment-api`), then walk through both bullets above in a real browser.
+
+- **Draft-conflict banner** (added in the Medium-findings cleanup pass): start an assessment
+  attempt in one browser tab, let the draft autosave to the server, then open `localStorage`
+  in DevTools and hand-edit `assessment-draft:<attemptId>`'s `savedAt` to an old timestamp
+  (e.g. `1`) — reloading the workspace should show the dismissible "Draft conflict" warning
+  banner. Unverified here since it needs a live attempt + browser DevTools.
+
+## 5. judge-service-go compile-command dedup and dead-code removal — no Go toolchain here
+
+This environment has no Go toolchain at all (`go`/`gofmt` not found), so `judge-service-go`'s
+changes from the Medium-findings cleanup pass were reviewed by hand only, not built or tested:
+
+- `pkg/languages/languages.go`: Go's `CompileCmd` now includes the offline-safe env vars
+  (`GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GO111MODULE=on GOTOOLCHAIN=local`) that were
+  previously only applied to the raw-run legacy path in `main.go`.
+- `pkg/central/adapters/go.go`: `GoAdapter.CompileCommand()` now delegates to
+  `languages.GetLanguage("go").CompileCmd` instead of a second hardcoded copy.
+- `main.go`'s `rawRunFilesAndCommands` Go case now uses `lang.CompileCmd` directly.
+- `pkg/wrapper/generator.go`: removed the `lang.ID == "java"` branch (and its
+  `buildJavaTestLiterals`/`numericToInt`/`escapeForJavaString` helpers) — it built a Go
+  `text/template` from a file that only contains plain `{{FUNCTION_NAME}}` markers, which
+  would fail to parse. This branch is only reachable via `JUDGE_CENTRAL_COMPARE_JAVA=false`
+  (nothing sets this in tests or normal operation), so it's a broken fallback path, not the
+  live Java judging path (`pkg/central/adapters/java.go`'s `JavaAdapter`, untouched).
+
+**To check in Codespace/locally**: `go build ./...` and `go vet ./...` in `judge-service-go/`
+to confirm everything still compiles, then run `go test ./...` (includes real
+container-spawning integration tests per language, per the C6 notes above) — pay particular
+attention to `go_integration_test.go` (the compile-command change) and, if the
+`JUDGE_CENTRAL_COMPARE_JAVA` env var is ever actually exercised in that environment,
+`java_integration_test.go` with it set to `false`.

@@ -22,7 +22,7 @@ const SignupPage = () => {
     setIsLoading(true);
 
     try {
-      const res = await api.post("/api/auth/signup", { collegeName, name, email, password });
+      const res = await api.post("/api/v1/auth/signup", { collegeName, name, email, password });
       const { user } = res.data;
       localStorage.setItem("user", JSON.stringify(user));
       window.dispatchEvent(new Event("auth-change"));

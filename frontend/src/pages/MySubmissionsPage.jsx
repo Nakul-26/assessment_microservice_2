@@ -12,7 +12,7 @@ const MySubmissionsPage = () => {
   useEffect(() => {
     const fetchMySubmissions = async () => {
       try {
-        const res = await api.get("/api/submissions/my");
+        const res = await api.get("/api/v1/submissions/my");
         setSubmissions(res.data || []);
       } catch (err) {
         const msg =
