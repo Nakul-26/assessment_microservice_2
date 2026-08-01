@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import College from '../../models/College.mjs';
-import User from '../../models/User.mjs';
 import * as authService from './auth.service.js';
 import { signup } from './college.service.js';
 

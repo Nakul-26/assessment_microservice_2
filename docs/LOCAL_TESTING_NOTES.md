@@ -116,6 +116,9 @@ changes from the Medium-findings cleanup pass were reviewed by hand only, not bu
   would fail to parse. This branch is only reachable via `JUDGE_CENTRAL_COMPARE_JAVA=false`
   (nothing sets this in tests or normal operation), so it's a broken fallback path, not the
   live Java judging path (`pkg/central/adapters/java.go`'s `JavaAdapter`, untouched).
+- `main.go`: the `DEFAULT_POOL_SIZE`/`MAX_EXECUTIONS_PER_CONTAINER` env-var parses now use
+  `strconv.Atoi` instead of `fmt.Sscanf(val, "%d", &target)` (Low finding, pure code-quality —
+  behavior is equivalent, `strconv` added to the import block).
 
 **To check in Codespace/locally**: `go build ./...` and `go vet ./...` in `judge-service-go/`
 to confirm everything still compiles, then run `go test ./...` (includes real
@@ -123,3 +126,38 @@ container-spawning integration tests per language, per the C6 notes above) — p
 attention to `go_integration_test.go` (the compile-command change) and, if the
 `JUDGE_CENTRAL_COMPARE_JAVA` env var is ever actually exercised in that environment,
 `java_integration_test.go` with it set to `false`.
+
+## 6. Backend lint cleanup — `problemDifficultyStats` fix has no test coverage
+
+While clearing the backend's ~27 pre-existing ESLint violations (to flip the CI lint gate from
+`continue-on-error` to blocking), the unused `difficulty` variable in
+`submissions.service.js`'s `getMyAnalytics` turned out to be a real bug: `problemDifficultyStats`
+was only incremented in the fallback branch (when `sub.problemId` needed a manual re-fetch), never
+in the common case where `problemId` arrives pre-populated with tags — so the "average difficulty"
+figure in student analytics was systematically wrong. Fixed to increment in both branches, but
+there's no existing test fixture for `getMyAnalytics` to extend cheaply, so this fix is
+code-reviewed only.
+
+**To check in Codespace/locally**: seed a student with a mix of Easy/Medium/Hard solved
+submissions where `problemId` comes back populated (the normal `findByUserId` path), call
+`GET /api/v1/submissions/my/analytics`, and confirm the returned average-difficulty figure
+actually reflects the seeded mix instead of defaulting to "Medium".
+
+## 7. `backup_db.sh` container auto-detection — unverified without Docker
+
+H11 flagged that `scripts/backup_db.sh` hardcoded `codespace_mongo` (the dev compose container
+name via `container_name:` in `docker-compose.yml`), which doesn't exist in prod —
+`docker-compose.prod.yml` sets no `container_name` on its `mongo` service, so Compose/Dokploy
+auto-generates one that varies by deployment, meaning the script would silently produce an empty
+backup (redirected stdout with no error surfaced) against the actual prod stack. Fixed by
+resolving the container at runtime via `docker ps --filter "name=mongo" --format '{{.Names}}'`
+(falls back to a clear failure message if nothing matches), with a `MONGO_CONTAINER_NAME` env var
+to override detection entirely. Not runnable here — no Docker in this environment.
+
+**To check in Codespace/locally**: run `docker compose up -d mongo` (dev) and confirm
+`./scripts/backup_db.sh` finds `codespace_mongo` automatically; then simulate the prod case by
+renaming/relaunching without `container_name` set (or just run it against
+`docker-compose.prod.yml`) and confirm it still finds the right container without needing
+`MONGO_CONTAINER_NAME`. Also confirm the failure path: stop all mongo containers and confirm the
+script exits with the "No running mongo container found" message instead of silently writing an
+empty/failed backup file.

@@ -46,7 +46,7 @@ router.get("/", async (req, res) => {
       try {
         await redis.ping();
         health.services.redis = "connected";
-      } catch (err) {
+      } catch {
         health.services.redis = "error";
         health.status = "unhealthy";
       }
@@ -73,7 +73,7 @@ router.get("/", async (req, res) => {
         health.services.judge = "error";
         health.status = "unhealthy";
       }
-    } catch (err) {
+    } catch {
       health.services.judge = "disconnected";
       health.status = "unhealthy";
     }

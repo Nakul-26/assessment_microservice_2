@@ -43,7 +43,7 @@ async function loadTest() {
   // We don't want to exhaust Node's event loop, so we batch them if > 1000
   // For 500, Promise.all is fine.
   
-  const requests = Array.from({ length: CONCURRENCY }).map((_, i) => {
+  const requests = Array.from({ length: CONCURRENCY }).map((_, _i) => {
     const reqId = `load-test-${uuidv4()}`;
     
     return axios.post(`${API_URL}/api/integration/submissions`, {

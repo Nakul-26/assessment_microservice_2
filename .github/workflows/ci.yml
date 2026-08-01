@@ -55,12 +55,7 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm test
-      - name: Lint (non-blocking)
-        # ESLint was just introduced here for the first time and surfaced ~27 pre-existing
-        # violations (mostly unused catch-block error variables) across a never-linted
-        # codebase. Report-only until that backlog is cleaned up, then make this blocking.
-        run: npm run lint
-        continue-on-error: true
+      - run: npm run lint
 
   frontend-unit:
     name: Frontend Unit Tests

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1276,7 +1277,8 @@ func main() {
 
 	poolSize := defaultPoolSizePerLang
 	if val := os.Getenv("DEFAULT_POOL_SIZE"); val != "" {
-		if i, err := fmt.Sscanf(val, "%d", &poolSize); err == nil && i > 0 {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			poolSize = parsed
 			slog.Info("Using configured pool size", "size", poolSize)
 		}
 	}
@@ -1284,7 +1286,8 @@ func main() {
 	// Max executions per pooled container before eviction
 	maxExecs := 100
 	if val := os.Getenv("MAX_EXECUTIONS_PER_CONTAINER"); val != "" {
-		if i, err := fmt.Sscanf(val, "%d", &maxExecs); err == nil && i > 0 {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			maxExecs = parsed
 			slog.Info("Using configured max executions per container", "maxExecs", maxExecs)
 		}
 	}

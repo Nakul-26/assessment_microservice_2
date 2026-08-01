@@ -153,6 +153,7 @@ export async function checkPlanUsageLimit(collegeId) {
     const count = await UsageEvent.countDocuments({ collegeId, createdAt: { $gte: startOfMonth() } });
     return { allowed: count < plan.submissionQuotaPerMonth, limit: plan.submissionQuotaPerMonth, count };
   } catch (err) {
+    console.error("Quota check error, failing open:", err);
     return { allowed: true };
   }
 }

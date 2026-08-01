@@ -145,7 +145,7 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
       try {
         await redis.ping();
         health.redis = "connected";
-      } catch (err) {
+      } catch {
         health.redis = "error";
       }
     }

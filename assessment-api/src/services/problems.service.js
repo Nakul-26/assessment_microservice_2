@@ -295,7 +295,7 @@ export async function getProblemStats(problemId) {
       try {
         const parsed = JSON.parse(s.output);
         elapsed = parsed.elapsedMs ?? parsed.totalTimeMs;
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
     
     if (elapsed !== null && typeof elapsed === 'number') {
@@ -388,7 +388,7 @@ export async function runProblem(id, payload) {
       for (const tc of problem.testCases) {
         try {
           fillMap.set(JSON.stringify(tc.inputs), tc.expected);
-        } catch (e) {
+        } catch {
           // ignore non-serializable
         }
       }
@@ -400,7 +400,7 @@ export async function runProblem(id, payload) {
           if (fillMap.has(key)) {
             t.expected = fillMap.get(key);
           }
-        } catch (e) {
+        } catch {
           // ignore
         }
         return t;
@@ -408,7 +408,6 @@ export async function runProblem(id, payload) {
     }
   } catch (e) {
     // best-effort only; do not fail the run if merging fails
-    // eslint-disable-next-line no-console
     console.warn('Failed to merge expected values into custom tests:', e && e.message ? e.message : e);
   }
 

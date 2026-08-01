@@ -43,7 +43,7 @@ export async function listQuestions(query = {}, user = null) {
   return { questions, total, page, totalPages };
 }
 
-export async function listTags(query = {}, user = null) {
+export async function listTags(_query = {}, user = null) {
   // Build filter similar to listQuestions but only for tags
   const filter = {};
   // If faculty, limit to their college
@@ -98,7 +98,6 @@ export async function selectQuestions(payload = {}, user = null) {
     for (const v of map.values()) picked.push(v);
   };
 
-  const results = [];
   if (reqEasy > 0) {
     const docs = await questionsRepo.sample({ ...baseFilter, difficulty: 'Easy' }, reqEasy);
     addUnique(docs);

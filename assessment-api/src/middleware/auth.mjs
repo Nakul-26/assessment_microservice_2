@@ -27,7 +27,7 @@ export function verifyToken(req, res, next) {
     const decoded = jwt.verify(token, env.JWT_SECRET);
     req.user = normalizeUser(decoded);
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ message: "Invalid token" });
   }
 }
@@ -39,7 +39,7 @@ export function optionalVerifyToken(req, res, next) {
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET);
     req.user = normalizeUser(decoded);
-  } catch (err) {
+  } catch {
     // Ignore invalid optional token and proceed as anonymous.
   }
 

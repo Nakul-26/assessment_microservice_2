@@ -79,11 +79,6 @@ describe('Integration API', () => {
       password: 'password',
       role: 'student'
     });
-    const tokenB = jwt.sign(
-      { _id: studentB._id.toString(), id: studentB._id.toString(), role: studentB.role },
-      env.JWT_SECRET
-    );
-
     // 2. Create an attempt for Student B
     // We need an assessment first
     const assessment = await (await import('../../models/Assessment.mjs')).default.create({

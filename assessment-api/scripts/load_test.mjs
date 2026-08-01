@@ -66,7 +66,7 @@ async function runLoadTest() {
   const studentPromises = studentsToImport.map(async (studentData, i) => {
     try {
       // Small random delay to jitter the start (0-3 seconds)
-      await new Promise(r => setTimeout(resolve => r(), Math.random() * 3000));
+      await new Promise(r => setTimeout(() => r(), Math.random() * 3000));
 
       // Student Login
       const loginRes = await fetch(`${API_URL}/auth/login`, {

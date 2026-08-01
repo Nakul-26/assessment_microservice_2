@@ -106,7 +106,7 @@ function parseOutputJSON(output) {
   if (!output || typeof output !== "string") return null;
   try {
     return JSON.parse(output);
-  } catch (err) {
+  } catch {
     return null;
   }
 }
@@ -328,8 +328,6 @@ export async function getMySubmissions(userId, query = {}) {
   return { submissions };
 }
 
-import mongoose from 'mongoose';
-
 export async function getMyAnalytics(userId) {
   const submissions = await submissionsRepo.findByUserId(userId, { limit: 1000 }); // Max 1000 for realistic analytics
   
@@ -353,10 +351,9 @@ export async function getMyAnalytics(userId) {
     // Using the populated problemId object if available
     if (sub.problemId && typeof sub.problemId === 'object' && sub.problemId.tags) {
       const difficulty = sub.problemId.difficulty || 'Medium';
-      
-      // We only count difficulty for solved problems to get "average solved difficulty"
-      // But we can also track attempted difficulty. Let's just track solved for simplicity.
-      
+      // We only count difficulty for solved problems to get "average solved difficulty".
+      if (isSuccess) problemDifficultyStats[difficulty]++;
+
       const tags = sub.problemId.tags || [];
       tags.forEach(tag => {
         if (!tagStats[tag]) {

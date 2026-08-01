@@ -74,6 +74,25 @@ router.get("/:_id", verifyToken, getAssessmentById);
 
 /**
  * @openapi
+ * /assessments/{_id}/my-attempt:
+ *   get:
+ *     tags:
+ *       - Assessments
+ *     summary: Get the authenticated user's own attempt for this assessment, if any
+ *     parameters:
+ *       - in: path
+ *         name: _id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: The user's attempt, or null if none exists
+ */
+router.get("/:_id/my-attempt", verifyToken, getMyAssessmentAttempt);
+
+/**
+ * @openapi
  * /assessments/{_id}:
  *   put:
  *     tags:

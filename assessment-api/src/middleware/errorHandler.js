@@ -1,6 +1,6 @@
 import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 
-export function errorHandler(err, req, res, next) {
+export function errorHandler(err, req, res, _next) {
   console.error(err);
 
   const status = err.status || 500;

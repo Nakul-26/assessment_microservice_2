@@ -68,6 +68,30 @@ describe('Assessments API', () => {
     expect(res.body.length).toBe(1);
   });
 
+  it('GET /api/assessments/:id/my-attempt should return null before starting and the attempt after starting', async () => {
+    const listRes = await request(app)
+      .get('/api/assessments')
+      .set('Authorization', `Bearer ${studentToken}`);
+    const assessmentId = listRes.body[0]._id;
+
+    const beforeRes = await request(app)
+      .get(`/api/assessments/${assessmentId}/my-attempt`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(beforeRes.status).toBe(200);
+    expect(beforeRes.body).toBeNull();
+
+    const startRes = await request(app)
+      .post(`/api/assessments/${assessmentId}/start`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(startRes.status).toBe(200);
+
+    const afterRes = await request(app)
+      .get(`/api/assessments/${assessmentId}/my-attempt`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(afterRes.status).toBe(200);
+    expect(afterRes.body._id).toBe(startRes.body._id);
+  });
+
   it('POST /api/assessments should create an assessment for admin', async () => {
     const newAssessment = {
       title: 'New Assessment',

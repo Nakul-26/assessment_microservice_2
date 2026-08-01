@@ -25,6 +25,7 @@ export async function checkCollegeSubmissionQuota(collegeId) {
     }
     return { allowed: count <= limit, limit, count, windowSeconds };
   } catch (err) {
+    console.error("Quota check error, failing open:", err);
     return { allowed: true };
   }
 }

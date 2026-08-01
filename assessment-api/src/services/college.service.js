@@ -14,7 +14,6 @@ function slugify(name) {
 async function uniqueSlug(base) {
   let slug = base;
   let suffix = 1;
-  // eslint-disable-next-line no-await-in-loop
   while (await College.findOne({ slug })) {
     suffix += 1;
     slug = `${base}-${suffix}`;
