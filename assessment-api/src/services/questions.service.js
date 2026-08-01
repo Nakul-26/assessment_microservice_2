@@ -1,5 +1,6 @@
 import * as questionsRepo from "../repositories/questions.repo.js";
 import { HttpError } from "../utils/httpError.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 function parsePagination(query) {
   const page = Math.max(1, Number(query.page || 1));
@@ -14,7 +15,7 @@ function buildFilter(query = {}, user = null) {
     const tags = Array.isArray(query.tag) ? query.tag : String(query.tag).split(',').map(t => t.trim()).filter(Boolean);
     if (tags.length) filter.tags = { $in: tags };
   }
-  if (query.search) filter.title = { $regex: query.search, $options: 'i' };
+  if (query.search) filter.title = { $regex: escapeRegex(query.search), $options: 'i' };
   if (query.collegeId) filter.collegeId = query.collegeId;
 
   // Visibility: faculty/admin should see their college & private authored questions

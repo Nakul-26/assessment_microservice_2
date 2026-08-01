@@ -1,5 +1,5 @@
 import express from "express";
-import { register, login, signup } from "../controllers/auth.controller.js";
+import { register, login, signup, logout } from "../controllers/auth.controller.js";
 import { verifyToken, authorizeRoles } from "../middleware/auth.mjs";
 
 const router = express.Router();
@@ -49,5 +49,7 @@ router.post("/signup", signup);
  */
 router.post("/login", login);
 
+// H8: clears the httpOnly auth cookie server-side (the frontend can't clear it itself).
+router.post("/logout", logout);
 
 export default router;

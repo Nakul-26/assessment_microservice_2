@@ -6,6 +6,7 @@ import College from "../../models/College.mjs";
 import { env } from "../config/env.js";
 import { getPlan } from "../config/plans.js";
 import { HttpError } from "../utils/httpError.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import * as auditService from "./audit.service.js";
 
 // Phase 2 billing seat limit — no-op for plans with an unbounded seat count (Infinity),
@@ -238,9 +239,10 @@ export async function listUsers(query = {}) {
   const filter = {};
   
   if (search) {
+    const safeSearch = escapeRegex(search);
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
+      { name: { $regex: safeSearch, $options: 'i' } },
+      { email: { $regex: safeSearch, $options: 'i' } }
     ];
   }
   

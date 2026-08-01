@@ -3,6 +3,7 @@ import Submission from "../../models/Submission.mjs";
 import { HttpError } from "../utils/httpError.js";
 import { validateProblemDefinition } from "./preview.service.js";
 import { collegeAllowsPremium } from "./billing.service.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 function isPrivilegedRole(role) {
   return role === "admin" || role === "faculty" || role === "superadmin";
@@ -239,7 +240,7 @@ function buildProblemFilter(query) {
   }
 
   if (query.search) {
-    filter.title = { $regex: query.search, $options: 'i' };
+    filter.title = { $regex: escapeRegex(query.search), $options: 'i' };
   }
   
   return filter;

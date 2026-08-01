@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Code2, AlertCircle, LogIn } from "lucide-react";
-import api, { setAuthToken } from "../api";
+import api from "../api";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -17,10 +17,8 @@ const LoginPage = () => {
 
     try {
       const res = await api.post("/api/auth/login", { email, password });
-      const { token, user } = res.data;
-      localStorage.setItem("token", token);
+      const { user } = res.data;
       localStorage.setItem("user", JSON.stringify(user));
-      setAuthToken(token);
       window.dispatchEvent(new Event("auth-change"));
       navigate("/");
     } catch (err) {

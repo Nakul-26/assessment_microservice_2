@@ -24,7 +24,7 @@ import BillingPage from './pages/BillingPage';
 import MySubmissionsPage from './pages/MySubmissionsPage';
 import SystemDashboardPage from './pages/SystemDashboardPage';
 import UserManagementPage from './pages/UserManagementPage';
-import { setAuthToken, system } from './api';
+import { auth, system } from './api';
 
 function AppContent() {
     const navigate = useNavigate();
@@ -99,10 +99,15 @@ function AppContent() {
         };
     }, [user, navigate]);
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
+    const handleLogout = async () => {
+        // The auth cookie is httpOnly - only the backend can clear it.
+        try {
+            await auth.logout();
+        } catch {
+            // Proceed with client-side cleanup regardless - worst case the cookie
+            // outlives this session until it naturally expires.
+        }
         localStorage.removeItem('user');
-        setAuthToken(null);
         setUser(null);
         window.dispatchEvent(new Event('auth-change'));
         navigate('/login');

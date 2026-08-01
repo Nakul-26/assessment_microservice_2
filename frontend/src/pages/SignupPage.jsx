@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Code2, AlertCircle, UserPlus } from "lucide-react";
-import api, { setAuthToken } from "../api";
+import api from "../api";
 
 // Self-serve signup: creates a brand-new College tenant plus its first user, who is
 // always that college's admin. Unlike the old (deleted) RegisterPage.jsx, there is no
@@ -23,10 +23,8 @@ const SignupPage = () => {
 
     try {
       const res = await api.post("/api/auth/signup", { collegeName, name, email, password });
-      const { token, user } = res.data;
-      localStorage.setItem("token", token);
+      const { user } = res.data;
       localStorage.setItem("user", JSON.stringify(user));
-      setAuthToken(token);
       window.dispatchEvent(new Event("auth-change"));
       navigate("/");
     } catch (err) {

@@ -18,7 +18,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'monaco': ['@monaco-editor/react'],
-          'xlsx': ['xlsx'],
+          'exceljs': ['exceljs'],
           'vendor': ['react', 'react-dom', 'react-router-dom', 'framer-motion', 'lucide-react'],
         },
       },

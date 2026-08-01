@@ -1,9 +1,17 @@
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 
-export function verifyToken(req, res, next) {
+// Cookie first (browser sessions, H8), then Authorization header fallback (external
+// server-to-server callers - /api/integration/*, /api/judge0/* - never send cookies and
+// must keep working unchanged).
+function extractToken(req) {
+  if (req.cookies?.token) return req.cookies.token;
   const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+  return authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+}
+
+export function verifyToken(req, res, next) {
+  const token = extractToken(req);
   if (!token) return res.status(401).json({ message: "No token" });
 
   try {
@@ -19,8 +27,7 @@ export function verifyToken(req, res, next) {
 }
 
 export function optionalVerifyToken(req, res, next) {
-  const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+  const token = extractToken(req);
   if (!token) return next();
 
   try {

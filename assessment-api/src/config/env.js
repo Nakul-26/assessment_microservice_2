@@ -27,7 +27,11 @@ export const env = {
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || null,
   STRIPE_PRICE_ID_PRO: process.env.STRIPE_PRICE_ID_PRO || null,
   BILLING_SUCCESS_URL: process.env.BILLING_SUCCESS_URL || null,
-  BILLING_CANCEL_URL: process.env.BILLING_CANCEL_URL || null
+  BILLING_CANCEL_URL: process.env.BILLING_CANCEL_URL || null,
+  // H8: browser-facing CORS allowlist for cookie-based auth (comma-separated origins).
+  // No production default on purpose - there is no deployed frontend yet, so this stays
+  // unset until one exists; set it then, no code change needed at that point.
+  CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS || ""
 };
 
 if (process.env.NODE_ENV === "production" && !env.JWT_SECRET) {

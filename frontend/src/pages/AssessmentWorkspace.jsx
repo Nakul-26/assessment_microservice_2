@@ -18,6 +18,17 @@ function loadDraft(attemptId) {
   }
 }
 
+// Computes remaining seconds against a server-derived endTimeMs using a monotonic
+// performance.now() delta rather than repeatedly sampling Date.now(). Date.now() is only
+// read once, to establish the anchor at the very start of the session (attemptStartAnchor
+// below) - after that, elapsed time is tracked via performance.now(), which is guaranteed
+// monotonic and immune to the student rolling their system clock backward mid-exam.
+function computeRemainingSeconds(endTimeMs, anchor) {
+  if (!anchor) return Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000));
+  const effectiveNow = anchor.wallNow0 + (performance.now() - anchor.perfNow0);
+  return Math.max(0, Math.floor((endTimeMs - effectiveNow) / 1000));
+}
+
 const AssessmentWorkspace = () => {
   const { attemptId } = useParams();
   const navigate = useNavigate();
@@ -34,6 +45,7 @@ const AssessmentWorkspace = () => {
   const [submissionMap, setSubmissionMap] = useState({}); // problemId -> submission object
   const intervalRefs = useRef({}); // problemId -> intervalId
   const finishStartedRef = useRef(false);
+  const timeAnchorRef = useRef(null); // { wallNow0, perfNow0 } - set once, see computeRemainingSeconds
 
   const [timeLeft, setTimeLeft] = useState(null);
   const [showConsole, setShowConsole] = useState(false);
@@ -164,7 +176,10 @@ const AssessmentWorkspace = () => {
         const graceMs = (attemptData.graceMinutes || 0) * 60 * 1000;
         const durationMs = (assessmentData.durationMinutes * 60 * 1000) + graceMs;
         const endTime = Math.min(startTime + durationMs, new Date(assessmentData.endTime).getTime() + graceMs);
-        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        if (!timeAnchorRef.current) {
+          timeAnchorRef.current = { wallNow0: Date.now(), perfNow0: performance.now() };
+        }
+        const remaining = computeRemainingSeconds(endTime, timeAnchorRef.current);
         setTimeLeft(remaining);
 
       } catch (err) {
@@ -355,12 +370,14 @@ const AssessmentWorkspace = () => {
         const attemptData = attemptRes.data;
         setAttempt(attemptData);
 
-        // Dynamic timer updates (graceMinutes sync)
+        // Dynamic timer updates (graceMinutes sync). Reuses the anchor set on initial load
+        // (not a fresh Date.now() sample) so a clock rollback mid-session can't re-inflate
+        // the countdown at every resync - see computeRemainingSeconds.
         const startTime = new Date(attemptData.startedAt).getTime();
         const graceMs = (attemptData.graceMinutes || 0) * 60 * 1000;
         const durationMs = (assessmentData.durationMinutes * 60 * 1000) + graceMs;
         const endTime = Math.min(startTime + durationMs, new Date(assessmentData.endTime).getTime() + graceMs);
-        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        const remaining = computeRemainingSeconds(endTime, timeAnchorRef.current);
         setTimeLeft(remaining);
 
         // Check if there's any new announcement since lastSeenAnnouncementTime

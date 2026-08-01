@@ -55,6 +55,12 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm test
+      - name: Lint (non-blocking)
+        # ESLint was just introduced here for the first time and surfaced ~27 pre-existing
+        # violations (mostly unused catch-block error variables) across a never-linted
+        # codebase. Report-only until that backlog is cleaned up, then make this blocking.
+        run: npm run lint
+        continue-on-error: true
 
   frontend-unit:
     name: Frontend Unit Tests
@@ -69,6 +75,39 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm test
+      - run: npm run lint
+
+  security-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: assessment-api
+        working-directory: ./assessment-api
+        run: |
+          npm ci
+          npm audit --audit-level=high
+      - name: frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run audit:ci
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        # Pinned to gitleaks-action v3.0.0's commit SHA, not the mutable tag.
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   e2e:
     name: Playwright E2E Tests

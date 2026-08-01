@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Download, Users, CheckCircle, Clock, AlertCircle, Search, RefreshCw, BarChart3, ChevronRight, FileSpreadsheet, MonitorOff, Copy, ClipboardPaste, Maximize, AlertTriangle, Trophy, Megaphone, Lock, Unlock } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { downloadRowsAsExcel } from '../utils/excel';
 import api, { assessments } from '../api';
 
 const AssessmentResultsPage = () => {
@@ -191,17 +191,7 @@ const AssessmentResultsPage = () => {
       };
     });
 
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Assessment Results");
-    
-    // Auto-size columns
-    const maxWidths = Object.keys(data[0] || {}).map(key => ({
-      wch: Math.max(key.length, ...data.map(obj => String(obj[key]).length)) + 2
-    }));
-    ws['!cols'] = maxWidths;
-
-    XLSX.writeFile(wb, `${assessment.title.replace(/\s+/g, '_')}_Results.xlsx`);
+    downloadRowsAsExcel(`${assessment.title.replace(/\s+/g, '_')}_Results.xlsx`, "Assessment Results", data, { autoSizeColumns: true });
   };
 
   if (loading && !assessment) return <div className="container">Loading results dashboard...</div>;

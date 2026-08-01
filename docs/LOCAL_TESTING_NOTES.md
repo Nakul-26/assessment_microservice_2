@@ -69,3 +69,26 @@ client calls in use), point judge-service-go's Docker client at the proxy instea
 socket via `DOCKER_HOST`, and run the full integration test suite (`go test ./...` in
 `judge-service-go`, which includes real container-spawning tests) against it before ever
 deploying the change to coding.fortifyhub.net.
+
+## 4. H8 cookie-auth and H10 exceljs migration — need a browser, unverified here
+
+Both changes are automated-test-covered (backend: 4 new supertest cases in `auth.test.js`
+covering cookie-only auth, logout clearing the cookie, the CSRF-lite header check, and
+Bearer-header-only still working; frontend: build + existing unit tests pass) but neither can
+be smoke-tested end-to-end from this Windows/no-browser-automation environment. Since there is
+no deployed frontend yet (per [[deployment_and_testing]]), this can only be checked once one is
+stood up (locally or in the Codespace):
+
+- **Cookie auth**: sign up/log in via a running frontend, open DevTools → Application → Cookies,
+  confirm the `token` cookie is present, `HttpOnly` is checked, and `document.cookie` does NOT
+  show it. Confirm subsequent API calls succeed with no `Authorization` header sent (Network
+  tab). Click logout, confirm the cookie disappears and a subsequent protected-route call 401s.
+- **exceljs migration**: on `/admin/users`, upload a real student-roster `.xlsx` file via the
+  bulk-import form and confirm rows parse correctly (this is the actual untrusted-input path
+  the H10 CVE concerned — `XLSX.read`/`sheet_to_json` replaced with `exceljs`-backed
+  `readWorkbookRows`). Download the sample template, credentials export, and all-users export,
+  plus the assessment-results export on `/admin/assessments/:id/results`, and open each in a
+  real spreadsheet app to confirm they're valid `.xlsx` files, not just that the download fires.
+
+**To check in Codespace/locally**: `docker-compose up` (or `npm run dev` in `frontend/` against
+a local `assessment-api`), then walk through both bullets above in a real browser.
