@@ -512,6 +512,16 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 	}
 }
 
+// elapsedMsFromResult extracts the total execution time already computed onto the result
+// (by the central runner, or by the wrapper's own JSON output) for reuse as the usage
+// metering signal, without timing the submission a second time.
+func elapsedMsFromResult(result *models.SubmissionResult) int64 {
+	if result == nil {
+		return 0
+	}
+	return result.ElapsedMs
+}
+
 // processAndStoreResults processes the executor output and updates the database and cache.
 func fallbackResultForExecutionFailure(executionPath string, execErr error, stdout string) *models.SubmissionResult {
 	result := models.NewSubmissionResult()
@@ -699,7 +709,7 @@ func finishWithContainer(containerPool *pool.ContainerPool, container *pool.Pool
 	containerPool.Release(container)
 }
 
-func processAndStoreResults(ctx context.Context, executionPath string, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, problemsCollection *mongo.Collection, redisClient *redis.Client) {
+func processAndStoreResults(ctx context.Context, executionPath string, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, problemsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client) {
 	var result models.SubmissionResult
 	submissionStatus := models.StatusError
 	submissionOutput := stderr
@@ -785,6 +795,26 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 		// Continue without full data if necessary
 	}
 
+	// Usage metering (H4): one event per executed submission, carrying the same
+	// elapsedMs already computed above for the result payload. Best-effort — a
+	// metering write must never fail or delay the submission's own result.
+	usageEvent := bson.M{
+		"submissionId": submissionObjID,
+		"userId":       originalSubmission.UserID,
+		"language":     submissionMsg.Language,
+		"status":       submissionStatus,
+		"elapsedMs":    elapsedMsFromResult(submissionTestResult),
+		"createdAt":    time.Now(),
+	}
+	if submissionMsg.CollegeID != "" {
+		if collegeObjID, err := primitive.ObjectIDFromHex(submissionMsg.CollegeID); err == nil {
+			usageEvent["collegeId"] = collegeObjID
+		}
+	}
+	if _, err := usageEventsCollection.InsertOne(ctx, usageEvent); err != nil {
+		slog.Error("Failed to record usage event", "submissionId", submissionMsg.SubmissionID, "error", err)
+	}
+
 	updatedSubmission := models.Submission{
 		ID:         submissionObjID,
 		ProblemID:  problemObjID,
@@ -829,7 +859,7 @@ func markSubmissionExecutionFailed(ctx context.Context, submissionsCollection *m
 }
 
 // processSubmission is the main coordinator for handling a submission message.
-func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
+func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
 
 	submissionMsg, err := validateAndDecodeSubmission(d)
@@ -938,7 +968,7 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 			d.Nack(false, false)
 			return
 		}
-		processAndStoreResults(ctx, models.ExecutionPathCentral, string(resultBytes), "", nil, submissionMsg, submissionsCollection, problemsCollection, redisClient)
+		processAndStoreResults(ctx, models.ExecutionPathCentral, string(resultBytes), "", nil, submissionMsg, submissionsCollection, problemsCollection, usageEventsCollection, redisClient)
 
 		d.Ack(false)
 		return
@@ -986,7 +1016,7 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 		discardReason = reason
 	}
 
-	processAndStoreResults(ctx, models.ExecutionPathLegacy, stdout, stderr, execErr, submissionMsg, submissionsCollection, problemsCollection, redisClient)
+	processAndStoreResults(ctx, models.ExecutionPathLegacy, stdout, stderr, execErr, submissionMsg, submissionsCollection, problemsCollection, usageEventsCollection, redisClient)
 
 	d.Ack(false)
 }
@@ -1326,6 +1356,10 @@ func main() {
 
 	problemsCollection := mongoClient.Database("assessment_db").Collection("problems")
 	submissionsCollection := mongoClient.Database("assessment_db").Collection("submissions")
+	// Collection name matches the default Mongoose pluralization of the "UsageEvent"
+	// model in assessment-api/models/UsageEvent.mjs, so both sides agree on it without
+	// either one owning the write path exclusively.
+	usageEventsCollection := mongoClient.Database("assessment_db").Collection("usageevents")
 
 	// Start Health/Stats/Run Server
 	healthPort := os.Getenv("HEALTH_PORT")
@@ -1437,7 +1471,7 @@ func main() {
 			defer workerWg.Done()
 			slog.Debug("Worker started", "workerId", workerID)
 			for d := range msgs {
-				processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, redisClient, executor, containerPool)
+				processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
 			}
 			slog.Debug("Worker stopped", "workerId", workerID)
 		}(i)

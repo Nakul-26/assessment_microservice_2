@@ -240,6 +240,10 @@ export async function submitSolution({ problemId, code, language, userId, colleg
     requestId: requestId
   };
 
+  // Carried through so judge-service-go can tag the usage_events record it writes
+  // per submission (H4 metering) without a round-trip lookup of userId -> collegeId.
+  if (collegeId) messageBody.collegeId = String(collegeId);
+
   if (!validateSubmissionMessage(messageBody)) {
     throw new HttpError(500, "Invalid submission message", { msg: "Internal server error: invalid submission message" });
   }

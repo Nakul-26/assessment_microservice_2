@@ -20,6 +20,7 @@ type SubmissionMessage struct {
 	CompareConfig CompareConfig `json:"compareConfig,omitempty"`
 	RequestID     string      `json:"requestId,omitempty"`
 	RetryCount    int         `json:"retryCount,omitempty"`
+	CollegeID     string      `json:"collegeId,omitempty"`
 }
 
 // Limits — tweak as needed
