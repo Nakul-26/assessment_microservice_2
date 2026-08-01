@@ -224,7 +224,7 @@ function AppContent() {
                 <Route path="/admin/assessment-attempt/:attemptId" element={<RequireStaff><AssessmentAttemptDetailPage /></RequireStaff>} />
                 <Route path="/admin/system" element={<RequireStaff><SystemDashboardPage /></RequireStaff>} />
                 <Route path="/admin/users" element={<RequireStaff><UserManagementPage /></RequireStaff>} />
-                <Route path="/admin/billing" element={<RequireRole roles={['admin', 'superadmin']}><BillingPage /></RequireRole>} />
+                <Route path="/admin/billing" element={<RequireRole roles={['admin', 'superadmin']}><BillingPage user={user} /></RequireRole>} />
 
                 <Route path="/problems/:_id" element={<ProblemPage user={user} />} />
                 <Route path="/add-problem" element={<RequireStaff><AddProblemPage /></RequireStaff>} />

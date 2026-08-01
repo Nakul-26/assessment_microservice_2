@@ -2,7 +2,7 @@ import College from "../../models/College.mjs";
 import User from "../../models/User.mjs";
 import UsageEvent from "../../models/UsageEvent.mjs";
 import { env } from "../config/env.js";
-import { getPlan } from "../config/plans.js";
+import { PLANS, getPlan } from "../config/plans.js";
 import { getStripeClient } from "../config/stripe.js";
 import { HttpError } from "../utils/httpError.js";
 
@@ -162,4 +162,40 @@ export async function collegeAllowsPremium(collegeId) {
   const college = await College.findById(collegeId);
   if (!college) return false;
   return getPlan(college.planId).allowsPremiumProblems;
+}
+
+// Real payment collection today is offline (cash/UPI), not Stripe checkout — this is the
+// manual counterpart to handleStripeEvent's automatic transitions, for a superadmin to flip
+// a college's plan after confirming an offline payment.
+export async function listCollegesForBilling() {
+  const colleges = await College.find().sort({ name: 1 }).lean();
+  const seatCounts = await User.aggregate([
+    { $match: { collegeId: { $ne: null } } },
+    { $group: { _id: "$collegeId", count: { $sum: 1 } } }
+  ]);
+  const seatsByCollege = new Map(seatCounts.map((row) => [String(row._id), row.count]));
+
+  return colleges.map((college) => ({
+    _id: college._id,
+    name: college.name,
+    slug: college.slug,
+    planId: college.planId,
+    subscriptionStatus: college.subscriptionStatus,
+    currentPeriodEnd: college.currentPeriodEnd || null,
+    seatsUsed: seatsByCollege.get(String(college._id)) || 0
+  }));
+}
+
+export async function setCollegePlan(collegeId, { planId, subscriptionStatus } = {}) {
+  if (!planId || !PLANS[planId]) {
+    throw new HttpError(400, "Unknown planId", { message: `planId must be one of: ${Object.keys(PLANS).join(", ")}` });
+  }
+  const college = await College.findById(collegeId);
+  if (!college) throw new HttpError(404, "College not found", { message: "College not found" });
+
+  college.planId = planId;
+  college.subscriptionStatus = subscriptionStatus || (planId === "free" ? "none" : "active");
+  await college.save();
+
+  return getBillingStatus(collegeId);
 }

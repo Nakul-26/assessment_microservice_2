@@ -130,7 +130,9 @@ export const questions = {
 export const billing = {
   getStatus: () => api.get("/api/v1/billing/status"),
   createCheckout: (planId) => api.post("/api/v1/billing/checkout", { planId }),
-  createPortal: () => api.post("/api/v1/billing/portal")
+  createPortal: () => api.post("/api/v1/billing/portal"),
+  listColleges: () => api.get("/api/v1/billing/colleges"),
+  setCollegePlan: (collegeId, data) => api.patch(`/api/v1/billing/colleges/${collegeId}/plan`, data)
 };
 
 export default api;

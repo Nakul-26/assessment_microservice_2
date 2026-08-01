@@ -16,7 +16,9 @@ const {
   getBillingStatus,
   checkPlanUsageLimit,
   collegeAllowsPremium,
-  handleStripeEvent
+  handleStripeEvent,
+  listCollegesForBilling,
+  setCollegePlan
 } = await import('./billing.service.js');
 
 async function makeCollege(overrides = {}) {
@@ -133,6 +135,50 @@ describe('billing.service', () => {
 
     it('is a no-op for unrecognized event types', async () => {
       await expect(handleStripeEvent({ type: 'invoice.paid', data: { object: {} } })).resolves.toBeUndefined();
+    });
+  });
+
+  describe('manual plan assignment (cash/UPI payments)', () => {
+    it('lists colleges with their plan and seat count', async () => {
+      const college = await makeCollege({ planId: 'free' });
+      const User = (await import('../../models/User.mjs')).default;
+      await User.create({ name: 'Seat', email: `seat-${Date.now()}@example.com`, password: 'hashedpw', role: 'student', collegeId: college._id });
+
+      const colleges = await listCollegesForBilling();
+      const row = colleges.find((c) => String(c._id) === String(college._id));
+      expect(row).toBeDefined();
+      expect(row.planId).toBe('free');
+      expect(row.seatsUsed).toBe(1);
+    });
+
+    it('sets a college onto a paid plan and defaults subscriptionStatus to active', async () => {
+      const college = await makeCollege({ planId: 'free', subscriptionStatus: 'none' });
+      const result = await setCollegePlan(college._id.toString(), { planId: 'pro' });
+      expect(result.planId).toBe('pro');
+
+      const updated = await College.findById(college._id);
+      expect(updated.planId).toBe('pro');
+      expect(updated.subscriptionStatus).toBe('active');
+    });
+
+    it('resets subscriptionStatus to none when moved back to free', async () => {
+      const college = await makeCollege({ planId: 'pro', subscriptionStatus: 'active' });
+      await setCollegePlan(college._id.toString(), { planId: 'free' });
+      const updated = await College.findById(college._id);
+      expect(updated.subscriptionStatus).toBe('none');
+    });
+
+    it('rejects an unknown planId', async () => {
+      const college = await makeCollege();
+      await expect(
+        setCollegePlan(college._id.toString(), { planId: 'enterprise' })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('404s for a nonexistent college', async () => {
+      await expect(
+        setCollegePlan('64b000000000000000000000', { planId: 'pro' })
+      ).rejects.toMatchObject({ status: 404 });
     });
   });
 });

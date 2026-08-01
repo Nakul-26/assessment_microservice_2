@@ -43,6 +43,30 @@ router.post("/portal", verifyToken, authorizeRoles("admin", "superadmin"), async
   }
 });
 
+// Manual plan assignment for offline (cash/UPI) payments — superadmin-only since it can set
+// *any* college's plan, unlike the self-service checkout/portal routes above which are scoped
+// to the caller's own college.
+router.get("/colleges", verifyToken, authorizeRoles("superadmin"), async (req, res, next) => {
+  try {
+    const colleges = await billingService.listCollegesForBilling();
+    res.json(colleges);
+  } catch (err) {
+    if (err.status && err.body) return res.status(err.status).json(err.body);
+    next(err);
+  }
+});
+
+router.patch("/colleges/:collegeId/plan", verifyToken, authorizeRoles("superadmin"), async (req, res, next) => {
+  try {
+    const { planId, subscriptionStatus } = req.body || {};
+    const result = await billingService.setCollegePlan(req.params.collegeId, { planId, subscriptionStatus });
+    res.json(result);
+  } catch (err) {
+    if (err.status && err.body) return res.status(err.status).json(err.body);
+    next(err);
+  }
+});
+
 // Stripe calls this directly — no verifyToken. Authenticity comes from the signature
 // check below, not a JWT. Requires the raw body, wired in app.js before the global
 // express.json() parser consumes it.

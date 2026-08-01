@@ -3,7 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { CreditCard, AlertCircle, CheckCircle2, Lock } from 'lucide-react';
 import { billing } from '../api';
 
-const BillingPage = () => {
+const KNOWN_PLAN_IDS = ['free', 'pro'];
+
+const BillingPage = ({ user }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [status, setStatus] = useState(null);
@@ -11,6 +13,13 @@ const BillingPage = () => {
   const [error, setError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [notice, setNotice] = useState(null);
+
+  const isSuperadmin = user?.role === 'superadmin';
+  const [colleges, setColleges] = useState([]);
+  const [collegesLoading, setCollegesLoading] = useState(false);
+  const [collegesError, setCollegesError] = useState(null);
+  const [planEdits, setPlanEdits] = useState({});
+  const [savingCollegeId, setSavingCollegeId] = useState(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -25,9 +34,39 @@ const BillingPage = () => {
     }
   };
 
+  const fetchColleges = async () => {
+    setCollegesLoading(true);
+    setCollegesError(null);
+    try {
+      const res = await billing.listColleges();
+      setColleges(res.data);
+    } catch (err) {
+      setCollegesError(err.response?.data?.message || 'Failed to load colleges.');
+    } finally {
+      setCollegesLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
+    if (isSuperadmin) fetchColleges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleSetPlan = async (collegeId) => {
+    const planId = planEdits[collegeId];
+    if (!planId) return;
+    setSavingCollegeId(collegeId);
+    setCollegesError(null);
+    try {
+      await billing.setCollegePlan(collegeId, { planId });
+      await fetchColleges();
+    } catch (err) {
+      setCollegesError(err.response?.data?.message || 'Failed to update plan.');
+    } finally {
+      setSavingCollegeId(null);
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -155,6 +194,69 @@ const BillingPage = () => {
             )}
           </div>
         </>
+      )}
+
+      {isSuperadmin && (
+        <div className="problem-card mt-8" style={{ padding: '24px' }}>
+          <h3 style={{ marginBottom: '4px' }}>Manual Plan Assignment</h3>
+          <p className="text-muted" style={{ marginBottom: '16px' }}>
+            Payments are currently collected offline (cash/UPI). Set a college's plan here once you've confirmed payment.
+          </p>
+
+          {collegesError && (
+            <div className="error-box mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
+              <AlertCircle size={18} />
+              <span>{collegesError}</span>
+            </div>
+          )}
+
+          {collegesLoading ? (
+            <p className="text-muted">Loading colleges...</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>College</th>
+                    <th>Plan</th>
+                    <th>Status</th>
+                    <th>Seats used</th>
+                    <th>Set plan</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {colleges.map((college) => (
+                    <tr key={college._id}>
+                      <td>{college.name}</td>
+                      <td>{college.planId}</td>
+                      <td>{college.subscriptionStatus}</td>
+                      <td>{college.seatsUsed}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <select
+                            value={planEdits[college._id] ?? college.planId}
+                            onChange={(e) => setPlanEdits((prev) => ({ ...prev, [college._id]: e.target.value }))}
+                          >
+                            {KNOWN_PLAN_IDS.map((planId) => (
+                              <option key={planId} value={planId}>{planId}</option>
+                            ))}
+                          </select>
+                          <button
+                            className="button button-outline"
+                            disabled={savingCollegeId === college._id}
+                            onClick={() => handleSetPlan(college._id)}
+                          >
+                            {savingCollegeId === college._id ? 'Saving...' : 'Save'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
