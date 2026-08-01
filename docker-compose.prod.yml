@@ -121,6 +121,9 @@ services:
       TESTING_PLATFORM_KEY: ${TESTING_PLATFORM_KEY:?TESTING_PLATFORM_KEY is required}
       JUDGE0_SHIM_KEY: ${JUDGE0_SHIM_KEY:?JUDGE0_SHIM_KEY is required}
       JUDGE_SERVICE_URL: http://judge-service-go:8081
+      # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if unset.
+      COLLEGE_SUBMISSION_QUOTA: ${COLLEGE_SUBMISSION_QUOTA:-}
+      COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS: ${COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS:-}
     healthcheck:
       # Uses node (always available) instead of wget (not on node:20-alpine by default)
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/api/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]

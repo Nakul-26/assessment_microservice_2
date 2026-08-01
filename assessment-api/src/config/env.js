@@ -15,7 +15,11 @@ export const env = {
   // integration key, and because the caller sends it as `x-rapidapi-key` (it's
   // impersonating a Judge0 instance), not `x-service-key`.
   JUDGE0_SHIM_KEY: process.env.JUDGE0_SHIM_KEY || (process.env.NODE_ENV === "production" ? null : "judge0_shim_secret"),
-  JUDGE_SERVICE_URL: process.env.JUDGE_SERVICE_URL || "http://judge-service-go:8081"
+  JUDGE_SERVICE_URL: process.env.JUDGE_SERVICE_URL || "http://judge-service-go:8081",
+  // H5 fair-scheduling quota: submissions per college allowed within the rolling
+  // window below, enforced in quota.service.js before a submission is queued.
+  COLLEGE_SUBMISSION_QUOTA: Number(process.env.COLLEGE_SUBMISSION_QUOTA) || 30,
+  COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS: Number(process.env.COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS) || 60
 };
 
 if (process.env.NODE_ENV === "production" && !env.JWT_SECRET) {

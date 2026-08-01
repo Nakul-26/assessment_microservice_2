@@ -4,6 +4,7 @@ import * as attemptsRepo from "../repositories/assessmentAttempts.repo.js";
 import * as assessmentsRepo from "../repositories/assessments.repo.js";
 import { publishSubmissionMessage } from "./evaluation.service.js";
 import { getCacheJSON, setCacheJSON } from "./cache.service.js";
+import { checkCollegeSubmissionQuota } from "./quota.service.js";
 import { HttpError } from "../utils/httpError.js";
 
 function validateSubmissionMessage(msg) {
@@ -179,6 +180,17 @@ export function sanitizeSubmissionForStudent(submission, problem) {
 
 export async function submitSolution({ problemId, code, language, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
+
+  if (collegeId) {
+    // Checked before any submission record is created so a rejected request never
+    // leaves behind an orphan "Pending" submission that nothing will process.
+    const quota = await checkCollegeSubmissionQuota(collegeId);
+    if (!quota.allowed) {
+      throw new HttpError(429, "Submission quota exceeded", {
+        msg: `Submission quota exceeded for this college (${quota.limit} per ${quota.windowSeconds}s). Please try again shortly.`
+      });
+    }
+  }
 
   const problem = await problemsRepo.findById(problemId);
   if (!problem) {
