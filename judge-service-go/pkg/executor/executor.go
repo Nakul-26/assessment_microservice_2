@@ -175,13 +175,21 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
 }
 
-func (e *Executor) copyFilesToContainer(containerID string, hostWorkDir string, containerWorkDir string, files []string) error {
+func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string, hostWorkDir string, containerWorkDir string, files []string) error {
 	if len(files) == 0 {
 		return nil
 	}
 
 	if err := workspace.ValidateNoExternalSymlinks(hostWorkDir); err != nil {
 		return err
+	}
+
+	// /app is a tmpfs mount (not a host bind mount, see pool.go's createContainer), so
+	// containerWorkDir's per-submission subdirectory only exists on the host staging side —
+	// the container's tmpfs starts with nothing under /app until something creates it there.
+	// Without this, UploadToContainer below 404s ("Could not find the file ... in container").
+	if _, _, _, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"mkdir", "-p", containerWorkDir}, 5*time.Second); err != nil {
+		return fmt.Errorf("failed to create workspace dir %s in container: %w", containerWorkDir, err)
 	}
 
 	var buf bytes.Buffer
@@ -402,7 +410,7 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
-	if err := e.copyFilesToContainer(containerID, hostWorkDir, containerWorkDir, files); err != nil {
+	if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
 		return "", "", err
 	}
 
@@ -439,7 +447,7 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 
 	if len(files) > 0 {
-		if err := e.copyFilesToContainer(containerID, hostWorkDir, containerWorkDir, files); err != nil {
+		if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
 			cancel()
 			return nil, err
 		}
@@ -627,7 +635,7 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 	defer cancel()
 
 	if len(files) > 0 {
-		if err := e.copyFilesToContainer(containerID, hostWorkDir, containerWorkDir, files); err != nil {
+		if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
 			return "", "", "", -1, err
 		}
 	}
