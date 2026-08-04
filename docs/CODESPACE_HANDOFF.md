@@ -1,5 +1,115 @@
 # Codespace / Docker environment handoff
 
+## 🔴 ACTIVE INCIDENT — read this section first
+
+**Production submissions are down** at `coding.fortifyhub.net` (the judge0-shim-only deployment
+— no frontend deployed there, just `/api/judge0/*` and `/api/integration/*` consumed by an
+external exam platform). This was discovered and is being actively debugged; it is NOT resolved.
+Continue from here — don't re-derive this from scratch.
+
+### How to test
+
+```
+curl -s -w '\nHTTP_STATUS:%{http_code}\n' -X POST \
+  'https://coding.fortifyhub.net/api/judge0/submissions?base64_encoded=true&wait=true' \
+  -H 'Content-Type: application/json' \
+  -H 'x-rapidapi-key: <JUDGE0_API_KEY from .env>' \
+  -d '{"language_id":71,"source_code":"'"$(printf 'print(1)' | base64 -w0)"'","stdin":""}'
+```
+`language_id: 71` = python (see `LANGUAGE_ID_MAP` in `judge0Shim.service.js` for others).
+`stdout`/`stderr`/`compile_output` in the response are base64 — decode to read them. A passing
+run looks like `status.id: 3` (ACCEPTED) with the program's real stdout.
+
+### Regressions found and fixed so far (all committed to `main`)
+
+The whole chain started from the C6 non-root-hardening change (judge-service-go now runs as a
+non-root `app` user instead of root) plus a `/app` tmpfs migration (`e38d1f3`, multi-tenancy
+commit) — three independent regressions surfaced sequentially as each was fixed and the next
+error appeared:
+
+1. **Workspace dir permission-denied** (`mkdir /tmp/judge-workspaces/judge-XXXX: permission
+   denied`) — a host dir left root-owned from before the non-root switch. **Fixed** (commit
+   `27676d2`): renamed `RootDir` in `judge-service-go/pkg/workspace/manager.go` from
+   `/tmp/judge-workspaces` to `/tmp/judge-exec-workspaces` so the non-root user creates (and
+   owns) a fresh dir instead of needing host access to chown the old one. **Confirmed fixed** —
+   error stopped appearing in logs after this deployed.
+
+2. **Docker socket permission-denied** (`dial unix /var/run/docker.sock: connect: permission
+   denied`) — `DOCKER_GROUP_GID` in `docker-compose.prod.yml`'s `group_add` defaulted to `999`,
+   didn't match the host's real Docker group GID. **Fixed**: user ran
+   `stat -c '%g' /var/run/docker.sock` inside the judge-service-go container terminal (via
+   Dokploy's UI — no host/SSH terminal access exists, only container terminals), got `992`, set
+   `DOCKER_GROUP_GID=992` as a Dokploy env var and redeployed. **Confirmed fixed** — no more
+   "no available containers" 503s.
+
+3. **File upload to container 404s** (`failed to upload files to container: API error (404):
+   Could not find the file /app/sub-raw-... in container ...`) — **root cause identified, fix
+   deployed but NOT YET CONFIRMED WORKING, this is where debugging stopped**. Commit `e38d1f3`
+   switched the sandbox containers' `/app` from a host bind-mount to a tmpfs mount (deliberate —
+   stops a submission from filling host disk), but nothing accounted for the fact that the
+   per-submission subdirectory (`/app/sub-<id>`, created by `workspace.NewSubmissionWorkspace`
+   via `os.MkdirTemp` on the HOST staging dir) used to auto-exist inside the container via the
+   bind mount and now doesn't exist in the tmpfs at all until something creates it there.
+   Docker's `PutContainerArchive`/`UploadToContainer` requires the destination directory to
+   already exist, hence the 404. **This affects every submission path**, not just the raw-run
+   shim — `RunInContainerStream`/`CompileInContainer` (the real exam-grading path) share the
+   same `copyFilesToContainer` function.
+
+   **Fix applied** (commit `713bf50`, `judge-service-go/pkg/executor/executor.go`):
+   `copyFilesToContainer` now execs `mkdir -p <containerWorkDir>` as root inside the target
+   container before uploading the tar (same pattern as the existing root-exec `/tmp` cleanup
+   step in `RunRawWithStdin`). Also see commit `b379135` (`judge0Shim.service.js`) — a
+   *separate*, already-confirmed-working fix that surfaces `raw.error` into the `stderr` field
+   of the shim's response, since previously an internal judge-service-go error came back to the
+   client as empty `stdout`/`stderr` with no indication anything was wrong — that's what made
+   this diagnosable via curl at all.
+
+   **Why this isn't confirmed fixed yet**: after what was reported as a full rebuild + redeploy
+   (container IDs in the error response were cross-checked against the freshest pool-warmup log
+   and do match the newest process), the live test **still returns the exact same 404** with no
+   change in error shape (no "failed to create workspace dir" wrapper message, which the new
+   mkdir-failure path would produce — meaning either the mkdir exec is succeeding but the
+   upload still can't see the directory, or commit `713bf50`'s code still isn't the binary
+   actually running). This was not resolved before handing off to Codespace.
+
+### Next steps (do these first, in order)
+
+1. **Confirm the running binary actually matches `713bf50`.** Don't trust "a rebuild was done"
+   at face value again — from a real Docker-capable terminal, rebuild judge-service-go
+   explicitly (`docker compose -f docker-compose.prod.yml build --no-cache judge-service-go` or
+   equivalent) and confirm the build step actually recompiles (watch for real `go build` output,
+   not a cache hit), before redeploying.
+2. If the binary is confirmed current and the 404 still happens, **exec into a live sandbox
+   container directly** (`docker exec -it <containerId> sh`) while judge-service-go is idle and
+   manually run `mkdir -p /app/sub-test && ls -la /app/` to check: does the mkdir actually
+   succeed as root under this tmpfs mount (`rw,nosuid,nodev,size=512m`, see `pool.go`'s
+   `createContainer`)? Does the directory persist / is it visible via a fresh `docker exec`?
+   This isolates "mkdir doesn't actually work under this tmpfs for some reason" from "the new
+   code isn't running."
+3. Also worth checking directly: does `fsouza/go-dockerclient`'s `UploadToContainer` (calls
+   Docker's `PUT /containers/{id}/archive`) have some quirk with tmpfs-mounted destinations
+   specifically vs regular overlay filesystem paths — e.g. try uploading to a non-tmpfs path in
+   the same container (there isn't an obvious one here, but worth a literature check) or add a
+   temporary debug log right before/after the mkdir exec call in `copyFilesToContainer`
+   (`judge-service-go/pkg/executor/executor.go`, ~line 178) printing the mkdir's own stdout/
+   stderr/exit code, since right now a mkdir failure would be silent unless it hits the wrapped
+   error return.
+4. Once fixed and confirmed via the curl test above returning `status.id: 3`, also smoke-test at
+   least one **compiled** language (e.g. `language_id: 62` for Java, or `54` for C++) since
+   compilation exercises the same workspace path but with an extra exec step — the interpreted
+   Python-only testing so far hasn't covered that.
+
+### Constraints to remember
+
+- **No host/VPS terminal access at all** — only container terminals via Dokploy's UI. Any fix
+  must be deployable through code + Dokploy env vars/redeploy, never a host-level command.
+- User handles all `git commit`/`push`/Dokploy redeploy actions themselves — report fixes as
+  ready, don't ask permission to commit/deploy, and don't attempt it directly.
+- Live secrets for testing (`JUDGE0_API_KEY`, etc.) are in the repo's `.env` file (gitignored,
+  already present on this machine).
+
+---
+
 This file exists because the work below was planned and partly implemented from a Windows
 machine with **no Docker, no Go toolchain, and no browser automation** — so a lot of it is
 "implemented but unverified" or "deliberately not attempted because it needs Docker." That
