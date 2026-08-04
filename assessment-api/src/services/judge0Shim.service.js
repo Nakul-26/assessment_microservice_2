@@ -121,7 +121,11 @@ export async function runRawJudge0({ languageId, sourceCode, stdin, wallTimeLimi
 
   return {
     stdout: raw.stdout || "",
-    stderr: raw.stderr || "",
+    // raw.error (judge-service-go's internal/plumbing failure message, distinct from
+    // compile/timeout/OOM) was previously dropped entirely, making INTERNAL_ERROR
+    // responses indistinguishable from a truly silent failure — surface it here so
+    // callers (and anyone debugging via this endpoint directly) can see what broke.
+    stderr: raw.stderr || (raw.error ? `Judge internal error: ${String(raw.error).slice(0, 300)}` : ""),
     compile_output: raw.compileOutput || "",
     status: { id: statusId },
     time: (Number(raw.timeMs) || 0) / 1000,
