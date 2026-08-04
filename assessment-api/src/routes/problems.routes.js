@@ -13,7 +13,7 @@ import {
 
 const router = express.Router();
 
-router.get("/", listProblems);
+router.get("/", optionalVerifyToken, listProblems);
 router.get("/:_id", optionalVerifyToken, getProblemById);
 router.get("/:_id/stats", optionalVerifyToken, getProblemStats);
 router.post("/:_id/run", verifyToken, runProblem);

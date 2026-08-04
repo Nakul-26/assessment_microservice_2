@@ -2,9 +2,31 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import User from "../../models/User.mjs";
+import College from "../../models/College.mjs";
 import { env } from "../config/env.js";
+import { getPlan } from "../config/plans.js";
 import { HttpError } from "../utils/httpError.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import * as auditService from "./audit.service.js";
+
+// Phase 2 billing seat limit — no-op for plans with an unbounded seat count (Infinity),
+// and fails open if the college doesn't exist yet (e.g. legacy/unscoped data) so this
+// never blocks account creation for reasons unrelated to billing.
+async function assertSeatCapacity(collegeId, incomingSeats) {
+  if (!collegeId) return;
+  const college = await College.findById(collegeId);
+  if (!college) return;
+
+  const plan = getPlan(college.planId);
+  if (!Number.isFinite(plan.seatLimit)) return;
+
+  const currentSeats = await User.countDocuments({ collegeId });
+  if (currentSeats + incomingSeats > plan.seatLimit) {
+    throw new HttpError(402, "Seat limit reached for your plan", {
+      message: `Seat limit reached for your plan (${plan.seatLimit} seats). Upgrade to add more users.`
+    });
+  }
+}
 
 function toPublicUser(user) {
   return {
@@ -39,6 +61,8 @@ export async function register({ name, email, password, role, collegeId, usn, se
     }
   }
 
+  await assertSeatCapacity(normalizedCollegeId, 1);
+
   const hashed = await bcrypt.hash(password, 10);
   const user = await User.create({
     name,
@@ -51,7 +75,7 @@ export async function register({ name, email, password, role, collegeId, usn, se
   });
 
   const token = jwt.sign(
-    { id: user._id.toString(), role: user.role, email: user.email, name: user.name },
+    { id: user._id.toString(), role: user.role, email: user.email, name: user.name, collegeId: user.collegeId || null },
     env.JWT_SECRET,
     { expiresIn: "7d" }
   );
@@ -137,6 +161,10 @@ export async function bulkRegister(users, defaultPassword, collegeId) {
     }
   }
 
+  if (verifiedUsersToCreate.length > 0) {
+    await assertSeatCapacity(collegeId, verifiedUsersToCreate.length);
+  }
+
   const createdIds = [];
   try {
     for (const userData of verifiedUsersToCreate) {
@@ -169,7 +197,7 @@ export async function bulkRegister(users, defaultPassword, collegeId) {
     if (createdIds.length > 0) {
       await User.deleteMany({ _id: { $in: createdIds } });
     }
-    throw new HttpError(500, `Catastrophic import error: ${creationError.message}. All modifications in this batch have been rolled back.`);
+    throw new HttpError(500, "Catastrophic error during bulk import. All modifications in this batch have been rolled back.");
   }
 
   return results;
@@ -192,7 +220,7 @@ export async function login({ email, password }, auditInfo = {}) {
   }
 
   const token = jwt.sign(
-    { id: user._id.toString(), role: user.role, email: user.email, name: user.name },
+    { id: user._id.toString(), role: user.role, email: user.email, name: user.name, collegeId: user.collegeId || null },
     env.JWT_SECRET,
     { expiresIn: "7d" }
   );
@@ -211,9 +239,10 @@ export async function listUsers(query = {}) {
   const filter = {};
   
   if (search) {
+    const safeSearch = escapeRegex(search);
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
+      { name: { $regex: safeSearch, $options: 'i' } },
+      { email: { $regex: safeSearch, $options: 'i' } }
     ];
   }
   

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { getRedis } from "../config/redis.js";
 import { getChannel } from "../config/rabbit.js";
 import { getIncidentBanner } from "../services/system.service.js";
+import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 
 const router = express.Router();
 
@@ -11,7 +12,8 @@ router.get("/banner", async (req, res) => {
     const banner = await getIncidentBanner();
     res.json(banner);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Get banner error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -44,7 +46,7 @@ router.get("/", async (req, res) => {
       try {
         await redis.ping();
         health.services.redis = "connected";
-      } catch (err) {
+      } catch {
         health.services.redis = "error";
         health.status = "unhealthy";
       }
@@ -71,7 +73,7 @@ router.get("/", async (req, res) => {
         health.services.judge = "error";
         health.status = "unhealthy";
       }
-    } catch (err) {
+    } catch {
       health.services.judge = "disconnected";
       health.status = "unhealthy";
     }
@@ -79,7 +81,8 @@ router.get("/", async (req, res) => {
     const statusCode = health.status === "healthy" ? 200 : 503;
     res.status(statusCode).json(health);
   } catch (error) {
-    res.status(500).json({ status: "error", message: error.message });
+    console.error("Health check error:", error);
+    res.status(error.status || 500).json({ status: "error", message: safeErrorMessage(error) });
   }
 });
 

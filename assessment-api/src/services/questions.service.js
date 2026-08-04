@@ -1,5 +1,6 @@
 import * as questionsRepo from "../repositories/questions.repo.js";
 import { HttpError } from "../utils/httpError.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 function parsePagination(query) {
   const page = Math.max(1, Number(query.page || 1));
@@ -14,7 +15,7 @@ function buildFilter(query = {}, user = null) {
     const tags = Array.isArray(query.tag) ? query.tag : String(query.tag).split(',').map(t => t.trim()).filter(Boolean);
     if (tags.length) filter.tags = { $in: tags };
   }
-  if (query.search) filter.title = { $regex: query.search, $options: 'i' };
+  if (query.search) filter.title = { $regex: escapeRegex(query.search), $options: 'i' };
   if (query.collegeId) filter.collegeId = query.collegeId;
 
   // Visibility: faculty/admin should see their college & private authored questions
@@ -42,7 +43,7 @@ export async function listQuestions(query = {}, user = null) {
   return { questions, total, page, totalPages };
 }
 
-export async function listTags(query = {}, user = null) {
+export async function listTags(_query = {}, user = null) {
   // Build filter similar to listQuestions but only for tags
   const filter = {};
   // If faculty, limit to their college
@@ -97,7 +98,6 @@ export async function selectQuestions(payload = {}, user = null) {
     for (const v of map.values()) picked.push(v);
   };
 
-  const results = [];
   if (reqEasy > 0) {
     const docs = await questionsRepo.sample({ ...baseFilter, difficulty: 'Easy' }, reqEasy);
     addUnique(docs);
@@ -143,8 +143,11 @@ export async function updateQuestion(id, payload, user) {
   const q = await questionsRepo.findById(id);
   if (!q) throw new HttpError(404, 'Question not found');
 
-  // Only author or admin/faculty can update
-  if (String(q.author) !== String(user._id) && !(user.role === 'admin' || user.role === 'superadmin' || user.role === 'faculty')) {
+  const isOwner = String(q.author) === String(user._id);
+  const isPrivileged = user.role === 'admin' || user.role === 'superadmin';
+  const isSameCollegeFaculty = user.role === 'faculty' && String(q.collegeId) === String(user.collegeId);
+
+  if (!isOwner && !isPrivileged && !isSameCollegeFaculty) {
     throw new HttpError(403, 'Forbidden');
   }
 

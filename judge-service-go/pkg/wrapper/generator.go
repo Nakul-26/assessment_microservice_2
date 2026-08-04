@@ -1,14 +1,12 @@
 package wrapper
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"text/template"
 
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
@@ -17,17 +15,6 @@ import (
 
 // safe identifier regexp
 var validIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
-
-func escapeForJavaString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, `
-`, `\n`)
-	s = strings.ReplaceAll(s, `
-`, `\r`)
-	s = strings.ReplaceAll(s, `	`, `\t`)
-	return s
-}
 
 // GenerateWrapper generates the wrapper source for a problem + language.
 func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncName string, templateName string) (string, error) {
@@ -50,42 +37,11 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 
 	sanitizedFuncName, _ := sanitizeIdentifier(submissionFuncName)
 
-	// For Java, continue using the template engine because it has complex logic.
-	if lang.ID == "java" {
-		ctx := map[string]interface{}{
-			"FUNCTION_NAME":        sanitizedFuncName,
-			"EXPECTED_OUTPUT_TYPE": p.ReturnType,
-			"TestCases":            p.TestCases,
-			"CLASS_NAME":           "GeneratedTester",
-		}
-
-		javaTests, javaExpected, err := buildJavaTestLiterals(p)
-		if err != nil {
-			return "", fmt.Errorf("failed to build Java test literals: %w", err)
-		}
-		ctx["TESTS_LITERAL"] = javaTests
-		ctx["EXPECTED_LITERAL"] = javaExpected
-
-		testsJSONBytes, err := json.Marshal(p.TestCases)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal TestCases to JSON: %w", err)
-		}
-		ctx["TESTS_JSON_STRING"] = string(testsJSONBytes)
-
-		t, err := template.New("wrapper").Option("missingkey=error").Parse(string(b))
-		if err != nil {
-			return "", fmt.Errorf("failed to parse template %s: %w", tplPath, err)
-		}
-		var out bytes.Buffer
-		if err := t.Execute(&out, ctx); err != nil {
-			return "", fmt.Errorf("failed to execute template %s: %w", tplPath, err)
-		}
-
-		result := out.String()
-		result = strings.ReplaceAll(result, "{{COMPARE_MODE}}", "") // Assuming empty for now
-		return result, nil
-	}
-
+	// Java's normal path is JavaAdapter.PrepareFiles (pkg/central/adapters/java.go),
+	// which never calls GenerateWrapper. This function only runs for Java if the
+	// JUDGE_CENTRAL_COMPARE_JAVA killswitch disables the central adapter — in which
+	// case it falls through to the generic string-replacement path below, same as
+	// every other simple-template language.
 	if lang.ID == "cpp" {
 		tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
 		cppCall := buildCppCall(p, sanitizedFuncName)
@@ -104,6 +60,13 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 		tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
 		goCall := buildGoCall(p, sanitizedFuncName)
 		tpl = strings.ReplaceAll(tpl, "// GENERATED_CALL_MARKER", goCall)
+		return tpl, nil
+	}
+
+	if lang.ID == "rust" {
+		tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
+		rustCall := buildRustCall(p, sanitizedFuncName)
+		tpl = strings.ReplaceAll(tpl, "// GENERATED_CALL_MARKER", rustCall)
 		return tpl, nil
 	}
 
@@ -159,111 +122,6 @@ func sanitizeIdentifier(name string) (string, bool) {
 		s = s[:127]
 	}
 	return s, false
-}
-
-func buildJavaTestLiterals(p models.Problem) (string, string, error) {
-	var testsBuf strings.Builder
-	var expectedBuf strings.Builder
-
-	allIntInputs := true
-	for _, tc := range p.TestCases {
-		for _, in := range tc.Input {
-			switch v := in.(type) {
-			case []interface{}:
-				for _, e := range v {
-					_, okFloat := e.(float64)
-					_, okInt64 := e.(int64)
-					_, okInt := e.(int)
-					if !(okFloat || okInt64 || okInt) {
-						allIntInputs = false
-					}
-				}
-			default:
-				_, okFloat := in.(float64)
-				_, okInt64 := in.(int64)
-				_, okInt := in.(int)
-				if !(okFloat || okInt64 || okInt) {
-					allIntInputs = false
-				}
-			}
-		}
-	}
-
-	if allIntInputs {
-		testsBuf.WriteString("Object[][] tests = new Object[][]{\n")
-		expectedBuf.WriteString("Object[] expected = new Object[]{\n")
-
-		for _, tc := range p.TestCases {
-			testsBuf.WriteString("    new Object[]{")
-			for i, in := range tc.Input {
-				if arr, ok := in.([]interface{}); ok {
-					testsBuf.WriteString("new int[]{")
-					for j, vv := range arr {
-						num := numericToInt(vv)
-						if j > 0 {
-							testsBuf.WriteString(",")
-						}
-						testsBuf.WriteString(fmt.Sprintf("%d", num))
-					}
-					testsBuf.WriteString("}")
-				} else {
-					num := numericToInt(in)
-					testsBuf.WriteString(fmt.Sprintf("%d", num))
-				}
-				if i < len(tc.Input)-1 {
-					testsBuf.WriteString(", ")
-				}
-			}
-			testsBuf.WriteString("},\n")
-
-			switch exp := tc.Expected.(type) {
-			case float64:
-				expectedBuf.WriteString(fmt.Sprintf("    %d,\n", int64(exp)))
-			case int64:
-				expectedBuf.WriteString(fmt.Sprintf("    %d,\n", exp))
-			case int:
-				expectedBuf.WriteString(fmt.Sprintf("    %d,\n", exp))
-			case []interface{}:
-				expectedBuf.WriteString("    new int[]{")
-				for j, vv := range exp {
-					num := numericToInt(vv)
-					if j > 0 {
-						expectedBuf.WriteString(",")
-					}
-					expectedBuf.WriteString(fmt.Sprintf("%d", num))
-				}
-				expectedBuf.WriteString("},\n")
-			default:
-				jb, _ := json.Marshal(exp)
-				expectedBuf.WriteString(fmt.Sprintf("    %s,\n", string(jb)))
-			}
-		}
-
-		testsBuf.WriteString("};")
-		expectedBuf.WriteString("};")
-		return testsBuf.String(), expectedBuf.String(), nil
-	}
-
-	jb, err := json.Marshal(p.TestCases)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal tests to json: %w", err)
-	}
-	escaped := escapeForJavaString(string(jb))
-	testsLiteral := fmt.Sprintf("String testsJson = \"%s\";", escaped)
-	return testsLiteral, "", nil
-}
-
-func numericToInt(v interface{}) int64 {
-	switch n := v.(type) {
-	case float64:
-		return int64(n)
-	case int64:
-		return n
-	case int:
-		return int64(n)
-	default:
-		return 0
-	}
 }
 
 func cppType(t string) string {
@@ -614,4 +472,133 @@ func jsonAddOutput(sb *strings.Builder, returnType string, varName string) {
 	}
 }
 
+// rustJSONHelpers returns the (fromJSON, toJSON) helper function names (defined
+// statically in rust_wrapper.tpl) for a given parsed type. Only number, string,
+// boolean, array<...> and matrix<...> of those are supported for Rust — the Rust
+// judge intentionally does not support linkedlist/tree/graph types.
+func rustJSONHelpers(t types.ParsedType) (fromJSON string, toJSON string, ok bool) {
+	switch t.Kind {
+	case types.NumberKind:
+		return "json_to_i32", "i32_to_json", true
+	case types.StringKind:
+		return "json_to_string", "string_to_json", true
+	case types.BooleanKind:
+		return "json_to_bool", "bool_to_json", true
+	case types.ArrayKind:
+		if t.Element == nil {
+			return "", "", false
+		}
+		switch t.Element.Kind {
+		case types.NumberKind:
+			return "json_to_vec_i32", "vec_i32_to_json", true
+		case types.StringKind:
+			return "json_to_vec_string", "vec_string_to_json", true
+		case types.BooleanKind:
+			return "json_to_vec_bool", "vec_bool_to_json", true
+		default:
+			return "", "", false
+		}
+	case types.MatrixKind:
+		if t.Element == nil {
+			return "", "", false
+		}
+		switch t.Element.Kind {
+		case types.NumberKind:
+			return "json_to_matrix_i32", "matrix_i32_to_json", true
+		case types.StringKind:
+			return "json_to_matrix_string", "matrix_string_to_json", true
+		case types.BooleanKind:
+			return "json_to_matrix_bool", "matrix_bool_to_json", true
+		default:
+			return "", "", false
+		}
+	default:
+		return "", "", false
+	}
+}
+
+// buildRustCall generates the body that replaces // GENERATED_CALL_MARKER in
+// rust_wrapper.tpl: it converts each JSON input to its typed Rust value, calls
+// the user's Solution method, and prints the {"output": ...} judge line.
+func buildRustCall(p models.Problem, funcName string) string {
+	var sb strings.Builder
+
+	type paramInfo struct {
+		fromJSON string
+		toJSON   string
+	}
+	params := make([]paramInfo, len(p.Parameters))
+
+	unsupported := false
+	for i, param := range p.Parameters {
+		parsed, err := types.ParseType(param.Type)
+		if err != nil {
+			unsupported = true
+			break
+		}
+		fromJSON, toJSON, ok := rustJSONHelpers(parsed)
+		if !ok {
+			unsupported = true
+			break
+		}
+		params[i] = paramInfo{fromJSON: fromJSON, toJSON: toJSON}
+	}
+
+	var returnToJSON string
+	if !unsupported && p.ReturnType != "void" {
+		returnParsed, err := types.ParseType(p.ReturnType)
+		if err != nil {
+			unsupported = true
+		} else {
+			_, toJSON, ok := rustJSONHelpers(returnParsed)
+			if !ok {
+				unsupported = true
+			} else {
+				returnToJSON = toJSON
+			}
+		}
+	}
+
+	if unsupported {
+		sb.WriteString("    compile_error!(\"this problem uses a type not supported by the Rust judge (only number/string/boolean/array/matrix are supported)\");\n")
+		return sb.String()
+	}
+
+	for i, info := range params {
+		sb.WriteString(fmt.Sprintf("    let mut arg%d = %s(&inputs[%d]);\n", i, info.fromJSON, i))
+	}
+	sb.WriteString("    let sol = Solution;\n")
+
+	if p.ReturnType == "void" {
+		sb.WriteString(fmt.Sprintf("    sol.%s(", funcName))
+		for i := range params {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			if i == 0 {
+				sb.WriteString("&mut arg0")
+			} else {
+				sb.WriteString(fmt.Sprintf("arg%d", i))
+			}
+		}
+		sb.WriteString(");\n")
+		if len(params) > 0 {
+			sb.WriteString(fmt.Sprintf("    eprintln!(\"{{\\\"output\\\": {}}}\", %s(&arg0));\n", params[0].toJSON))
+		} else {
+			sb.WriteString("    eprintln!(\"{{\\\"output\\\": null}}\");\n")
+		}
+	} else {
+		sb.WriteString(fmt.Sprintf("    let output = sol.%s(", funcName))
+		for i := range params {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("arg%d", i))
+		}
+		sb.WriteString(");\n")
+		sb.WriteString(fmt.Sprintf("    eprintln!(\"{{\\\"output\\\": {}}}\", %s(&output));\n", returnToJSON))
+	}
+
+	return sb.String()
+}
 

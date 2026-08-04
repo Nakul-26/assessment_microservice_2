@@ -18,6 +18,17 @@ function loadDraft(attemptId) {
   }
 }
 
+// Computes remaining seconds against a server-derived endTimeMs using a monotonic
+// performance.now() delta rather than repeatedly sampling Date.now(). Date.now() is only
+// read once, to establish the anchor at the very start of the session (attemptStartAnchor
+// below) - after that, elapsed time is tracked via performance.now(), which is guaranteed
+// monotonic and immune to the student rolling their system clock backward mid-exam.
+function computeRemainingSeconds(endTimeMs, anchor) {
+  if (!anchor) return Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000));
+  const effectiveNow = anchor.wallNow0 + (performance.now() - anchor.perfNow0);
+  return Math.max(0, Math.floor((endTimeMs - effectiveNow) / 1000));
+}
+
 const AssessmentWorkspace = () => {
   const { attemptId } = useParams();
   const navigate = useNavigate();
@@ -34,6 +45,7 @@ const AssessmentWorkspace = () => {
   const [submissionMap, setSubmissionMap] = useState({}); // problemId -> submission object
   const intervalRefs = useRef({}); // problemId -> intervalId
   const finishStartedRef = useRef(false);
+  const timeAnchorRef = useRef(null); // { wallNow0, perfNow0 } - set once, see computeRemainingSeconds
 
   const [timeLeft, setTimeLeft] = useState(null);
   const [showConsole, setShowConsole] = useState(false);
@@ -57,6 +69,7 @@ const AssessmentWorkspace = () => {
 
   const [testCasesMap, setTestCasesMap] = useState({});
   const [activeTestCaseIdxMap, setActiveTestCaseIdxMap] = useState({});
+  const [draftConflict, setDraftConflict] = useState(false);
   const finishAttempt = useCallback(async () => {
     if (finishStartedRef.current) return;
     finishStartedRef.current = true;
@@ -122,12 +135,25 @@ const AssessmentWorkspace = () => {
         const assessmentData = (await assessments.get(assessmentId)).data;
         setAssessment(assessmentData);
 
-        const problemPromises = assessmentData.problems.map(p => api.get(`/api/problems/${p.problemId._id || p.problemId}`));
+        const problemPromises = assessmentData.problems.map(p => api.get(`/api/v1/problems/${p.problemId._id || p.problemId}`));
         const problemResponses = await Promise.all(problemPromises);
         const fullProblems = problemResponses.map(r => r.data);
         setProblems(fullProblems);
 
         const savedDraft = loadDraft(attemptId);
+        // The local draft always wins on merge below, but if the server has a save newer
+        // than this local snapshot (e.g. the student continued the attempt on another
+        // device, or the tab crashed after a server sync but before this browser's
+        // localStorage caught up), that newer server-side progress is about to be
+        // silently discarded — surface it instead of merging quietly.
+        if (
+          savedDraft.savedAt &&
+          Object.keys(savedDraft.codeMap || {}).length > 0 &&
+          attemptData.updatedAt &&
+          new Date(attemptData.updatedAt).getTime() > savedDraft.savedAt
+        ) {
+          setDraftConflict(true);
+        }
         const initialCodeMap = { ...(attemptData.codeDrafts?.codeMap || {}), ...(savedDraft.codeMap || {}) };
         const initialLangMap = { ...(attemptData.codeDrafts?.langMap || {}), ...(savedDraft.langMap || {}) };
         const initialProblemIdx = typeof savedDraft.currentProblemIndex === 'number'
@@ -164,7 +190,10 @@ const AssessmentWorkspace = () => {
         const graceMs = (attemptData.graceMinutes || 0) * 60 * 1000;
         const durationMs = (assessmentData.durationMinutes * 60 * 1000) + graceMs;
         const endTime = Math.min(startTime + durationMs, new Date(assessmentData.endTime).getTime() + graceMs);
-        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        if (!timeAnchorRef.current) {
+          timeAnchorRef.current = { wallNow0: Date.now(), perfNow0: performance.now() };
+        }
+        const remaining = computeRemainingSeconds(endTime, timeAnchorRef.current);
         setTimeLeft(remaining);
 
       } catch (err) {
@@ -178,7 +207,7 @@ const AssessmentWorkspace = () => {
 
   useEffect(() => {
     if (loading || Object.keys(codeMap).length === 0) return;
-    localStorage.setItem(`assessment-draft:${attemptId}`, JSON.stringify({ codeMap, langMap, currentProblemIndex }));
+    localStorage.setItem(`assessment-draft:${attemptId}`, JSON.stringify({ codeMap, langMap, currentProblemIndex, savedAt: Date.now() }));
 
     const timeout = setTimeout(async () => {
       try {
@@ -355,12 +384,14 @@ const AssessmentWorkspace = () => {
         const attemptData = attemptRes.data;
         setAttempt(attemptData);
 
-        // Dynamic timer updates (graceMinutes sync)
+        // Dynamic timer updates (graceMinutes sync). Reuses the anchor set on initial load
+        // (not a fresh Date.now() sample) so a clock rollback mid-session can't re-inflate
+        // the countdown at every resync - see computeRemainingSeconds.
         const startTime = new Date(attemptData.startedAt).getTime();
         const graceMs = (attemptData.graceMinutes || 0) * 60 * 1000;
         const durationMs = (assessmentData.durationMinutes * 60 * 1000) + graceMs;
         const endTime = Math.min(startTime + durationMs, new Date(assessmentData.endTime).getTime() + graceMs);
-        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        const remaining = computeRemainingSeconds(endTime, timeAnchorRef.current);
         setTimeLeft(remaining);
 
         // Check if there's any new announcement since lastSeenAnnouncementTime
@@ -442,7 +473,7 @@ const AssessmentWorkspace = () => {
 
   const checkStatus = async (submissionId, problemId) => {
     try {
-      const res = await api.get(`/api/submissions/${submissionId}`);
+      const res = await api.get(`/api/v1/submissions/${submissionId}`);
       const submission = res.data;
       setSubmissionMap(prev => ({ ...prev, [problemId]: submission }));
 
@@ -579,6 +610,59 @@ const AssessmentWorkspace = () => {
 
   return (
     <div className="ide-layout assessment-workspace fade-in">
+      {/* Draft conflict warning: this browser's saved draft is older than the server's,
+          meaning progress from another session may have been overwritten by the merge. */}
+      {draftConflict && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 99999,
+          width: '480px',
+          maxWidth: '90%',
+          background: 'var(--surface)',
+          borderRadius: 'var(--radius-md)',
+          border: '2px solid var(--warning)',
+          boxShadow: '0 10px 30px rgba(245, 158, 11, 0.25), 0 0 20px rgba(245, 158, 11, 0.1)',
+          display: 'flex',
+          gap: '16px',
+          padding: '16px 20px',
+          alignItems: 'flex-start'
+        }}>
+          <div style={{
+            background: 'rgba(245, 158, 11, 0.1)',
+            color: 'var(--warning)',
+            padding: '8px',
+            borderRadius: '50%',
+            display: 'flex',
+            flexShrink: 0
+          }}>
+            <AlertTriangle size={18} />
+          </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--warning)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Draft conflict</span>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text)', lineHeight: '1.4', fontWeight: '500' }}>
+              This browser has an older saved draft than your last synced progress on the server —
+              if you worked on this attempt elsewhere, that progress may not be reflected here.
+            </p>
+          </div>
+          <button
+            onClick={() => setDraftConflict(false)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '1.1rem',
+              padding: '0 4px',
+              lineHeight: 1
+            }}
+          >
+            &times;
+          </button>
+        </div>
+      )}
       {/* Assessment Locked Overlay */}
       {assessment?.locked && (
         <div style={{

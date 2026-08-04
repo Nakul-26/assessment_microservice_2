@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 
 # Runtime stage (small)
 FROM alpine:3.19 AS runtime
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata wget
 # Create a non-root user
 RUN addgroup -S app && adduser -S -G app app
 
@@ -33,7 +33,7 @@ USER app
 WORKDIR /app
 
 ENV APP_ENV=production
-EXPOSE 8080
+EXPOSE 8081
 
 ENTRYPOINT ["/usr/local/bin/go-judge-service"]
 

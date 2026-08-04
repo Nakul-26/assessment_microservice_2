@@ -1,8 +1,10 @@
-export function errorHandler(err, req, res, next) {
+import { safeErrorMessage } from "../utils/safeErrorMessage.js";
+
+export function errorHandler(err, req, res, _next) {
   console.error(err);
 
   const status = err.status || 500;
-  const message = err.message || "Internal Server Error";
+  const message = safeErrorMessage(err);
 
   if (err.status && err.body) {
     const responseBody = typeof err.body === 'object' ? { ...err.body } : { body: err.body };

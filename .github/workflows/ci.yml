@@ -55,6 +55,7 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm test
+      - run: npm run lint
 
   frontend-unit:
     name: Frontend Unit Tests
@@ -69,6 +70,39 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm test
+      - run: npm run lint
+
+  security-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: assessment-api
+        working-directory: ./assessment-api
+        run: |
+          npm ci
+          npm audit --audit-level=high
+      - name: frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run audit:ci
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        # Pinned to gitleaks-action v3.0.0's commit SHA, not the mutable tag.
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   e2e:
     name: Playwright E2E Tests

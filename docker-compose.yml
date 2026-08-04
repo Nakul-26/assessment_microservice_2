@@ -47,8 +47,8 @@ services:
   # 4. Backend Service: Assessment API
   assessment-api:
     build:
-      context: ./assessment-api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: assessment-api/Dockerfile
     container_name: codespace_assessment_api
     command: npm run dev
     ports:
@@ -177,6 +177,46 @@ services:
     image: judge-go-env
     pull_policy: build
     container_name: judge_go_env
+    networks:
+      - assessment-net
+
+  judge-rust:
+    build:
+      context: ./judge-service-go/environments/rust
+      dockerfile: Dockerfile
+    image: judge-rust-env
+    pull_policy: build
+    container_name: judge_rust_env
+    networks:
+      - assessment-net
+
+  judge-ruby:
+    build:
+      context: ./judge-service-go/environments/ruby
+      dockerfile: Dockerfile
+    image: judge-ruby-env
+    pull_policy: build
+    container_name: judge_ruby_env
+    networks:
+      - assessment-net
+
+  judge-php:
+    build:
+      context: ./judge-service-go/environments/php
+      dockerfile: Dockerfile
+    image: judge-php-env
+    pull_policy: build
+    container_name: judge_php_env
+    networks:
+      - assessment-net
+
+  judge-kotlin:
+    build:
+      context: ./judge-service-go/environments/kotlin
+      dockerfile: Dockerfile
+    image: judge-kotlin-env
+    pull_policy: build
+    container_name: judge_kotlin_env
     networks:
       - assessment-net
 

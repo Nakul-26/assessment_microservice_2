@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle } from 'lucide-react';
+import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle, CreditCard } from 'lucide-react';
 import ProblemListPage from './pages/ProblemListPage';
 import AssessmentListPage from './pages/AssessmentListPage';
 import AssessmentManagementPage from './pages/AssessmentManagementPage';
@@ -19,10 +19,12 @@ import ProblemPage from './pages/ProblemPage';
 import AddProblemPage from './pages/AddProblemPage';
 import EditProblemPage from './pages/EditProblemPage';
 import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
+import BillingPage from './pages/BillingPage';
 import MySubmissionsPage from './pages/MySubmissionsPage';
 import SystemDashboardPage from './pages/SystemDashboardPage';
 import UserManagementPage from './pages/UserManagementPage';
-import { setAuthToken, system } from './api';
+import { auth, system } from './api';
 
 function AppContent() {
     const navigate = useNavigate();
@@ -97,16 +99,22 @@ function AppContent() {
         };
     }, [user, navigate]);
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
+    const handleLogout = async () => {
+        // The auth cookie is httpOnly - only the backend can clear it.
+        try {
+            await auth.logout();
+        } catch {
+            // Proceed with client-side cleanup regardless - worst case the cookie
+            // outlives this session until it naturally expires.
+        }
         localStorage.removeItem('user');
-        setAuthToken(null);
         setUser(null);
         window.dispatchEvent(new Event('auth-change'));
         navigate('/login');
     };
 
     const canCreateProblem = user && (user.role === 'admin' || user.role === 'faculty' || user.role === 'superadmin');
+    const isCollegeAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
 
     const NavLink = ({ to, children, icon: Icon }) => {
         const isActive = location.pathname === to;
@@ -180,6 +188,9 @@ function AppContent() {
                         {canCreateProblem && (
                             <NavLink to="/admin/system" icon={Database}>System</NavLink>
                         )}
+                        {isCollegeAdmin && (
+                            <NavLink to="/admin/billing" icon={CreditCard}>Billing</NavLink>
+                        )}
                         {canCreateProblem && (
                             <NavLink to="/add-problem" icon={PlusCircle}>Add Problem</NavLink>
                         )}
@@ -202,9 +213,9 @@ function AppContent() {
             <Routes>
                 <Route path="/" element={<ProblemListPage user={user} />} />
                 <Route path="/assessments" element={user ? <AssessmentListPage user={user} /> : <Navigate to="/login" replace />} />
-                <Route path="/questions" element={user ? <QuestionBankPage user={user} /> : <Navigate to="/login" replace />} />
-                <Route path="/questions/add" element={user ? <AddQuestionPage user={user} /> : <Navigate to="/login" replace />} />
-                <Route path="/questions/:id/edit" element={user ? <EditQuestionPage user={user} /> : <Navigate to="/login" replace />} />
+                <Route path="/questions" element={<RequireStaff><QuestionBankPage user={user} /></RequireStaff>} />
+                <Route path="/questions/add" element={<RequireStaff><AddQuestionPage user={user} /></RequireStaff>} />
+                <Route path="/questions/:id/edit" element={<RequireStaff><EditQuestionPage user={user} /></RequireStaff>} />
                 <Route path="/assessments/:id" element={<RequireAuth><AssessmentDetailsPage user={user} /></RequireAuth>} />
                 <Route path="/assessment-attempt/:attemptId" element={<RequireStudent><AssessmentWorkspace user={user} /></RequireStudent>} />
                 <Route path="/assessment-attempt/:attemptId/result" element={<RequireStudent><AssessmentResultPage user={user} /></RequireStudent>} />
@@ -218,11 +229,13 @@ function AppContent() {
                 <Route path="/admin/assessment-attempt/:attemptId" element={<RequireStaff><AssessmentAttemptDetailPage /></RequireStaff>} />
                 <Route path="/admin/system" element={<RequireStaff><SystemDashboardPage /></RequireStaff>} />
                 <Route path="/admin/users" element={<RequireStaff><UserManagementPage /></RequireStaff>} />
+                <Route path="/admin/billing" element={<RequireRole roles={['admin', 'superadmin']}><BillingPage user={user} /></RequireRole>} />
 
                 <Route path="/problems/:_id" element={<ProblemPage user={user} />} />
                 <Route path="/add-problem" element={<RequireStaff><AddProblemPage /></RequireStaff>} />
                 <Route path="/problems/:_id/edit" element={<RequireStaff><EditProblemPage /></RequireStaff>} />
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
                 <Route path="/my-submissions" element={<RequireAuth><MySubmissionsPage /></RequireAuth>} />
             </Routes>
         </>

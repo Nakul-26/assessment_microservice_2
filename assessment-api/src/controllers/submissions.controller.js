@@ -2,19 +2,19 @@ import * as submissionsService from "../services/submissions.service.js";
 
 export async function submitSolution(req, res, next) {
   const { problemId, code, language, assessmentId, attemptId } = req.body;
-  const userId = req.user && req.user._id; // User model uses _id, but middleware might set .id
-  const finalUserId = userId || (req.user && req.user.id);
-  
+  const userId = req.user && req.user._id;
+
   try {
-    if (!finalUserId) {
+    if (!userId) {
       return res.status(401).json({ msg: "Unauthorized" });
     }
 
-    const result = await submissionsService.submitSolution({ 
-      problemId, 
-      code, 
-      language, 
-      userId: finalUserId,
+    const result = await submissionsService.submitSolution({
+      problemId,
+      code,
+      language,
+      userId,
+      collegeId: req.user && req.user.collegeId,
       assessmentId,
       attemptId,
       requestId: req.id
@@ -33,11 +33,12 @@ export async function submitSolution(req, res, next) {
 
 export async function getSubmissionById(req, res, next) {
   const { _id } = req.params;
-  const userId = req.user && req.user.id;
+  const userId = req.user && req.user._id;
   const role = req.user && req.user.role;
+  const collegeId = req.user && req.user.collegeId;
 
   try {
-    const result = await submissionsService.getSubmissionById(_id, { userId, role });
+    const result = await submissionsService.getSubmissionById(_id, { userId, role, collegeId });
     if (result.notFound) {
       return res.status(404).json({ msg: "Submission not found" });
     }
@@ -51,7 +52,7 @@ export async function getSubmissionById(req, res, next) {
 }
 
 export async function getMySubmissions(req, res, next) {
-  const userId = req.user && req.user.id;
+  const userId = req.user && req.user._id;
 
   try {
     if (!userId) {
@@ -66,7 +67,7 @@ export async function getMySubmissions(req, res, next) {
 }
 
 export async function getMyAnalytics(req, res, next) {
-  const userId = req.user && req.user.id;
+  const userId = req.user && req.user._id;
 
   try {
     if (!userId) {

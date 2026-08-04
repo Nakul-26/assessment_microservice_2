@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Users, Upload, CheckCircle, AlertCircle, Trash2, UserPlus, FileText, Download, Search, Key, Shield, User as UserIcon, Filter, FileSpreadsheet } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { readWorkbookRows, downloadAoaAsExcel, downloadRowsAsExcel } from '../utils/excel';
 import { admin } from '../api';
 
 const UserManagementPage = () => {
@@ -123,15 +123,10 @@ const UserManagementPage = () => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
-        const bstr = evt.target.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        
-        const rawJson = XLSX.utils.sheet_to_json(ws);
-        
+        const rawJson = await readWorkbookRows(evt.target.result);
+
         const mapped = rawJson.map((row, idx) => {
           const rowKeys = Object.keys(row);
           const getVal = (possibleHeaders) => {
@@ -161,7 +156,7 @@ const UserManagementPage = () => {
         setError('Failed to parse file: ' + err.message);
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const handleBulkImport = async (e) => {
@@ -228,15 +223,12 @@ const UserManagementPage = () => {
       ["1BY23CS001", "John Doe", "john@college.edu", "A"],
       ["1BY23CS002", "Jane Smith", "jane@college.edu", "A"]
     ];
-    const ws = XLSX.utils.aoa_to_sheet(sampleData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Students");
-    XLSX.writeFile(wb, "student_import_template.xlsx");
+    downloadAoaAsExcel("student_import_template.xlsx", "Students", sampleData);
   };
 
   const downloadCredentials = () => {
     if (!results || !results.created || results.created.length === 0) return;
-    
+
     const data = results.created.map(u => ({
       USN: u.usn || '',
       Name: u.name || '',
@@ -245,10 +237,7 @@ const UserManagementPage = () => {
       Password: u.password || ''
     }));
 
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Credentials");
-    XLSX.writeFile(wb, "student_credentials.xlsx");
+    downloadRowsAsExcel("student_credentials.xlsx", "Credentials", data);
   };
 
   const exportAllUsers = () => {
@@ -260,10 +249,7 @@ const UserManagementPage = () => {
       Section: u.section || '',
       Role: u.role
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Users");
-    XLSX.writeFile(wb, "platform_users.xlsx");
+    downloadRowsAsExcel("platform_users.xlsx", "Users", data);
   };
 
   return (

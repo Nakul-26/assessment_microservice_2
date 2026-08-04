@@ -74,4 +74,57 @@ describe('Auth API', () => {
     expect(res.status).toBe(401);
     expect(res.body.message || res.body.msg).toBeDefined();
   });
+
+  describe('cookie-based auth (H8)', () => {
+    it('authenticates via the httpOnly cookie alone, with no Authorization header', async () => {
+      const uniqueEmail = `cookie-auth-${Date.now()}@example.com`;
+      await authService.register({ ...testUser, email: uniqueEmail });
+
+      const agent = request.agent(app); // persists Set-Cookie across requests
+      const loginRes = await agent.post('/api/auth/login').send({ email: uniqueEmail, password: testUser.password });
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.headers['set-cookie']).toBeDefined();
+
+      // No Authorization header set here - only the agent's cookie jar authenticates this.
+      const res = await agent.get('/api/v1/billing/status');
+      expect(res.status).toBe(200);
+    });
+
+    it('logout clears the cookie so a subsequent protected request 401s', async () => {
+      const uniqueEmail = `cookie-logout-${Date.now()}@example.com`;
+      await authService.register({ ...testUser, email: uniqueEmail });
+
+      const agent = request.agent(app);
+      await agent.post('/api/auth/login').send({ email: uniqueEmail, password: testUser.password });
+
+      const logoutRes = await agent.post('/api/auth/logout').set('X-Requested-With', 'XMLHttpRequest');
+      expect(logoutRes.status).toBe(200);
+
+      const res = await agent.get('/api/v1/billing/status');
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a cookie-authenticated state-changing request with no X-Requested-With header', async () => {
+      const uniqueEmail = `csrf-check-${Date.now()}@example.com`;
+      await authService.register({ ...testUser, email: uniqueEmail });
+
+      const agent = request.agent(app);
+      await agent.post('/api/auth/login').send({ email: uniqueEmail, password: testUser.password });
+
+      // Logout is otherwise unauthenticated, but the CSRF-lite check runs ahead of any
+      // route logic for state-changing methods carrying the auth cookie.
+      const res = await agent.post('/api/auth/logout');
+      expect(res.status).toBe(403);
+    });
+
+    it('still authenticates via a bare Authorization header with no cookie (integration/service callers)', async () => {
+      const uniqueEmail = `bearer-only-${Date.now()}@example.com`;
+      const registered = await authService.register({ ...testUser, email: uniqueEmail });
+
+      const res = await request(app)
+        .get('/api/v1/billing/status')
+        .set('Authorization', `Bearer ${registered.token}`);
+      expect(res.status).toBe(200);
+    });
+  });
 });

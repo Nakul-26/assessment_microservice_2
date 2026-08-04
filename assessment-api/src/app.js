@@ -1,9 +1,11 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import routes from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { env } from "./config/env.js";
 
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger.js";
@@ -52,13 +54,55 @@ app.use((req, res, next) => {
   next();
 });
 
+// H8: explicit allowlist rather than origin:"*" (which browsers reject outright when
+// combined with credentials:true - the combination previously here was silently a no-op
+// for any credentialed/cookie request). No hardcoded production origin: there is no
+// deployed frontend yet, so CORS_ALLOWED_ORIGINS stays unset until one exists - see
+// docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md, H8.
+const allowedOrigins = env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean);
+if (process.env.NODE_ENV !== "production") {
+  allowedOrigins.push("http://localhost:5173", "http://127.0.0.1:5173");
+}
+
 const corsOptions = {
-  origin: "*",
+  origin(origin, callback) {
+    // No Origin header at all = same-origin or a non-browser client (curl, server-to-server
+    // integrations) - always allowed, since CORS is a browser-enforced concept only.
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
   optionsSuccessStatus: 200,
   credentials: true
 };
 
 app.use(cors(corsOptions));
+app.use(cookieParser());
+// H8 CSRF mitigation: SameSite=Lax on the auth cookie is the primary defense (blocks it
+// being sent on cross-site subrequests). This is a lightweight second layer - a bare
+// cross-site HTML form can't set custom headers, but axios/fetch from our own frontend
+// can, so state-changing requests authenticated via the cookie must carry this header.
+// Bearer-header callers (integration/judge0 partners) never hit this, since they don't
+// send the cookie in the first place.
+const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+app.use((req, res, next) => {
+  if (
+    STATE_CHANGING_METHODS.has(req.method) &&
+    req.cookies?.token &&
+    req.headers["x-requested-with"] !== "XMLHttpRequest"
+  ) {
+    return res.status(403).json({ message: "Missing required request header" });
+  }
+  next();
+});
+// The Judge0 shim carries base64 source+stdin payloads that can comfortably exceed
+// the platform's normal 100kb request cap; give it its own, larger limit before the
+// general parser below runs (body-parser skips re-parsing an already-consumed body).
+app.use("/api/judge0", express.json({ limit: "2mb" }));
+app.use("/api/v1/judge0", express.json({ limit: "2mb" }));
+// Stripe webhook signature verification needs the raw, unparsed body — mounted ahead
+// of the general express.json() below for the same reason as the judge0 shim above.
+app.use("/api/billing/webhook", express.raw({ type: "application/json" }));
+app.use("/api/v1/billing/webhook", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
@@ -73,6 +117,9 @@ app.use("/api/v1", generalLimiter);
 app.use("/api/v1", routes);
 
 // Backward Compatibility / Default Prefix
+app.use("/api/auth", authLimiter);
+app.use("/api/integration", integrationLimiter);
+app.use("/api", generalLimiter);
 app.use("/api", routes);
 
 app.get("/", (req, res) => {

@@ -1,37 +1,26 @@
-# Use a modern Node version that supports Vite and Gemini
 FROM node:20-alpine
 
-# 1. Set the working directory (created as root)
 WORKDIR /usr/src/app
 
-# Copy the entrypoint script and make it executable (must be done by root)
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Copy contracts directory so schema validation works in production
+COPY contracts /usr/src/contracts
+COPY contracts ./contracts
 
-# Install Gemini CLI and nodemon globally
-RUN npm install -g @google/gemini-cli nodemon && chmod +x $(which nodemon)
-
-# 2. Grant ownership of the workdir to the node user for the build steps
-RUN chown -R node:node /usr/src/app
-
-# 3. Switch to the non-root 'node' user
+# Switch to non-root user workspace
+RUN chown -R node:node /usr/src/app /usr/src/contracts
 USER node
 
-# 4. Copy and install dependencies as the 'node' user
 # --chown is required here: COPY ignores the active USER and copies as root
 # by default, which made `npm install` (running as node) fail with EACCES on
 # package-lock.json on a build with no prior cached layers to mask it.
-COPY --chown=node:node package*.json ./
-RUN npm install
+# devDependencies are kept in (no --omit=dev) because docker-compose.yml's dev
+# service runs `npm run dev` (nodemon), which is a devDependency.
+COPY --chown=node:node assessment-api/package*.json ./
+RUN npm ci
 
-# 5. Copy the rest of the application files
-COPY --chown=node:node . .
+# Copy application source
+COPY --chown=node:node assessment-api/ .
 
-# 6. Ensure local nodemon binary is executable (prevents “Permission denied”)
-RUN chmod +x ./node_modules/.bin/nodemon || true
+EXPOSE 5000
 
-EXPOSE 3000
-
-# 7. Use the entrypoint and run the dev server
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["npm", "run", "dev"]
+CMD ["node", "src/server.js"]

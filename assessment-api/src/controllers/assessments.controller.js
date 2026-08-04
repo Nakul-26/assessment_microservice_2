@@ -37,7 +37,7 @@ export async function getMyAssessmentAttempt(req, res, next) {
 
 export async function createAssessment(req, res, next) {
   try {
-    const assessment = await assessmentsService.createAssessment(req.body, req.user._id);
+    const assessment = await assessmentsService.createAssessment(req.body, req.user);
     res.status(201).json(assessment);
   } catch (err) {
     next(err);
@@ -46,8 +46,7 @@ export async function createAssessment(req, res, next) {
 
 export async function updateAssessment(req, res, next) {
   try {
-    const assessment = await assessmentsService.updateAssessment(req.params._id, req.body);
-    if (!assessment) return res.status(404).json({ msg: "Assessment not found" });
+    const assessment = await assessmentsService.updateAssessment(req.params._id, req.body, req.user);
     res.json(assessment);
   } catch (err) {
     next(err);
@@ -56,7 +55,7 @@ export async function updateAssessment(req, res, next) {
 
 export async function deleteAssessment(req, res, next) {
   try {
-    await assessmentsService.deleteAssessment(req.params._id);
+    await assessmentsService.deleteAssessment(req.params._id, req.user);
     res.json({ msg: "Assessment deleted" });
   } catch (err) {
     next(err);
@@ -65,7 +64,7 @@ export async function deleteAssessment(req, res, next) {
 
 export async function startAssessment(req, res, next) {
   try {
-    const attempt = await assessmentsService.startAssessment(req.params._id, req.user._id, getAuditInfo(req));
+    const attempt = await assessmentsService.startAssessment(req.params._id, req.user, getAuditInfo(req));
     res.json(attempt);
   } catch (err) {
     next(err);
@@ -130,7 +129,7 @@ export async function getAttemptSubmissions(req, res, next) {
 
 export async function getAnnouncements(req, res, next) {
   try {
-    const announcements = await assessmentsService.getAnnouncements(req.params._id);
+    const announcements = await assessmentsService.getAnnouncements(req.params._id, req.user);
     res.json(announcements);
   } catch (err) {
     next(err);
@@ -139,7 +138,7 @@ export async function getAnnouncements(req, res, next) {
 
 export async function createAnnouncement(req, res, next) {
   try {
-    const announcement = await assessmentsService.createAnnouncement(req.params._id, req.body.message);
+    const announcement = await assessmentsService.createAnnouncement(req.params._id, req.body.message, req.user);
     res.status(201).json(announcement);
   } catch (err) {
     next(err);

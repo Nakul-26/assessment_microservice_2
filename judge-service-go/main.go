@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -257,6 +259,261 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 	return filesToCopy, compileCmd, runCmd, nil
 }
 
+// rawRunFilesAndCommands returns the file(s) to write, compile command, and run command
+// for RAW (unwrapped) execution of a single source file against stdin — no function
+// wrapper, no test harness, no structural comparison. The run command for each language
+// is intentionally the SAME command the wrapper-based flow already uses (languages.go),
+// so the sandbox images don't need to change; only the source is written straight into
+// the file that command already expects, instead of being merged into a wrapper.
+//
+// Java is the one case that constrains the student's code: RunCmd always invokes class
+// "Main", so raw Java submissions must declare `public class Main`. C# raw execution
+// compiles the student's Program.cs as the project's sole entry point — unlike the
+// wrapper flow, which forces StartupObject=Harness to make the fixed test-harness class
+// win over the (also present) Solution class, raw mode has no Harness in the mix, so no
+// override is needed.
+func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir string) ([]string, []string, []string, error) {
+	switch lang.ID {
+	case "python":
+		if err := workspace.WriteFile(tempDir, "wrapper.py", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.py"}, nil, lang.RunCmd, nil
+	case "javascript":
+		if err := workspace.WriteFile(tempDir, "wrapper.js", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.js"}, nil, lang.RunCmd, nil
+	case "typescript":
+		if err := workspace.WriteFile(tempDir, "wrapper.ts", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.ts"}, nil, lang.RunCmd, nil
+	case "c":
+		if err := workspace.WriteFile(tempDir, "main.c", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"main.c"}, lang.CompileCmd, lang.RunCmd, nil
+	case "cpp":
+		if err := workspace.WriteFile(tempDir, "main.cpp", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"main.cpp"}, lang.CompileCmd, lang.RunCmd, nil
+	case "go":
+		if err := workspace.WriteFile(tempDir, "main.go", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		// lang.CompileCmd is already offline-safe (see languages.go) — no need for a
+		// second copy of the compile command here.
+		return []string{"main.go"}, lang.CompileCmd, lang.RunCmd, nil
+	case "java":
+		if err := workspace.WriteFile(tempDir, "Main.java", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		compileCmd := []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"}
+		return []string{"Main.java"}, compileCmd, lang.RunCmd, nil
+	case "ruby":
+		if err := workspace.WriteFile(tempDir, "wrapper.rb", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.rb"}, nil, lang.RunCmd, nil
+	case "php":
+		if err := workspace.WriteFile(tempDir, "wrapper.php", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"wrapper.php"}, nil, lang.RunCmd, nil
+	case "rust":
+		if err := workspace.WriteFile(tempDir, "main.rs", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		return []string{"main.rs"}, lang.CompileCmd, lang.RunCmd, nil
+	case "kotlin":
+		// Unlike the wrapper-based flow (Solution.kt + Harness.kt), raw execution
+		// compiles a single self-contained file the student's own `fun main()` lives in.
+		if err := workspace.WriteFile(tempDir, "Main.kt", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		compileCmd := []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"}
+		runCmd := []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"}
+		return []string{"Main.kt"}, compileCmd, runCmd, nil
+	case "csharp":
+		if err := workspace.WriteFile(tempDir, "Program.cs", []byte(code), 0644); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
+		}
+		// The image pre-warms a "dotnet new console" project at /home/judge/app so the
+		// first real build isn't paying SDK/restore cold-start cost; app.csproj is
+		// copied in fresh per run, same as the wrapper adapter does.
+		compileCmd := []string{"sh", "-c", "cp /home/judge/app/app.csproj . && dotnet build -c Release -o out"}
+		runCmd := []string{"dotnet", "out/app.dll"}
+		return []string{"Program.cs"}, compileCmd, runCmd, nil
+	default:
+		return nil, nil, nil, fmt.Errorf("raw execution is not supported for language %q yet", lang.ID)
+	}
+}
+
+type rawRunRequest struct {
+	Language      string `json:"language"`
+	Code          string `json:"code"`
+	Stdin         string `json:"stdin"`
+	TimeoutMs     int64  `json:"timeoutMs"`
+	MemoryLimitMb int64  `json:"memoryLimitMb"`
+}
+
+type rawRunResponse struct {
+	Stdout        string `json:"stdout"`
+	Stderr        string `json:"stderr"`
+	CompileOutput string `json:"compileOutput,omitempty"`
+	ExitCode      int    `json:"exitCode"`
+	TimedOut      bool   `json:"timedOut"`
+	OomKilled     bool   `json:"oomKilled"`
+	CompileError  bool   `json:"compileError"`
+	TimeMs        int64  `json:"timeMs"`
+	Error         string `json:"error,omitempty"`
+}
+
+// handleRawRun serves POST /raw-run: compile (if needed) and execute a single raw source
+// file against a single stdin payload, with no problem/test-case/wrapper concept at all.
+// This is the primitive the public Judge0-compatible shim in assessment-api calls into —
+// judge-service-go itself is never exposed publicly (see docker-compose.prod.yml), so this
+// endpoint intentionally has no auth of its own; the network boundary is the control.
+func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req rawRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		lang := languages.GetLanguage(req.Language)
+		if lang == nil {
+			http.Error(w, "Unsupported language", http.StatusBadRequest)
+			return
+		}
+
+		// Clamp caller-supplied limits defensively — this endpoint trusts assessment-api,
+		// but a bug or misconfiguration there shouldn't be able to pin a container forever
+		// or starve the sandbox's own memory ceiling.
+		timeoutMs := req.TimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = int64(defaultSandboxTimeout / time.Millisecond)
+		}
+		if timeoutMs > 60000 {
+			timeoutMs = 60000
+		}
+		timeout := time.Duration(timeoutMs) * time.Millisecond
+
+		memoryLimitMb := req.MemoryLimitMb
+		if memoryLimitMb <= 0 {
+			memoryLimitMb = 256
+		}
+		if memoryLimitMb > 2048 {
+			memoryLimitMb = 2048
+		}
+
+		acquireCtx, acquireCancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer acquireCancel()
+
+		pooledContainer := containerPool.Acquire(acquireCtx, lang.ID)
+		if pooledContainer == nil {
+			http.Error(w, "No available containers (request timed out waiting for resource)", http.StatusServiceUnavailable)
+			return
+		}
+		discardContainer := false
+		discardReason := ""
+		defer func() {
+			finishWithContainer(containerPool, pooledContainer, discardContainer, discardReason)
+		}()
+
+		reqID := fmt.Sprintf("raw-%d", time.Now().UnixNano())
+		subWorkspace, err := workspace.NewSubmissionWorkspace(pooledContainer.WorkDir, reqID)
+		if err != nil {
+			http.Error(w, "Failed to create submission workspace", http.StatusInternalServerError)
+			return
+		}
+		defer func() {
+			if cleanupErr := workspace.CleanupSubmissionWorkspace(subWorkspace.HostPath); cleanupErr != nil {
+				discardContainer = true
+				discardReason = "raw-run workspace cleanup failed"
+				slog.Error("Failed to cleanup raw-run workspace", "path", subWorkspace.HostPath, "error", cleanupErr)
+			}
+		}()
+
+		filesToCopy, compileCmd, runCmd, err := rawRunFilesAndCommands(lang, req.Code, subWorkspace.HostPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Must comfortably exceed RunRawWithStdin's own budget (120s fixed compile +
+		// up to 2x the run timeout) or this context cancels the request before the
+		// compile step's dedicated allowance even runs out.
+		execCtx, cancel := context.WithTimeout(r.Context(), 150*time.Second+2*timeout)
+		defer cancel()
+
+		start := time.Now()
+		stdout, stderr, compileOutput, exitCode, execErr := ex.RunRawWithStdin(
+			execCtx, pooledContainer.ID, filesToCopy, subWorkspace.HostPath, subWorkspace.ContainerPath,
+			compileCmd, runCmd, timeout, memoryLimitMb, []byte(req.Stdin),
+		)
+		elapsedMs := time.Since(start).Milliseconds()
+
+		resp := rawRunResponse{
+			Stdout:        stdout,
+			Stderr:        stderr,
+			CompileOutput: compileOutput,
+			ExitCode:      exitCode,
+			TimeMs:        elapsedMs,
+		}
+
+		if execErr != nil {
+			var execErrObj *executor.ExecutionError
+			if errors.As(execErr, &execErrObj) {
+				switch execErrObj.Type {
+				case executor.ErrCompilationFailed:
+					resp.CompileError = true
+					if resp.CompileOutput == "" {
+						resp.CompileOutput = execErrObj.Message
+					}
+				case executor.ErrTimeLimitExceeded:
+					resp.TimedOut = true
+				case executor.ErrMemoryLimitExceeded:
+					resp.OomKilled = true
+					// Echo back the requested limit so the caller's own
+					// "memory >= limit => reclassify as MLE" heuristic fires
+					// even though we don't meter actual peak usage here.
+				default:
+					resp.Error = execErr.Error()
+				}
+			} else {
+				resp.Error = execErr.Error()
+			}
+
+			if discard, reason := shouldDiscardContainer(execErr, nil, false); discard {
+				discardContainer = true
+				discardReason = reason
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// elapsedMsFromResult extracts the total execution time already computed onto the result
+// (by the central runner, or by the wrapper's own JSON output) for reuse as the usage
+// metering signal, without timing the submission a second time.
+func elapsedMsFromResult(result *models.SubmissionResult) int64 {
+	if result == nil {
+		return 0
+	}
+	return result.ElapsedMs
+}
+
 // processAndStoreResults processes the executor output and updates the database and cache.
 func fallbackResultForExecutionFailure(executionPath string, execErr error, stdout string) *models.SubmissionResult {
 	result := models.NewSubmissionResult()
@@ -444,7 +701,7 @@ func finishWithContainer(containerPool *pool.ContainerPool, container *pool.Pool
 	containerPool.Release(container)
 }
 
-func processAndStoreResults(ctx context.Context, executionPath string, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, problemsCollection *mongo.Collection, redisClient *redis.Client) {
+func processAndStoreResults(ctx context.Context, executionPath string, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, problemsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client) {
 	var result models.SubmissionResult
 	submissionStatus := models.StatusError
 	submissionOutput := stderr
@@ -530,6 +787,26 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 		// Continue without full data if necessary
 	}
 
+	// Usage metering (H4): one event per executed submission, carrying the same
+	// elapsedMs already computed above for the result payload. Best-effort — a
+	// metering write must never fail or delay the submission's own result.
+	usageEvent := bson.M{
+		"submissionId": submissionObjID,
+		"userId":       originalSubmission.UserID,
+		"language":     submissionMsg.Language,
+		"status":       submissionStatus,
+		"elapsedMs":    elapsedMsFromResult(submissionTestResult),
+		"createdAt":    time.Now(),
+	}
+	if submissionMsg.CollegeID != "" {
+		if collegeObjID, err := primitive.ObjectIDFromHex(submissionMsg.CollegeID); err == nil {
+			usageEvent["collegeId"] = collegeObjID
+		}
+	}
+	if _, err := usageEventsCollection.InsertOne(ctx, usageEvent); err != nil {
+		slog.Error("Failed to record usage event", "submissionId", submissionMsg.SubmissionID, "error", err)
+	}
+
 	updatedSubmission := models.Submission{
 		ID:         submissionObjID,
 		ProblemID:  problemObjID,
@@ -552,8 +829,29 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 	}
 }
 
+// markSubmissionExecutionFailed records a terminal failure for a submission that never
+// reached execution (e.g. it exhausted its retry budget waiting for a pool container),
+// so it surfaces to the user instead of silently vanishing from the queue.
+func markSubmissionExecutionFailed(ctx context.Context, submissionsCollection *mongo.Collection, submissionMsg models.SubmissionMessage, reason string) {
+	submissionObjID, err := primitive.ObjectIDFromHex(submissionMsg.SubmissionID)
+	if err != nil {
+		slog.Error("Invalid SubmissionID while marking submission failed", "submissionId", submissionMsg.SubmissionID, "error", err)
+		return
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"status":    models.StatusError,
+			"output":    reason,
+			"updatedAt": time.Now(),
+		},
+	}
+	if _, err := submissionsCollection.UpdateByID(ctx, submissionObjID, update); err != nil {
+		slog.Error("Failed to mark submission as failed", "submissionId", submissionMsg.SubmissionID, "error", err)
+	}
+}
+
 // processSubmission is the main coordinator for handling a submission message.
-func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
+func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
 
 	submissionMsg, err := validateAndDecodeSubmission(d)
@@ -601,12 +899,29 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 
 	pooledContainer := containerPool.Acquire(acquireCtx, lang.ID)
 	if pooledContainer == nil {
-		slog.Warn("No available containers for language, routing to retry queue", "submissionId", submissionMsg.SubmissionID, "language", lang.ID)
+		if submissionMsg.RetryCount >= models.MaxSubmissionRetries {
+			slog.Error("Submission exceeded max retries waiting for a container; marking as failed",
+				"submissionId", submissionMsg.SubmissionID, "language", lang.ID, "retryCount", submissionMsg.RetryCount)
+			markSubmissionExecutionFailed(ctx, submissionsCollection, submissionMsg,
+				fmt.Sprintf("No available %s execution containers after %d retries", lang.ID, submissionMsg.RetryCount))
+			d.Ack(false)
+			return
+		}
+
+		submissionMsg.RetryCount++
+		retryBody, err := json.Marshal(submissionMsg)
+		if err != nil {
+			slog.Error("Failed to marshal submission for retry, using original body", "submissionId", submissionMsg.SubmissionID, "error", err)
+			retryBody = d.Body
+		}
+
+		slog.Warn("No available containers for language, routing to retry queue",
+			"submissionId", submissionMsg.SubmissionID, "language", lang.ID, "retryCount", submissionMsg.RetryCount)
 
 		// To avoid hot-requeue loop, we publish to a retry queue with TTL
-		err := ch.PublishWithContext(ctx, "", retryQueueName, false, false, amqp.Publishing{
+		err = ch.PublishWithContext(ctx, "", retryQueueName, false, false, amqp.Publishing{
 			ContentType:  d.ContentType,
-			Body:         d.Body,
+			Body:         retryBody,
 			DeliveryMode: amqp.Persistent,
 		})
 		if err != nil {
@@ -656,7 +971,7 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 			d.Nack(false, false)
 			return
 		}
-		processAndStoreResults(ctx, models.ExecutionPathCentral, string(resultBytes), "", nil, submissionMsg, submissionsCollection, problemsCollection, redisClient)
+		processAndStoreResults(ctx, models.ExecutionPathCentral, string(resultBytes), "", nil, submissionMsg, submissionsCollection, problemsCollection, usageEventsCollection, redisClient)
 
 		d.Ack(false)
 		return
@@ -704,7 +1019,7 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 		discardReason = reason
 	}
 
-	processAndStoreResults(ctx, models.ExecutionPathLegacy, stdout, stderr, execErr, submissionMsg, submissionsCollection, problemsCollection, redisClient)
+	processAndStoreResults(ctx, models.ExecutionPathLegacy, stdout, stderr, execErr, submissionMsg, submissionsCollection, problemsCollection, usageEventsCollection, redisClient)
 
 	d.Ack(false)
 }
@@ -736,7 +1051,7 @@ func isCentralCompareEnabled(language string) bool {
 			return isTruthyEnv(raw)
 		}
 		return true
-	case "go", "csharp", "typescript":
+	case "go", "csharp", "typescript", "rust", "ruby", "php", "kotlin":
 		return true
 	default:
 		return false
@@ -896,6 +1211,8 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		json.NewEncoder(w).Encode(result)
 	})
 
+	mux.HandleFunc("/raw-run", handleRawRun(containerPool, executor))
+
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,
@@ -939,7 +1256,29 @@ func main() {
 
 	// Load environment variables or use defaults
 	rabbitmqURL := os.Getenv("RABBITMQ_URL")
-	if rabbitmqURL == "" {
+	if rabbitmqPass := os.Getenv("RABBITMQ_PASS"); rabbitmqPass != "" {
+		// Build the URI ourselves and let net/url percent-encode the credentials —
+		// passwords with reserved characters (%, $, ^, @, ...) break naive
+		// "amqp://user:pass@host" string interpolation (net/url: invalid userinfo).
+		rabbitmqHost := os.Getenv("RABBITMQ_HOST")
+		if rabbitmqHost == "" {
+			rabbitmqHost = "rabbitmq"
+		}
+		rabbitmqPort := os.Getenv("RABBITMQ_PORT")
+		if rabbitmqPort == "" {
+			rabbitmqPort = "5672"
+		}
+		rabbitmqUser := os.Getenv("RABBITMQ_USER")
+		if rabbitmqUser == "" {
+			rabbitmqUser = "user"
+		}
+		u := &url.URL{
+			Scheme: "amqp",
+			User:   url.UserPassword(rabbitmqUser, rabbitmqPass),
+			Host:   net.JoinHostPort(rabbitmqHost, rabbitmqPort),
+		}
+		rabbitmqURL = u.String()
+	} else if rabbitmqURL == "" {
 		rabbitmqURL = defaultRabbitMQURL
 	}
 	submissionQueueName := os.Getenv("SUBMISSION_QUEUE")
@@ -957,7 +1296,8 @@ func main() {
 
 	poolSize := defaultPoolSizePerLang
 	if val := os.Getenv("DEFAULT_POOL_SIZE"); val != "" {
-		if i, err := fmt.Sscanf(val, "%d", &poolSize); err == nil && i > 0 {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			poolSize = parsed
 			slog.Info("Using configured pool size", "size", poolSize)
 		}
 	}
@@ -965,7 +1305,8 @@ func main() {
 	// Max executions per pooled container before eviction
 	maxExecs := 100
 	if val := os.Getenv("MAX_EXECUTIONS_PER_CONTAINER"); val != "" {
-		if i, err := fmt.Sscanf(val, "%d", &maxExecs); err == nil && i > 0 {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			maxExecs = parsed
 			slog.Info("Using configured max executions per container", "maxExecs", maxExecs)
 		}
 	}
@@ -1028,6 +1369,10 @@ func main() {
 
 	problemsCollection := mongoClient.Database("assessment_db").Collection("problems")
 	submissionsCollection := mongoClient.Database("assessment_db").Collection("submissions")
+	// Collection name matches the default Mongoose pluralization of the "UsageEvent"
+	// model in assessment-api/models/UsageEvent.mjs, so both sides agree on it without
+	// either one owning the write path exclusively.
+	usageEventsCollection := mongoClient.Database("assessment_db").Collection("usageevents")
 
 	// Start Health/Stats/Run Server
 	healthPort := os.Getenv("HEALTH_PORT")
@@ -1036,21 +1381,30 @@ func main() {
 	}
 	startHealthServer(ctx, containerPool, healthPort, problemsCollection, executor)
 
-	// Normalize Redis address
-	redisAddr := redisURI
-	if strings.HasPrefix(redisURI, "redis://") {
-		if u, err := url.Parse(redisURI); err == nil {
-			redisAddr = u.Host
-		} else {
-			redisAddr = strings.TrimPrefix(redisURI, "redis://")
+	// Initialize Redis Client
+	redisPass := os.Getenv("REDIS_PASS")
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "redis:6379"
+	}
+	var redisOpt *redis.Options
+	if redisPass != "" {
+		redisOpt = &redis.Options{
+			Addr:     redisHost,
+			Password: redisPass,
 		}
+	} else if strings.HasPrefix(redisURI, "redis://") {
+		var parseErr error
+		redisOpt, parseErr = redis.ParseURL(redisURI)
+		if parseErr != nil {
+			slog.Warn("Failed to parse REDIS_URI with ParseURL, falling back", "error", parseErr)
+			redisOpt = &redis.Options{Addr: strings.TrimPrefix(redisURI, "redis://")}
+		}
+	} else {
+		redisOpt = &redis.Options{Addr: redisURI}
 	}
 
-	// Initialize Redis Client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
-		DB:   0, // use default DB
-	})
+	redisClient := redis.NewClient(redisOpt)
 	_, err = redisClient.Ping(ctx).Result()
 	failOnError(err, "Failed to connect to Redis")
 
@@ -1130,7 +1484,7 @@ func main() {
 			defer workerWg.Done()
 			slog.Debug("Worker started", "workerId", workerID)
 			for d := range msgs {
-				processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, redisClient, executor, containerPool)
+				processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
 			}
 			slog.Debug("Worker stopped", "workerId", workerID)
 		}(i)

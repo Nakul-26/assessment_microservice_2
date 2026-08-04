@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Code2, AlertCircle, LogIn } from "lucide-react";
-import api, { setAuthToken } from "../api";
+import api from "../api";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -16,11 +16,9 @@ const LoginPage = () => {
     setIsLoading(true);
 
     try {
-      const res = await api.post("/api/auth/login", { email, password });
-      const { token, user } = res.data;
-      localStorage.setItem("token", token);
+      const res = await api.post("/api/v1/auth/login", { email, password });
+      const { user } = res.data;
       localStorage.setItem("user", JSON.stringify(user));
-      setAuthToken(token);
       window.dispatchEvent(new Event("auth-change"));
       navigate("/");
     } catch (err) {
@@ -95,6 +93,12 @@ const LoginPage = () => {
             <span style={{ color: 'var(--primary)', fontWeight: '600' }}>
               contact your faculty or administrator.
             </span>
+          </p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '16px' }}>
+            New college?{" "}
+            <Link to="/signup" style={{ color: 'var(--primary)', fontWeight: '600' }}>
+              Create a workspace
+            </Link>
           </p>
         </div>
       </div>

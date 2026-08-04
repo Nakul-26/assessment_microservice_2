@@ -10,6 +10,7 @@ import { verifyToken, authorizeRoles } from "../middleware/auth.mjs";
 import * as authService from "../services/auth.service.js";
 import * as auditService from "../services/audit.service.js";
 import * as systemService from "../services/system.service.js";
+import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 
 const router = express.Router();
 
@@ -18,7 +19,8 @@ router.get("/audit-logs", verifyToken, authorizeRoles("admin", "superadmin", "fa
     const logs = await auditService.listLogs(req.query);
     res.json(logs);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Audit logs error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -27,7 +29,8 @@ router.get("/users", verifyToken, authorizeRoles("admin", "superadmin", "faculty
     const results = await authService.listUsers(req.query);
     res.json(results);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("List users error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -44,7 +47,8 @@ router.post("/users/:userId/reset-password", verifyToken, authorizeRoles("admin"
     const result = await authService.resetUserPassword(req.params.userId, newPassword, req.user, auditInfo);
     res.json(result);
   } catch (error) {
-    res.status(error.status || 500).json({ error: error.message });
+    console.error("Reset password error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -69,7 +73,10 @@ router.post("/bulk-import-students", verifyToken, authorizeRoles("admin", "super
     res.json(results);
   } catch (error) {
     console.error("Bulk import error:", error);
-    res.status(500).json({ error: error.message });
+    if (error.status && error.body) {
+      return res.status(error.status).json(error.body);
+    }
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -138,7 +145,7 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
       try {
         await redis.ping();
         health.redis = "connected";
-      } catch (err) {
+      } catch {
         health.redis = "error";
       }
     }
@@ -167,7 +174,7 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
     });
   } catch (error) {
     console.error("Admin stats error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -183,14 +190,15 @@ router.post("/rejudge/submission/:submissionId", verifyToken, authorizeRoles("ad
     };
     await auditService.logEvent({
       event: "REJUDGE_SUBMISSION",
-      userId: req.user.id,
+      userId: req.user._id,
       details: { submissionId: req.params.submissionId, problemId: result.problemId },
       ...auditInfo
     });
 
     res.json({ msg: "Rejudge scheduled successfully", submission: result });
   } catch (error) {
-    res.status(error.status || 500).json({ error: error.message });
+    console.error("Rejudge submission error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -205,14 +213,15 @@ router.post("/rejudge/problem/:problemId", verifyToken, authorizeRoles("admin", 
     };
     await auditService.logEvent({
       event: "REJUDGE_PROBLEM",
-      userId: req.user.id,
+      userId: req.user._id,
       details: { problemId: req.params.problemId, assessmentId },
       ...auditInfo
     });
 
     res.json({ msg: `Rejudge scheduled successfully for ${result.count} submissions`, count: result.count });
   } catch (error) {
-    res.status(error.status || 500).json({ error: error.message });
+    console.error("Rejudge problem error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -226,14 +235,15 @@ router.post("/rejudge/assessment/:assessmentId", verifyToken, authorizeRoles("ad
     };
     await auditService.logEvent({
       event: "REJUDGE_ASSESSMENT",
-      userId: req.user.id,
+      userId: req.user._id,
       details: { assessmentId: req.params.assessmentId },
       ...auditInfo
     });
 
     res.json({ msg: `Rejudge scheduled successfully for ${result.count} submissions`, count: result.count });
   } catch (error) {
-    res.status(error.status || 500).json({ error: error.message });
+    console.error("Rejudge assessment error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -245,7 +255,7 @@ router.post("/banner", verifyToken, authorizeRoles("admin", "superadmin", "facul
     // Log the event
     await auditService.logEvent({
       event: "UPDATE_INCIDENT_BANNER",
-      userId: req.user.id,
+      userId: req.user._id,
       details: { active, message, type },
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
       userAgent: req.headers['user-agent']
@@ -253,7 +263,8 @@ router.post("/banner", verifyToken, authorizeRoles("admin", "superadmin", "facul
 
     res.json({ msg: "Incident banner updated successfully", banner });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Banner update error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -264,7 +275,7 @@ router.get("/backup", verifyToken, authorizeRoles("admin", "superadmin"), async 
     // Log the event
     await auditService.logEvent({
       event: "DATABASE_BACKUP",
-      userId: req.user.id,
+      userId: req.user._id,
       details: {},
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
       userAgent: req.headers['user-agent']
@@ -274,7 +285,8 @@ router.get("/backup", verifyToken, authorizeRoles("admin", "superadmin"), async 
     res.setHeader("Content-Disposition", `attachment; filename=leetcode_clone_backup_${Date.now()}.json`);
     res.json(data);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Database backup error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -285,7 +297,7 @@ router.post("/restore", verifyToken, authorizeRoles("admin", "superadmin"), asyn
     // Log the event
     await auditService.logEvent({
       event: "DATABASE_RESTORE",
-      userId: req.user.id,
+      userId: req.user._id,
       details: { restoredCollections: results },
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
       userAgent: req.headers['user-agent']
@@ -293,7 +305,8 @@ router.post("/restore", verifyToken, authorizeRoles("admin", "superadmin"), asyn
 
     res.json({ msg: "Database restored successfully", results });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Database restore error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
 

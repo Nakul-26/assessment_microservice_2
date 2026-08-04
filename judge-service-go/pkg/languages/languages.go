@@ -69,11 +69,16 @@ var Languages = map[string]*Language{
 		WrapperTemplate: "cpp_single_wrapper.tpl",
 	},
 	"go": {
-		ID:              "go",
-		Name:            "Go",
-		FileExt:         ".go",
-		Image:           "judge-go-env",
-		CompileCmd:      []string{"sh", "-c", "go mod init solution 2>/dev/null || true; go build -o main ."},
+		ID:      "go",
+		Name:    "Go",
+		FileExt: ".go",
+		Image:   "judge-go-env",
+		// With network disabled, an unconfigured `go build` can still try to reach the
+		// module proxy/checksum db (or check for a toolchain switch) and hang for the
+		// full sandbox timeout instead of failing fast — force everything local/offline
+		// explicitly instead of relying on image env (see main.go's rawRunFilesAndCommands,
+		// where this was first found and fixed for the raw-run path).
+		CompileCmd:      []string{"sh", "-c", "export GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GO111MODULE=on GOTOOLCHAIN=local; go mod init solution 2>/dev/null || true; go build -o main ."},
 		RunCmd:          []string{"./main"},
 		WrapperTemplate: "go_wrapper.tpl",
 	},
@@ -81,9 +86,44 @@ var Languages = map[string]*Language{
 		ID:              "typescript",
 		Name:            "TypeScript",
 		FileExt:         ".ts",
-		Image:           "judge-js-env", // We'll add ts-node to this image
-		RunCmd:          []string{"ts-node", "/app/wrapper.ts"},
+		Image:           "judge-js-env",
+		RunCmd:          []string{"tsx", "/app/wrapper.ts"},
 		WrapperTemplate: "ts_wrapper.tpl",
+	},
+	"rust": {
+		ID:              "rust",
+		Name:            "Rust",
+		FileExt:         ".rs",
+		Image:           "judge-rust-env",
+		CompileCmd:      []string{"rustc", "--edition", "2021", "-O", "-o", "/app/main", "/app/main.rs"},
+		RunCmd:          []string{"/app/main"},
+		WrapperTemplate: "rust_wrapper.tpl",
+	},
+	"ruby": {
+		ID:              "ruby",
+		Name:            "Ruby",
+		FileExt:         ".rb",
+		Image:           "judge-ruby-env",
+		RunCmd:          []string{"ruby", "/app/wrapper.rb"},
+		WrapperTemplate: "ruby_single_wrapper.tpl",
+	},
+	"php": {
+		ID:              "php",
+		Name:            "PHP",
+		FileExt:         ".php",
+		Image:           "judge-php-env",
+		RunCmd:          []string{"php", "/app/wrapper.php"},
+		WrapperTemplate: "php_wrapper.tpl",
+	},
+	"kotlin": {
+		ID:   "kotlin",
+		Name: "Kotlin",
+		// User submissions are written to Solution.kt and wrapper to Harness.kt
+		FileExt:         ".kt",
+		Image:           "judge-kotlin-env",
+		CompileCmd:      []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Solution.kt", "/app/Harness.kt"},
+		RunCmd:          []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "HarnessKt"},
+		WrapperTemplate: "kotlin_wrapper.tpl",
 	},
 }
 

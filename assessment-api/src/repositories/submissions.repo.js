@@ -5,8 +5,11 @@ export async function create(data) {
   return submission.save();
 }
 
-export async function findById(id) {
-  return Submission.findById(id);
+// collegeId: pass a value to scope the lookup to that college (404s instead of leaking
+// existence across tenants); pass null/undefined to skip scoping (superadmin/cross-tenant use).
+export async function findById(id, collegeId) {
+  const filter = collegeId ? { _id: id, collegeId } : { _id: id };
+  return Submission.findOne(filter);
 }
 
 export async function findByUserId(userId, options = {}) {

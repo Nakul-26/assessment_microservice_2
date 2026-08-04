@@ -2,7 +2,7 @@ import * as problemsService from "../services/problems.service.js";
 
 export async function listProblems(req, res, next) {
   try {
-    const problems = await problemsService.listProblems(req.query || {});
+    const problems = await problemsService.listProblems(req.query || {}, req.user || null);
     res.json(problems);
   } catch (err) {
     next(err);

@@ -1,7 +1,7 @@
 import './mocks.js';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
-import { afterAll, beforeAll, beforeEach, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { initRedis } from '../config/redis.js';
 import { initRabbit } from '../config/rabbit.js';
 

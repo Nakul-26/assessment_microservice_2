@@ -84,7 +84,6 @@ async function generateDemoData() {
 
     // 5. Create Attempts and Submissions for each student
     for (const student of students) {
-      let attemptStatus = 'Submitted';
       let score = 0;
       let tabSwitchCount = 0;
       let copyCount = 0;

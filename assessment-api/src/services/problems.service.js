@@ -3,6 +3,8 @@ import Submission from "../../models/Submission.mjs";
 import { HttpError } from "../utils/httpError.js";
 import { validateProblemDefinition } from "./preview.service.js";
 import { env } from "../config/env.js";
+import { collegeAllowsPremium } from "./billing.service.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 function isPrivilegedRole(role) {
   return role === "admin" || role === "faculty" || role === "superadmin";
@@ -239,16 +241,29 @@ function buildProblemFilter(query) {
   }
 
   if (query.search) {
-    filter.title = { $regex: query.search, $options: 'i' };
+    filter.title = { $regex: escapeRegex(query.search), $options: 'i' };
   }
   
   return filter;
 }
 
-export async function listProblems(query = {}) {
+export async function listProblems(query = {}, user = null) {
   const filter = buildProblemFilter(query);
   const options = parsePagination(query);
-  return problemsRepo.findAllWithoutTests(filter, options);
+  const problems = await problemsRepo.findAllWithoutTests(filter, options);
+
+  // Phase 2: isPremium was previously set on Problem but never consumed anywhere —
+  // this is what wires it to the college's plan. Privileged roles always see
+  // everything (they're managing the content, not consuming it as a student would).
+  if (isPrivilegedRole(user && user.role)) {
+    return problems.map((p) => ({ ...(typeof p.toObject === "function" ? p.toObject() : p), locked: false }));
+  }
+
+  const allowsPremium = await collegeAllowsPremium(user && user.collegeId);
+  return problems.map((p) => {
+    const problem = typeof p.toObject === "function" ? p.toObject() : { ...p };
+    return { ...problem, locked: Boolean(problem.isPremium) && !allowsPremium };
+  });
 }
 
 export async function getProblemById(id, user = null) {
@@ -256,10 +271,12 @@ export async function getProblemById(id, user = null) {
   if (!problem) return null;
 
   if (isPrivilegedRole(user && user.role)) {
-    return problem;
+    return { ...(typeof problem.toObject === "function" ? problem.toObject() : problem), locked: false };
   }
 
-  return sanitizeProblemForStudent(problem);
+  const sanitized = sanitizeProblemForStudent(problem);
+  const allowsPremium = await collegeAllowsPremium(user && user.collegeId);
+  return { ...sanitized, locked: Boolean(problem.isPremium) && !allowsPremium };
 }
 
 export async function getProblemStats(problemId) {
@@ -279,7 +296,7 @@ export async function getProblemStats(problemId) {
       try {
         const parsed = JSON.parse(s.output);
         elapsed = parsed.elapsedMs ?? parsed.totalTimeMs;
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
     
     if (elapsed !== null && typeof elapsed === 'number') {
@@ -380,7 +397,7 @@ export async function runProblem(id, payload) {
       for (const tc of problem.testCases) {
         try {
           fillMap.set(JSON.stringify(tc.inputs), tc.expected);
-        } catch (e) {
+        } catch {
           // ignore non-serializable
         }
       }
@@ -392,7 +409,7 @@ export async function runProblem(id, payload) {
           if (fillMap.has(key)) {
             t.expected = fillMap.get(key);
           }
-        } catch (e) {
+        } catch {
           // ignore
         }
         return t;
@@ -400,7 +417,6 @@ export async function runProblem(id, payload) {
     }
   } catch (e) {
     // best-effort only; do not fail the run if merging fails
-    // eslint-disable-next-line no-console
     console.warn('Failed to merge expected values into custom tests:', e && e.message ? e.message : e);
   }
 
@@ -439,6 +455,7 @@ export async function runProblem(id, payload) {
     return judgeResult;
   } catch (err) {
     if (err instanceof HttpError) throw err;
-    throw new HttpError(500, "Failed to connect to judge service: " + err.message);
+    console.error("Failed to connect to judge service:", err);
+    throw new HttpError(500, "Failed to connect to judge service");
   }
 }

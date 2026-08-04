@@ -29,6 +29,10 @@ var AdapterRegistry = map[string]LanguageAdapter{
 	"c":          CAdapter{},
 	"csharp":     CSharpAdapter{},
 	"typescript": TypeScriptAdapter{},
+	"rust":       RustAdapter{},
+	"ruby":       RubyAdapter{},
+	"php":        PHPAdapter{},
+	"kotlin":     KotlinAdapter{},
 }
 
 func GetAdapter(language string) (LanguageAdapter, bool) {

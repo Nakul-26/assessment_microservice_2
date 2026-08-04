@@ -13,7 +13,12 @@ import (
 
 const (
 	containerWorkspaceRoot = "/app"
-	RootDir                = "/tmp/judge-workspaces"
+	// Renamed from "/tmp/judge-workspaces": that path was created on the host back when
+	// this process ran as root (pre-non-root hardening) and is still root-owned there,
+	// so the now-non-root "app" user can't write into it — deploying this rename lets
+	// the app create (and own) a fresh directory instead of needing host/root access to
+	// chown or delete the stale one.
+	RootDir = "/tmp/judge-exec-workspaces"
 )
 
 var workspaceNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)

@@ -457,12 +457,14 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create temp dir for container: %w", err)
 	}
-	// Container images typically run as a non-root "judge" user. The temp dir
-	// created by MkdirTemp is 0700, which blocks bind-mounted file access.
+	// hostWorkDir is used purely as a host-side staging area: submission source files
+	// are written here, then read back and uploaded into the container via the Docker
+	// exec/UploadToContainer API (see executor.copyFilesToContainer) — it is never
+	// bind-mounted into the container. Container images typically run as a non-root
+	// "judge" user, so keep this permissive for the judge-service process's own use.
 	if err := os.Chmod(hostWorkDir, 0777); err != nil {
 		return "", "", fmt.Errorf("failed to chmod container workdir %s: %w", hostWorkDir, err)
 	}
-	workspaceBind := fmt.Sprintf("%s:/app", hostWorkDir)
 
 	hostCfg := &docker.HostConfig{
 		NetworkMode:    "none",
@@ -474,10 +476,13 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 		MemorySwap:     memorySwap,
 		CPUQuota:       100000, // Increase to 1.0 CPU
 		PidsLimit:      &pidsLimit,
-		Binds:          []string{workspaceBind},
 		Init:           true,
 		Tmpfs: map[string]string{
 			"/tmp": "rw,noexec,nosuid,nodev,size=512m",
+			// /app is tmpfs (not a host bind mount) so a submission that writes a huge
+			// file there fills bounded, memory-backed space instead of real host disk.
+			// Unlike /tmp, this must stay executable — compiled binaries run from here.
+			"/app": "rw,nosuid,nodev,size=512m",
 		},
 	}
 

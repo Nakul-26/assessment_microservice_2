@@ -45,9 +45,18 @@ function formatAjvErrors(errors = []) {
 }
 
 function loadSchema(schemaName) {
-  const schemaPath = path.resolve(`../contracts/${schemaName}.schema.json`);
-  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
-  return schema;
+  const possiblePaths = [
+    path.resolve(`../contracts/${schemaName}.schema.json`),
+    path.resolve(`./contracts/${schemaName}.schema.json`),
+    `/usr/src/contracts/${schemaName}.schema.json`,
+    `/usr/src/app/contracts/${schemaName}.schema.json`
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  }
+  throw new Error(`Schema ${schemaName} not found in any expected location`);
 }
 
 export function validate(schemaName) {

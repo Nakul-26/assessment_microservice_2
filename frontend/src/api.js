@@ -12,61 +12,35 @@ function resolveBaseUrl() {
   return raw;
 }
 
+// H8: auth now travels via an httpOnly cookie set by the backend (login/register/signup),
+// not a JS-readable token in localStorage/an Authorization header - withCredentials sends
+// it automatically. The X-Requested-With header is the backend's lightweight CSRF check
+// (a bare cross-site HTML form can't set custom headers, but this axios instance always does).
 const api = axios.create({
-  baseURL: resolveBaseUrl()
+  baseURL: resolveBaseUrl(),
+  withCredentials: true,
+  headers: {
+    "X-Requested-With": "XMLHttpRequest"
+  }
 });
-
-export function setAuthToken(token) {
-  if (token) {
-    api.defaults.headers.common.Authorization = `Bearer ${token}`;
-  } else {
-    delete api.defaults.headers.common.Authorization;
-  }
-}
-
-export function isTokenExpired(token) {
-  if (!token) return true;
-  try {
-    const base64Url = token.split(".")[1];
-    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = decodeURIComponent(
-      window.atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    const { exp } = JSON.parse(jsonPayload);
-    return Date.now() >= exp * 1000;
-  } catch {
-    return true;
-  }
-}
 
 // Add a response interceptor to handle 401 errors
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // If we get a 401, clear the local storage and notify the app
-      localStorage.removeItem("token");
+      // If we get a 401, clear the cached user and notify the app. The auth cookie itself
+      // is httpOnly - only the backend can clear it (see auth.logout below).
       localStorage.removeItem("user");
-      setAuthToken(null);
       window.dispatchEvent(new Event("auth-change"));
     }
     return Promise.reject(error);
   }
 );
 
-const storedToken = localStorage.getItem("token");
-if (storedToken) {
-  if (isTokenExpired(storedToken)) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setAuthToken(null);
-  } else {
-    setAuthToken(storedToken);
-  }
-}
+export const auth = {
+  logout: () => api.post("/api/v1/auth/logout")
+};
 
 export const assessments = {
   list: (params) => api.get("/api/v1/assessments", { params }),
@@ -125,6 +99,14 @@ export const questions = {
   create: (data) => api.post("/api/v1/questions", data),
   update: (id, data) => api.put(`/api/v1/questions/${id}`, data),
   delete: (id) => api.delete(`/api/v1/questions/${id}`)
+};
+
+export const billing = {
+  getStatus: () => api.get("/api/v1/billing/status"),
+  createCheckout: (planId) => api.post("/api/v1/billing/checkout", { planId }),
+  createPortal: () => api.post("/api/v1/billing/portal"),
+  listColleges: () => api.get("/api/v1/billing/colleges"),
+  setCollegePlan: (collegeId, data) => api.patch(`/api/v1/billing/colleges/${collegeId}/plan`, data)
 };
 
 export default api;

@@ -4,6 +4,8 @@ import * as attemptsRepo from "../repositories/assessmentAttempts.repo.js";
 import * as assessmentsRepo from "../repositories/assessments.repo.js";
 import { publishSubmissionMessage } from "./evaluation.service.js";
 import { getCacheJSON, setCacheJSON } from "./cache.service.js";
+import { checkCollegeSubmissionQuota } from "./quota.service.js";
+import { checkPlanUsageLimit, collegeAllowsPremium } from "./billing.service.js";
 import { HttpError } from "../utils/httpError.js";
 
 function validateSubmissionMessage(msg) {
@@ -54,9 +56,15 @@ function buildJudgeMessageBody({ submissionId, problem, language, code, requestI
   return body;
 }
 
-function canAccessSubmission(submission, { userId, role }) {
+function canAccessSubmission(submission, { userId, role, collegeId }) {
   if (!submission || !userId) return false;
-  if (role === "admin" || role === "faculty" || role === "superadmin") return true;
+  if (role === "superadmin") return true;
+  if (role === "admin" || role === "faculty") {
+    // Legacy submissions from before collegeId was stamped stay visible during the
+    // migration window; once backfilled this always requires a same-college match.
+    if (!submission.collegeId) return true;
+    return String(submission.collegeId) === String(collegeId);
+  }
   return String(submission.userId) === String(userId);
 }
 
@@ -133,7 +141,7 @@ function parseOutputJSON(output) {
   if (!output || typeof output !== "string") return null;
   try {
     return JSON.parse(output);
-  } catch (err) {
+  } catch {
     return null;
   }
 }
@@ -206,12 +214,39 @@ export function sanitizeSubmissionForStudent(submission, problem) {
   return normalized;
 }
 
-export async function submitSolution({ problemId, code, language, userId, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null }) {
+export async function submitSolution({ problemId, code, language, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
+
+  if (collegeId) {
+    // Checked before any submission record is created so a rejected request never
+    // leaves behind an orphan "Pending" submission that nothing will process.
+    const quota = await checkCollegeSubmissionQuota(collegeId);
+    if (!quota.allowed) {
+      throw new HttpError(429, "Submission quota exceeded", {
+        msg: `Submission quota exceeded for this college (${quota.limit} per ${quota.windowSeconds}s). Please try again shortly.`
+      });
+    }
+
+    // Phase 2 billing hard cap — separate from the fairness quota above (that one
+    // throttles bursts within a short window; this one enforces the plan's monthly
+    // submission allowance).
+    const planUsage = await checkPlanUsageLimit(collegeId);
+    if (!planUsage.allowed) {
+      throw new HttpError(402, "Plan usage limit exceeded", {
+        msg: `This college has used its plan's monthly submission allowance (${planUsage.limit}). Upgrade to continue.`
+      });
+    }
+  }
 
   const problem = await problemsRepo.findById(problemId);
   if (!problem) {
     return { notFound: true };
+  }
+
+  if (problem.isPremium && collegeId && !(await collegeAllowsPremium(collegeId))) {
+    throw new HttpError(402, "Upgrade required for premium problems", {
+      msg: "This problem is only available on a paid plan."
+    });
   }
 
   const submissionData = {
@@ -222,6 +257,7 @@ export async function submitSolution({ problemId, code, language, userId, assess
     status: "Pending"
   };
 
+  if (collegeId) submissionData.collegeId = collegeId;
   if (assessmentId) submissionData.assessmentId = assessmentId;
   if (attemptId) submissionData.attemptId = attemptId;
   if (externalStudentId) submissionData.externalStudentId = externalStudentId;
@@ -256,6 +292,10 @@ export async function submitSolution({ problemId, code, language, userId, assess
     code,
     requestId
   });
+
+  // Carried through so judge-service-go can tag the usage_events record it writes
+  // per submission (H4 metering) without a round-trip lookup of userId -> collegeId.
+  if (collegeId) messageBody.collegeId = String(collegeId);
 
   if (!validateSubmissionMessage(messageBody)) {
     throw new HttpError(500, "Invalid submission message", { msg: "Internal server error: invalid submission message" });
@@ -312,8 +352,6 @@ export async function getMySubmissions(userId, query = {}) {
   return { submissions };
 }
 
-import mongoose from 'mongoose';
-
 export async function getMyAnalytics(userId) {
   const submissions = await submissionsRepo.findByUserId(userId, { limit: 1000 }); // Max 1000 for realistic analytics
   
@@ -337,10 +375,9 @@ export async function getMyAnalytics(userId) {
     // Using the populated problemId object if available
     if (sub.problemId && typeof sub.problemId === 'object' && sub.problemId.tags) {
       const difficulty = sub.problemId.difficulty || 'Medium';
-      
-      // We only count difficulty for solved problems to get "average solved difficulty"
-      // But we can also track attempted difficulty. Let's just track solved for simplicity.
-      
+      // We only count difficulty for solved problems to get "average solved difficulty".
+      if (isSuccess) problemDifficultyStats[difficulty]++;
+
       const tags = sub.problemId.tags || [];
       tags.forEach(tag => {
         if (!tagStats[tag]) {

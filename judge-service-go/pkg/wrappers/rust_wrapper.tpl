@@ -1,0 +1,414 @@
+// wrapper injected by judge (single test execution for central comparator mode)
+//
+// Note: only number / string / boolean / array<...> / matrix<...> parameter and
+// return types are supported for Rust. linkedlist/tree/graph are not supported.
+
+#[derive(Debug, Clone)]
+enum Json {
+    Null,
+    Bool(bool),
+    Num(f64),
+    Str(String),
+    Arr(Vec<Json>),
+    Obj(Vec<(String, Json)>),
+}
+
+struct JsonParser<'a> {
+    chars: std::iter::Peekable<std::str::Chars<'a>>,
+}
+
+impl<'a> JsonParser<'a> {
+    fn new(s: &'a str) -> Self {
+        JsonParser {
+            chars: s.chars().peekable(),
+        }
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(&c) = self.chars.peek() {
+            if c.is_whitespace() {
+                self.chars.next();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn expect(&mut self, c: char) -> Result<(), String> {
+        match self.chars.next() {
+            Some(x) if x == c => Ok(()),
+            other => Err(format!("expected '{}', got {:?}", c, other)),
+        }
+    }
+
+    fn parse_value(&mut self) -> Result<Json, String> {
+        self.skip_ws();
+        match self.chars.peek() {
+            Some('{') => self.parse_object(),
+            Some('[') => self.parse_array(),
+            Some('"') => self.parse_string().map(Json::Str),
+            Some('t') | Some('f') => self.parse_bool(),
+            Some('n') => self.parse_null(),
+            Some(c) if c.is_ascii_digit() || *c == '-' => self.parse_number(),
+            other => Err(format!("unexpected token: {:?}", other)),
+        }
+    }
+
+    fn parse_object(&mut self) -> Result<Json, String> {
+        self.expect('{')?;
+        let mut entries = Vec::new();
+        self.skip_ws();
+        if self.chars.peek() == Some(&'}') {
+            self.chars.next();
+            return Ok(Json::Obj(entries));
+        }
+        loop {
+            self.skip_ws();
+            let key = self.parse_string()?;
+            self.skip_ws();
+            self.expect(':')?;
+            let val = self.parse_value()?;
+            entries.push((key, val));
+            self.skip_ws();
+            match self.chars.next() {
+                Some(',') => continue,
+                Some('}') => break,
+                other => return Err(format!("expected ',' or '}}', got {:?}", other)),
+            }
+        }
+        Ok(Json::Obj(entries))
+    }
+
+    fn parse_array(&mut self) -> Result<Json, String> {
+        self.expect('[')?;
+        let mut items = Vec::new();
+        self.skip_ws();
+        if self.chars.peek() == Some(&']') {
+            self.chars.next();
+            return Ok(Json::Arr(items));
+        }
+        loop {
+            let val = self.parse_value()?;
+            items.push(val);
+            self.skip_ws();
+            match self.chars.next() {
+                Some(',') => continue,
+                Some(']') => break,
+                other => return Err(format!("expected ',' or ']', got {:?}", other)),
+            }
+        }
+        Ok(Json::Arr(items))
+    }
+
+    fn parse_string(&mut self) -> Result<String, String> {
+        self.expect('"')?;
+        let mut s = String::new();
+        loop {
+            match self.chars.next() {
+                Some('"') => break,
+                Some('\\') => match self.chars.next() {
+                    Some('"') => s.push('"'),
+                    Some('\\') => s.push('\\'),
+                    Some('/') => s.push('/'),
+                    Some('n') => s.push('\n'),
+                    Some('t') => s.push('\t'),
+                    Some('r') => s.push('\r'),
+                    Some('b') => s.push('\u{0008}'),
+                    Some('f') => s.push('\u{000C}'),
+                    Some('u') => {
+                        let mut hex = String::new();
+                        for _ in 0..4 {
+                            if let Some(c) = self.chars.next() {
+                                hex.push(c);
+                            }
+                        }
+                        if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                            if let Some(ch) = char::from_u32(code) {
+                                s.push(ch);
+                            }
+                        }
+                    }
+                    other => return Err(format!("invalid escape: {:?}", other)),
+                },
+                Some(c) => s.push(c),
+                None => return Err("unterminated string".to_string()),
+            }
+        }
+        Ok(s)
+    }
+
+    fn parse_bool(&mut self) -> Result<Json, String> {
+        let lookahead: String = self.chars.clone().take(5).collect();
+        if lookahead.starts_with("true") {
+            for _ in 0..4 {
+                self.chars.next();
+            }
+            Ok(Json::Bool(true))
+        } else if lookahead.starts_with("false") {
+            for _ in 0..5 {
+                self.chars.next();
+            }
+            Ok(Json::Bool(false))
+        } else {
+            Err("invalid literal".to_string())
+        }
+    }
+
+    fn parse_null(&mut self) -> Result<Json, String> {
+        let lookahead: String = self.chars.clone().take(4).collect();
+        if lookahead.starts_with("null") {
+            for _ in 0..4 {
+                self.chars.next();
+            }
+            Ok(Json::Null)
+        } else {
+            Err("invalid literal".to_string())
+        }
+    }
+
+    fn parse_number(&mut self) -> Result<Json, String> {
+        let mut s = String::new();
+        if self.chars.peek() == Some(&'-') {
+            s.push('-');
+            self.chars.next();
+        }
+        while let Some(&c) = self.chars.peek() {
+            if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-' {
+                s.push(c);
+                self.chars.next();
+            } else {
+                break;
+            }
+        }
+        s.parse::<f64>().map(Json::Num).map_err(|e| e.to_string())
+    }
+}
+
+fn parse_json(s: &str) -> Result<Json, String> {
+    let mut p = JsonParser::new(s);
+    p.parse_value()
+}
+
+fn get_inputs(payload: &Json) -> Vec<Json> {
+    if let Json::Obj(entries) = payload {
+        for (k, v) in entries {
+            if k == "inputs" {
+                if let Json::Arr(a) = v {
+                    return a.clone();
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn json_to_i32(v: &Json) -> i32 {
+    match v {
+        Json::Num(n) => *n as i32,
+        _ => 0,
+    }
+}
+
+fn json_to_string(v: &Json) -> String {
+    match v {
+        Json::Str(s) => s.clone(),
+        _ => String::new(),
+    }
+}
+
+fn json_to_bool(v: &Json) -> bool {
+    match v {
+        Json::Bool(b) => *b,
+        _ => false,
+    }
+}
+
+fn json_to_vec_i32(v: &Json) -> Vec<i32> {
+    match v {
+        Json::Arr(a) => a.iter().map(json_to_i32).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn json_to_vec_string(v: &Json) -> Vec<String> {
+    match v {
+        Json::Arr(a) => a.iter().map(json_to_string).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn json_to_vec_bool(v: &Json) -> Vec<bool> {
+    match v {
+        Json::Arr(a) => a.iter().map(json_to_bool).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn json_to_matrix_i32(v: &Json) -> Vec<Vec<i32>> {
+    match v {
+        Json::Arr(a) => a.iter().map(json_to_vec_i32).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn json_to_matrix_string(v: &Json) -> Vec<Vec<String>> {
+    match v {
+        Json::Arr(a) => a.iter().map(json_to_vec_string).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn json_to_matrix_bool(v: &Json) -> Vec<Vec<bool>> {
+    match v {
+        Json::Arr(a) => a.iter().map(json_to_vec_bool).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn i32_to_json(v: &i32) -> String {
+    v.to_string()
+}
+
+fn bool_to_json(v: &bool) -> String {
+    v.to_string()
+}
+
+fn string_to_json(v: &str) -> String {
+    let mut s = String::with_capacity(v.len() + 2);
+    s.push('"');
+    for c in v.chars() {
+        match c {
+            '"' => s.push_str("\\\""),
+            '\\' => s.push_str("\\\\"),
+            '\n' => s.push_str("\\n"),
+            '\r' => s.push_str("\\r"),
+            '\t' => s.push_str("\\t"),
+            c if (c as u32) < 0x20 => s.push_str(&format!("\\u{:04x}", c as u32)),
+            c => s.push(c),
+        }
+    }
+    s.push('"');
+    s
+}
+
+fn vec_i32_to_json(v: &[i32]) -> String {
+    let parts: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn vec_string_to_json(v: &[String]) -> String {
+    let parts: Vec<String> = v.iter().map(|x| string_to_json(x)).collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn vec_bool_to_json(v: &[bool]) -> String {
+    let parts: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn matrix_i32_to_json(v: &[Vec<i32>]) -> String {
+    let parts: Vec<String> = v.iter().map(|x| vec_i32_to_json(x)).collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn matrix_string_to_json(v: &[Vec<String>]) -> String {
+    let parts: Vec<String> = v.iter().map(|x| vec_string_to_json(x)).collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn matrix_bool_to_json(v: &[Vec<bool>]) -> String {
+    let parts: Vec<String> = v.iter().map(|x| vec_bool_to_json(x)).collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [255u8; 256];
+    for (i, &b) in TABLE.iter().enumerate() {
+        lookup[b as usize] = i as u8;
+    }
+
+    let mut out = Vec::new();
+    let mut buf: u32 = 0;
+    let mut bits = 0;
+    for &b in input.as_bytes() {
+        if b == b'=' || b == b'\n' || b == b'\r' {
+            continue;
+        }
+        let val = lookup[b as usize];
+        if val == 255 {
+            return Err(format!("invalid base64 character: {}", b as char));
+        }
+        buf = (buf << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buf >> bits) & 0xFF) as u8);
+        }
+    }
+    Ok(out)
+}
+
+// User's solution is written to solution.rs alongside this file and included
+// verbatim here (not as a separate module) so its items don't need `pub`.
+include!("solution.rs");
+
+fn main() {
+    std::panic::set_hook(Box::new(|_| {}));
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        eprintln!("{{\"error\": \"missing input payload\"}}");
+        return;
+    }
+
+    let decoded_bytes = match base64_decode(&args[1]) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!(
+                "{{\"error\": \"Runtime Error\", \"message\": {}}}",
+                string_to_json(&e)
+            );
+            return;
+        }
+    };
+    let decoded_str = match String::from_utf8(decoded_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "{{\"error\": \"Runtime Error\", \"message\": {}}}",
+                string_to_json(&e.to_string())
+            );
+            return;
+        }
+    };
+    let payload = match parse_json(&decoded_str) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "{{\"error\": \"Runtime Error\", \"message\": {}}}",
+                string_to_json(&e)
+            );
+            return;
+        }
+    };
+    let inputs = get_inputs(&payload);
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    // GENERATED_CALL_MARKER
+    }));
+
+    if let Err(panic_payload) = outcome {
+        let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".to_string()
+        };
+        eprintln!(
+            "{{\"error\": \"Runtime Error\", \"message\": {}}}",
+            string_to_json(&msg)
+        );
+    }
+}

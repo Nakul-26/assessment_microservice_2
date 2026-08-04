@@ -1,0 +1,14 @@
+{
+  // High+ severity fails the build, same bar as assessment-api's plain `npm audit
+  // --audit-level=high` gate. The one entry below is an explicit, reviewed exception -
+  // see the comment on it - not a blanket suppression.
+  "high": true,
+  "allowlist": [
+    // react-router "RSC Mode CSRF Bypass" (GHSA-qwww-vcr4-c8h2). This app is a Vite SPA
+    // and does not use React Router's RSC/Server Components mode at all, so the
+    // vulnerable code path is unreachable here. A real fix requires a react-router
+    // v7->v8 major upgrade (no patched 7.x release exists) - out of scope for this
+    // dependency-audit pass; revisit when doing a deliberate router upgrade.
+    "GHSA-qwww-vcr4-c8h2"
+  ]
+}

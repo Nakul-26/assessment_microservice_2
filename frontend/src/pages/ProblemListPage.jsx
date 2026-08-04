@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Filter, Plus, ChevronRight, Users, CheckCircle2, X } from 'lucide-react';
+import { Search, Filter, Plus, ChevronRight, Users, CheckCircle2, X, Lock } from 'lucide-react';
 import api from '../api';
 
 function ProblemListPage({ user }) {
@@ -17,6 +17,7 @@ function ProblemListPage({ user }) {
   const [apiError, setApiError] = useState(null);
 
   const canManage = user && (user.role === 'admin' || user.role === 'faculty' || user.role === 'superadmin');
+  const isCollegeAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
 
   useEffect(() => {
     setApiError(null);
@@ -111,6 +112,32 @@ function ProblemListPage({ user }) {
           const rate = problem.submissionCount > 0 
             ? ((problem.acceptedCount / problem.submissionCount) * 100).toFixed(1) + '%'
             : '0%';
+          if (problem.locked) {
+            return (
+              <Link
+                key={problem._id}
+                to={isCollegeAdmin ? "/admin/billing" : "#"}
+                className="problem-card"
+                style={{ opacity: 0.7, cursor: isCollegeAdmin ? 'pointer' : 'not-allowed' }}
+                onClick={(e) => { if (!isCollegeAdmin) e.preventDefault(); }}
+                title={isCollegeAdmin ? "Upgrade your plan to unlock this problem" : "Ask your admin to upgrade the plan to unlock this problem"}
+              >
+                <div className="flex-between mb-2">
+                  <span className={`tag difficulty-${problem.difficulty.toLowerCase()}`}>
+                    {problem.difficulty}
+                  </span>
+                  <span className="text-muted flex-center gap-2" style={{ fontSize: '0.8rem', justifyContent: 'flex-end' }}>
+                    <Lock size={14} /> Premium
+                  </span>
+                </div>
+                <h3>{problem.title}</h3>
+                <p className="text-muted" style={{ fontSize: '0.85rem' }}>
+                  {isCollegeAdmin ? 'Upgrade your plan to unlock this problem.' : 'Ask your admin to upgrade the plan to unlock this problem.'}
+                </p>
+              </Link>
+            );
+          }
+
           return (
             <Link key={problem._id} to={`/problems/${problem._id}`} className="problem-card">
               <div className="flex-between mb-2">
@@ -127,7 +154,7 @@ function ProblemListPage({ user }) {
                   <span key={tag} className="tag">{tag}</span>
                 ))}
               </div>
-              
+
               <div className="stats">
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

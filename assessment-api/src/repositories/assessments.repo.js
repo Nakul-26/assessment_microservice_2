@@ -4,8 +4,11 @@ export async function findAll(filter = {}, options = {}) {
   return Assessment.find(filter, null, options).populate("createdBy", "name email");
 }
 
-export async function findById(id) {
-  return Assessment.findById(id).populate("createdBy", "name email").populate("problems.problemId", "title difficulty");
+// collegeId: pass a value to scope the lookup to that college (404s instead of leaking
+// existence across tenants); pass null/undefined to skip scoping (superadmin/cross-tenant use).
+export async function findById(id, collegeId) {
+  const filter = collegeId ? { _id: id, collegeId } : { _id: id };
+  return Assessment.findOne(filter).populate("createdBy", "name email").populate("problems.problemId", "title difficulty");
 }
 
 export async function create(data) {
@@ -13,10 +16,12 @@ export async function create(data) {
   return assessment.save();
 }
 
-export async function updateById(id, data) {
-  return Assessment.findByIdAndUpdate(id, data, { new: true, runValidators: true });
+export async function updateById(id, data, collegeId) {
+  const filter = collegeId ? { _id: id, collegeId } : { _id: id };
+  return Assessment.findOneAndUpdate(filter, data, { new: true, runValidators: true });
 }
 
-export async function deleteById(id) {
-  return Assessment.findByIdAndDelete(id);
+export async function deleteById(id, collegeId) {
+  const filter = collegeId ? { _id: id, collegeId } : { _id: id };
+  return Assessment.findOneAndDelete(filter);
 }
