@@ -482,7 +482,13 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 			// /app is tmpfs (not a host bind mount) so a submission that writes a huge
 			// file there fills bounded, memory-backed space instead of real host disk.
 			// Unlike /tmp, this must stay executable — compiled binaries run from here.
-			"/app": "rw,nosuid,nodev,size=512m",
+			// "exec" must be listed explicitly: Docker defaults tmpfs mounts to noexec
+			// when the option isn't named outright, even though nothing here asked for
+			// noexec — confirmed via `mount`/`/proc/mounts` showing noexec on this
+			// engine version despite this string never containing it. Without "exec",
+			// every compiled language's own freshly-built binary 126s with "permission
+			// denied" trying to exec itself from /app.
+			"/app": "rw,exec,nosuid,nodev,size=512m",
 		},
 	}
 

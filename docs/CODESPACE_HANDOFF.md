@@ -1,11 +1,103 @@
 # Codespace / Docker environment handoff
 
-## 🔴 ACTIVE INCIDENT — read this section first
+## 🟢 INCIDENT RESOLVED IN CODESPACE — NOT YET DEPLOYED TO PROD
 
-**Production submissions are down** at `coding.fortifyhub.net` (the judge0-shim-only deployment
-— no frontend deployed there, just `/api/judge0/*` and `/api/integration/*` consumed by an
-external exam platform). This was discovered and is being actively debugged; it is NOT resolved.
-Continue from here — don't re-derive this from scratch.
+**Root-caused and fixed in this Codespace** (commits pending — user handles commit/push/Dokploy
+redeploy themselves, per the constraints below). **`coding.fortifyhub.net` is still down** until
+this is deployed there — the fix only exists in this Codespace's working tree so far. Read this
+section before touching the code again; it supersedes the debugging trail further down (kept
+below for history/context, but steps 1-3 of "Next steps" are now moot — see why in the
+root-cause writeup).
+
+### Root cause #1 (the original 404) — Docker's archive-copy API silently breaks under `ReadonlyRootfs`
+
+The 404 (`failed to upload files to container: API error (404): Could not find the file
+/app/sub-... in container ...`) was **never a code bug in the mkdir fix (`713bf50`)** — that fix
+was correct and did run (verified: rebuilding the image and confirming the binary + logs matched
+the new source). The real cause is a **Docker Engine limitation**: `UploadToContainer`
+(`docker cp` / `PutContainerArchive`) does not work against a container created with
+`ReadonlyRootfs: true` (the C6 non-root hardening flag, `pool.go`'s `createContainer`) —
+**even onto an explicitly writable tmpfs mount like `/app`**. Confirmed by hand on a live sandbox
+container in this Codespace:
+- `docker exec ... mkdir -p /app/sub-test123 && ls -la /app/` → directory demonstrably exists.
+- `docker cp` a file into that exact, just-verified directory → still 404s with "Could not find
+  the file ... in container".
+- `docker cp` straight to the `/app` mount point itself → a *different*, more honest error:
+  `"container rootfs is marked read-only"`.
+
+So no amount of `mkdir -p` in application code could ever fix this — the daemon's own
+archive-copy path is what's broken for `ReadonlyRootfs` containers, independent of whether the
+target directory exists. This is also why the prior session's "rebuild + redeploy, still same
+404, no change in error shape" observation made sense: the mkdir fix was genuinely running, and
+still couldn't have worked.
+
+**Fix** (`judge-service-go/pkg/executor/executor.go`, `copyFilesToContainer`): stopped using
+`UploadToContainer` entirely. Instead, the tar archive (already built for the upload) is piped
+over stdin into a `docker exec` running `sh -c 'mkdir -p "$1" && tar -xf - -C "$1"'` inside the
+target container — a normal process write to the live tmpfs, not subject to the archive-copy
+limitation. Verified `tar` is present in every language sandbox image
+(`judge-c/cpp/csharp/go/java/js/kotlin/php/ruby/rust-env`).
+
+### Root cause #2 (found while verifying the fix above) — `/app` tmpfs was silently `noexec`
+
+Fixing root cause #1 unblocked file upload, but compiled-language submissions then failed a
+different way: `OCI runtime exec failed: ... exec: "/app/sub-.../main": permission denied` (exit
+126) — this happened even for a **freshly compiled, `judge`-owned, `0755` binary**, immediately
+after compiling it, in the same shell. `mount`/`/proc/mounts` inside the container showed
+`/app` mounted `noexec` — even though `pool.go`'s `Tmpfs` option string for `/app` never said
+`noexec` (`"rw,nosuid,nodev,size=512m"`). This Docker Engine version (28.5.1) defaults a tmpfs
+mount to `noexec` unless `exec` is named **explicitly** in the options string — the comment
+directly above that line ("Unlike /tmp, this must stay executable") stated the intent correctly,
+but the mount options never actually delivered it.
+
+**Fix** (`judge-service-go/pkg/pool/pool.go`, `createContainer`): `/app`'s `Tmpfs` entry is now
+`"rw,exec,nosuid,nodev,size=512m"`.
+
+### A third, smaller fix needed to make #1 actually work end-to-end
+
+Once file upload worked (root cause #1's fix), Java compilation still failed
+(`error while writing Main: .../Main.class`) — the `mkdir -p` + `tar -x` in the exec both run as
+`root` (needed, since the container's main process/exec defaults require root for this), but
+compilation/execution runs as the unprivileged `judge` user (`getJudgeUser()`). A root-owned,
+default-mode (`0755`) directory isn't writable by `judge`. Before the tmpfs migration this was a
+non-issue because the host-side staging dir was explicitly `chmod 0777`'d
+(`workspace.NewSubmissionWorkspace`) and bind-mounted straight through. Re-applied the same
+world-writable approach on the container side: the exec is now
+`mkdir -p "$1" && tar -xf - -C "$1" && chmod -R 0777 "$1"`.
+
+### Verification performed (all in this Codespace, local dev stack)
+
+Used the same curl recipe as below against `http://localhost:3000` (this Codespace's
+`assessment-api`, dev shim key `judge0_shim_secret` — see `assessment-api/src/config/env.js`)
+with `wait=true`:
+- Python (`language_id: 71`, interpreted): `status.id: 3` (ACCEPTED), correct stdout.
+- Java (`language_id: 62`, compiled): `status.id: 3`, correct stdout — exercises compile step.
+- C++ (`language_id: 54`, compiled): `status.id: 3`, correct stdout.
+- Go (`language_id: 60`, compiled): `status.id: 3`, correct stdout.
+
+`copyFilesToContainer` is shared by `RunRawWithStdin` (the shim path tested above),
+`CompileInContainer`, and `RunInContainerStream` (the real exam-grading path) — so this fixes
+all three, not just the raw-run shim.
+
+`go build ./...` and `go vet ./...` are clean. `go test ./...` has two **pre-existing** failures
+in `judge-service-go/main_test.go` (`TestIsCentralCompareEnabled_DefaultsAndOverrides` sub-test
+`unsupported_language_stays_legacy`, and `TestAppendBatchedResultsParsesJSONLines`) — confirmed
+via `git stash` that both fail identically without this session's changes, so they're unrelated
+and pre-date this fix. Not investigated further here; folds into Priority 1 item #1 below (the
+"Go toolchain sanity check" that was already on the to-do list before this incident).
+
+### What's left
+
+1. **Not yet committed/pushed** — the two file diffs (`executor.go`, `pool.go`) are sitting in
+   this Codespace's working tree. User handles `git commit`/push/Dokploy redeploy themselves per
+   the constraints below.
+2. **Not yet verified against `coding.fortifyhub.net`** — everything above was tested against
+   this Codespace's local dev stack, not prod. Re-run the same curl test against prod after
+   deploying, per the "How to test" section just below.
+3. Root cause #2 (`noexec` tmpfs) is specific to this Docker Engine version's default behavior —
+   worth double-checking prod's Docker Engine version behaves the same way (likely does, but
+   confirm the fix actually changes prod's `mount` output for `/app` post-deploy the same way it
+   did here, rather than assuming).
 
 ### How to test
 
@@ -43,8 +135,11 @@ error appeared:
    "no available containers" 503s.
 
 3. **File upload to container 404s** (`failed to upload files to container: API error (404):
-   Could not find the file /app/sub-raw-... in container ...`) — **root cause identified, fix
-   deployed but NOT YET CONFIRMED WORKING, this is where debugging stopped**. Commit `e38d1f3`
+   Could not find the file /app/sub-raw-... in container ...`) — **RESOLVED, see the "🟢 INCIDENT
+   RESOLVED" section at the top of this doc for the actual root cause and fix** (it was a Docker
+   Engine limitation, not the mkdir-based theory below — the mkdir fix was necessary but not
+   sufficient, and the "Next steps" list right after this section is superseded/moot). Kept below
+   for the historical debugging trail. Commit `e38d1f3`
    switched the sandbox containers' `/app` from a host bind-mount to a tmpfs mount (deliberate —
    stops a submission from filling host disk), but nothing accounted for the fact that the
    per-submission subdirectory (`/app/sub-<id>`, created by `workspace.NewSubmissionWorkspace`
@@ -72,7 +167,11 @@ error appeared:
    upload still can't see the directory, or commit `713bf50`'s code still isn't the binary
    actually running). This was not resolved before handing off to Codespace.
 
-### Next steps (do these first, in order)
+### Next steps (superseded — kept for history; step 3 below is what turned out to be right)
+
+**This whole numbered list is moot now** — item 3's "does UploadToContainer have some quirk with
+tmpfs-mounted destinations" guess was correct, confirmed and fixed; see the top of this doc.
+There's no need to work through steps 1-2 (binary/mkdir verification) again.
 
 1. **Confirm the running binary actually matches `713bf50`.** Don't trust "a rebuild was done"
    at face value again — from a real Docker-capable terminal, rebuild judge-service-go

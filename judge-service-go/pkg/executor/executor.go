@@ -279,14 +279,6 @@ func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string,
 		return err
 	}
 
-	// /app is a tmpfs mount (not a host bind mount, see pool.go's createContainer), so
-	// containerWorkDir's per-submission subdirectory only exists on the host staging side —
-	// the container's tmpfs starts with nothing under /app until something creates it there.
-	// Without this, UploadToContainer below 404s ("Could not find the file ... in container").
-	if _, _, _, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"mkdir", "-p", containerWorkDir}, 5*time.Second); err != nil {
-		return fmt.Errorf("failed to create workspace dir %s in container: %w", containerWorkDir, err)
-	}
-
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	for _, name := range files {
@@ -319,12 +311,24 @@ func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string,
 		return fmt.Errorf("failed to close tar writer: %w", err)
 	}
 
-	opts := docker.UploadToContainerOptions{
-		InputStream: &buf,
-		Path:        containerWorkDir,
-	}
-	if err := e.cli.UploadToContainer(containerID, opts); err != nil {
-		return fmt.Errorf("failed to upload files to container: %w", err)
+	// Docker's archive-copy API (UploadToContainer, i.e. `docker cp`) does not work
+	// against containers created with ReadonlyRootfs: true (see pool.go's
+	// createContainer) — even onto an explicitly writable tmpfs mount like /app. The
+	// daemon's PutContainerArchive path either rejects the copy outright ("container
+	// rootfs is marked read-only", confirmed when the destination is the mount point
+	// itself) or, for subdirectories of that mount, 404s ("Could not find the file ...
+	// in container") even though a live `docker exec` confirms the directory exists.
+	// So instead of asking the daemon to write the archive for us, extract it ourselves
+	// inside the container via `docker exec` with the tar piped over stdin — a normal
+	// process write to the live tmpfs, not subject to the archive-copy limitation.
+	// chmod -R 0777 after extraction: the dir is created (and the tar extracted) as
+	// root, but compilation/execution runs as the unprivileged "judge" user (see
+	// getJudgeUser) — same world-writable-workspace approach NewSubmissionWorkspace
+	// already uses for the host-side staging dir, just re-applied on the container side
+	// since tar doesn't preserve that across the root-owned mkdir.
+	extractCmd := []string{"sh", "-c", `mkdir -p "$1" && tar -xf - -C "$1" && chmod -R 0777 "$1"`, "sh", containerWorkDir}
+	if _, stderr, _, err := e.runExecWithStdin(ctx, containerID, "root", "/", extractCmd, 20*time.Second, buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to extract files into container: %w (stderr=%s)", err, stderr)
 	}
 	return nil
 }
