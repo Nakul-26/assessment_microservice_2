@@ -15,6 +15,8 @@
 #                         platform's JUDGE0_API_KEY Worker secret.
 #   TESTING_PLATFORM_KEY  shared secret for /api/integration/* (checked as `x-service-key`).
 #                         No insecure fallback on purpose — deploy fails closed if unset.
+#   ARVENTIQ_SECRET       shared secret for the Arventiq integration (see auth middleware).
+#                         No insecure fallback on purpose — deploy fails closed if unset.
 #
 # Optional tuning vars (have sensible defaults):
 #   MONGO_DB_NAME          (default: assessment_db)
@@ -132,6 +134,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TESTING_PLATFORM_KEY: ${TESTING_PLATFORM_KEY:?TESTING_PLATFORM_KEY is required}
       JUDGE0_SHIM_KEY: ${JUDGE0_SHIM_KEY:?JUDGE0_SHIM_KEY is required}
+      ARVENTIQ_SECRET: ${ARVENTIQ_SECRET:?ARVENTIQ_SECRET is required}
       JUDGE_SERVICE_URL: http://judge-service-go:8081
       # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if unset.
       COLLEGE_SUBMISSION_QUOTA: ${COLLEGE_SUBMISSION_QUOTA:-}
