@@ -22,7 +22,7 @@ const LANGUAGE_ID_MAP = {
 };
 
 // Judge0 status ids judge.js understands (see exam-platform/workers/student-workerjs/src/judge.js).
-const JUDGE0_STATUS = {
+const CODEASSESS_STATUS = {
   ACCEPTED: 3,
   RUNTIME_ERROR: 11,
   TIME_LIMIT_EXCEEDED: 5,
@@ -43,14 +43,14 @@ export function mapLanguageId(languageId) {
  * cpuTimeLimitSec / wallTimeLimitSec / memoryLimitKb come straight from the Judge0
  * request body exam-platform sends; there is no per-problem or per-student state here.
  */
-export async function runRawJudge0({ languageId, sourceCode, stdin, wallTimeLimitSec, memoryLimitKb }) {
+export async function runRawCodeAssess({ languageId, sourceCode, stdin, wallTimeLimitSec, memoryLimitKb }) {
   const language = mapLanguageId(languageId);
   if (!language) {
     return {
       stdout: "",
       stderr: `Unsupported language_id: ${languageId}`,
       compile_output: "",
-      status: { id: JUDGE0_STATUS.INTERNAL_ERROR },
+      status: { id: CODEASSESS_STATUS.INTERNAL_ERROR },
       time: 0,
       memory: 0,
       exit_code: null,
@@ -80,7 +80,7 @@ export async function runRawJudge0({ languageId, sourceCode, stdin, wallTimeLimi
         stdout: "",
         stderr: `Judge backend ${resp.status}: ${text.slice(0, 300)}`,
         compile_output: "",
-        status: { id: JUDGE0_STATUS.INTERNAL_ERROR },
+        status: { id: CODEASSESS_STATUS.INTERNAL_ERROR },
         time: 0,
         memory: 0,
         exit_code: null,
@@ -93,7 +93,7 @@ export async function runRawJudge0({ languageId, sourceCode, stdin, wallTimeLimi
       stdout: "",
       stderr: `Judge backend unreachable: ${String(e.message || e).slice(0, 300)}`,
       compile_output: "",
-      status: { id: JUDGE0_STATUS.INTERNAL_ERROR },
+      status: { id: CODEASSESS_STATUS.INTERNAL_ERROR },
       time: 0,
       memory: 0,
       exit_code: null,
@@ -101,22 +101,22 @@ export async function runRawJudge0({ languageId, sourceCode, stdin, wallTimeLimi
     };
   }
 
-  let statusId = JUDGE0_STATUS.ACCEPTED;
+  let statusId = CODEASSESS_STATUS.ACCEPTED;
   let memoryKb = 0;
   if (raw.compileError) {
-    statusId = JUDGE0_STATUS.COMPILATION_ERROR;
+    statusId = CODEASSESS_STATUS.COMPILATION_ERROR;
   } else if (raw.timedOut) {
-    statusId = JUDGE0_STATUS.TIME_LIMIT_EXCEEDED;
+    statusId = CODEASSESS_STATUS.TIME_LIMIT_EXCEEDED;
   } else if (raw.oomKilled) {
-    statusId = JUDGE0_STATUS.RUNTIME_ERROR;
+    statusId = CODEASSESS_STATUS.RUNTIME_ERROR;
     // judge-service-go doesn't meter peak memory yet; echo back the requested
     // ceiling so exam-platform's own "memory >= limit => MLE" reclassification
     // (runOnJudge in judge.js) fires correctly on an OOM kill.
     memoryKb = memoryLimitMb * 1024;
   } else if (raw.error) {
-    statusId = JUDGE0_STATUS.INTERNAL_ERROR;
+    statusId = CODEASSESS_STATUS.INTERNAL_ERROR;
   } else if (raw.exitCode && raw.exitCode !== 0) {
-    statusId = JUDGE0_STATUS.RUNTIME_ERROR;
+    statusId = CODEASSESS_STATUS.RUNTIME_ERROR;
   }
 
   return {

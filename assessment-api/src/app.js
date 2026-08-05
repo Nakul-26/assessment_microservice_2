@@ -81,7 +81,7 @@ app.use(cookieParser());
 // being sent on cross-site subrequests). This is a lightweight second layer - a bare
 // cross-site HTML form can't set custom headers, but axios/fetch from our own frontend
 // can, so state-changing requests authenticated via the cookie must carry this header.
-// Bearer-header callers (integration/judge0 partners) never hit this, since they don't
+// Bearer-header callers (integration/codeAssess partners) never hit this, since they don't
 // send the cookie in the first place.
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 app.use((req, res, next) => {
@@ -94,13 +94,13 @@ app.use((req, res, next) => {
   }
   next();
 });
-// The Judge0 shim carries base64 source+stdin payloads that can comfortably exceed
+// The CodeAssess shim carries base64 source+stdin payloads that can comfortably exceed
 // the platform's normal 100kb request cap; give it its own, larger limit before the
 // general parser below runs (body-parser skips re-parsing an already-consumed body).
-app.use("/api/judge0", express.json({ limit: "2mb" }));
-app.use("/api/v1/judge0", express.json({ limit: "2mb" }));
+app.use("/api/codeAssess", express.json({ limit: "2mb" }));
+app.use("/api/v1/codeAssess", express.json({ limit: "2mb" }));
 // Stripe webhook signature verification needs the raw, unparsed body — mounted ahead
-// of the general express.json() below for the same reason as the judge0 shim above.
+// of the general express.json() below for the same reason as the codeAssess shim above.
 app.use("/api/billing/webhook", express.raw({ type: "application/json" }));
 app.use("/api/v1/billing/webhook", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: "100kb" }));

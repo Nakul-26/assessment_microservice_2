@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 
 // Cookie first (browser sessions, H8), then Authorization header fallback (external
-// server-to-server callers - /api/integration/*, /api/judge0/* - never send cookies and
+// server-to-server callers - /api/integration/*, /api/codeAssess/* - never send cookies and
 // must keep working unchanged).
 function extractToken(req) {
   if (req.cookies?.token) return req.cookies.token;

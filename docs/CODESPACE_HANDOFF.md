@@ -1,13 +1,21 @@
 # Codespace / Docker environment handoff
 
-## 🟢 INCIDENT RESOLVED IN CODESPACE — NOT YET DEPLOYED TO PROD
+## ✅ INCIDENT RESOLVED AND CONFIRMED LIVE ON PROD
 
-**Root-caused and fixed in this Codespace** (commits pending — user handles commit/push/Dokploy
-redeploy themselves, per the constraints below). **`coding.fortifyhub.net` is still down** until
-this is deployed there — the fix only exists in this Codespace's working tree so far. Read this
-section before touching the code again; it supersedes the debugging trail further down (kept
-below for history/context, but steps 1-3 of "Next steps" are now moot — see why in the
-root-cause writeup).
+**Deployed and verified against `coding.fortifyhub.net`** — `/api/health` reports mongodb/redis/
+rabbitmq/judge all connected, and live test submissions pass for both interpreted (Python) and
+compiled (Java, C++) languages with correct stdout and `status.id: 3` (ACCEPTED). The root-cause
+writeup below is kept for history/context; steps 1-3 of the old "Next steps" list were superseded
+during the fix, as noted inline.
+
+One extra issue surfaced only at deploy time, after the code fixes below: `docker-compose.prod.yml`'s
+`assessment-api` service never wired `ARVENTIQ_SECRET` through to the container (a separate,
+never-before-provisioned shared secret for the `/api/arventiq/*` integration, distinct from the
+judge0 shim's `JUDGE0_SHIM_KEY`) — `env.js` fatal-crashes without it in production. Fixed by adding
+`ARVENTIQ_SECRET: ${ARVENTIQ_SECRET:?ARVENTIQ_SECRET is required}` to that service's `environment:`
+block (matching `JWT_SECRET`/`TESTING_PLATFORM_KEY`/`JUDGE0_SHIM_KEY`), generating a new secret
+value, and setting it in Dokploy. That compose edit itself briefly caused a false start — it was
+made but not committed/pushed for a round of "still broken" reports before that was caught.
 
 ### Root cause #1 (the original 404) — Docker's archive-copy API silently breaks under `ReadonlyRootfs`
 
@@ -101,14 +109,18 @@ and pre-date this fix. Not investigated further here; folds into Priority 1 item
 
 ### How to test
 
+**Route renamed** — `/api/judge0/*` is now `/api/codeAssess/*` (branding: avoid exposing that
+this shim speaks Judge0's wire format). The header name (`x-rapidapi-key`) is unchanged — it's
+hardcoded in the exam-platform's own `judge.js`, not something this repo controls.
+
 ```
 curl -s -w '\nHTTP_STATUS:%{http_code}\n' -X POST \
-  'https://coding.fortifyhub.net/api/judge0/submissions?base64_encoded=true&wait=true' \
+  'https://coding.fortifyhub.net/api/codeAssess/submissions?base64_encoded=true&wait=true' \
   -H 'Content-Type: application/json' \
   -H 'x-rapidapi-key: <JUDGE0_API_KEY from .env>' \
   -d '{"language_id":71,"source_code":"'"$(printf 'print(1)' | base64 -w0)"'","stdin":""}'
 ```
-`language_id: 71` = python (see `LANGUAGE_ID_MAP` in `judge0Shim.service.js` for others).
+`language_id: 71` = python (see `LANGUAGE_ID_MAP` in `codeAssessShim.service.js` for others).
 `stdout`/`stderr`/`compile_output` in the response are base64 — decode to read them. A passing
 run looks like `status.id: 3` (ACCEPTED) with the program's real stdout.
 
@@ -265,7 +277,7 @@ Treat any failure as a real bug to fix, not a false alarm.
      `HttpOnly`, and does **not** show up in `document.cookie`.
    - Confirm subsequent API calls succeed with no `Authorization` header (Network tab).
    - Log out, confirm the cookie clears and a subsequent protected-route call 401s.
-   - Confirm `/api/integration/*` and `/api/judge0/*` (external partners, Bearer-header/shared
+   - Confirm `/api/integration/*` and `/api/codeAssess/*` (external partners, Bearer-header/shared
      -secret only, never send cookies) still work unaffected —
      `assessment-api/src/middleware/auth.mjs`'s `extractToken` checks the cookie first but
      falls back to the `Authorization` header.
@@ -358,7 +370,7 @@ Treat any failure as a real bug to fix, not a false alarm.
 - **Other language adapters' `CompileCommand`/`RunCommand` dedup** (only Go's was unified —
   the others append per-language wrapper-protocol args, so it's a bigger, untested refactor of
   the sandbox execution path). Needs Docker + each language's toolchain to verify safely.
-- **Secrets rotation** — no mechanism exists for `TESTING_PLATFORM_KEY`/`JUDGE0_SHIM_KEY`
+- **Secrets rotation** — no mechanism exists for `TESTING_PLATFORM_KEY`/`CODEASSESS_SHIM_KEY`
   (static shared secrets for the two external integrations).
 - **Console-only, unstructured logging** throughout `assessment-api` — no structured
   logger/log aggregation.

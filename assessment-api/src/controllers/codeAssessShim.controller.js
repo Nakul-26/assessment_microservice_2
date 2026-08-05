@@ -1,4 +1,4 @@
-import { runRawJudge0 } from "../services/judge0Shim.service.js";
+import { runRawCodeAssess } from "../services/codeAssessShim.service.js";
 
 function b64decode(s) {
   if (!s) return "";
@@ -9,9 +9,10 @@ function b64encode(s) {
   return Buffer.from(s == null ? "" : String(s), "utf8").toString("base64");
 }
 
-// POST /judge0/submissions?base64_encoded=true&wait=true
-// Judge0 CE-compatible synchronous execution endpoint. Exists purely so
-// exam-platform's judge.js (which only knows how to speak to a Judge0 instance,
+// POST /codeAssess/submissions?base64_encoded=true&wait=true
+// Judge0 CE wire-format-compatible synchronous execution endpoint (same request/response
+// shape as the real Judge0 CE API — see codeAssessShim.service.js). Exists purely so
+// exam-platform's judge.js (which only knows how to speak to a Judge0-shaped instance,
 // see runOnJudge()) can point JUDGE_URL at this service without any code changes
 // on that side. Always responds synchronously — there is no queue behind this route,
 // it calls straight into judge-service-go's internal /raw-run.
@@ -26,7 +27,7 @@ export async function submitRawExecution(req, res) {
     return res.status(400).json({ error: "language_id and source_code are required" });
   }
 
-  const result = await runRawJudge0({
+  const result = await runRawCodeAssess({
     languageId: Number(body.language_id),
     sourceCode,
     stdin,
@@ -48,7 +49,7 @@ export async function submitRawExecution(req, res) {
   });
 }
 
-// GET /judge0/submissions/:token
+// GET /codeAssess/submissions/:token
 // Not needed in practice: /submissions above always resolves synchronously
 // (wait=true), so judge.js's defensive poll loop never has anything to poll for.
 // Implemented only so a stray poll doesn't 404 into confusing error handling.

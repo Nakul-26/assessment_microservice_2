@@ -9,10 +9,12 @@
 #   JWT_SECRET        long random secret for JWT signing
 #
 # Required for the Arventiq/exam-platform integration:
-#   JUDGE0_SHIM_KEY       shared secret for the Judge0-compatible shim at /api/judge0/submissions.
-#                         exam-platform sends this back as the `x-rapidapi-key` header (it's
-#                         built to talk to a Judge0 instance) — set the SAME value as that
-#                         platform's JUDGE0_API_KEY Worker secret.
+#   CODEASSESS_SHIM_KEY   shared secret for the Judge0-wire-compatible shim at
+#                         /api/codeAssess/submissions. exam-platform sends this back as the
+#                         `x-rapidapi-key` header (its judge.js is built to talk to a
+#                         Judge0-shaped instance) — set the SAME value as that platform's
+#                         JUDGE0_API_KEY Worker secret (that var name lives on their side,
+#                         unrelated to this rename).
 #   TESTING_PLATFORM_KEY  shared secret for /api/integration/* (checked as `x-service-key`).
 #                         No insecure fallback on purpose — deploy fails closed if unset.
 #   ARVENTIQ_SECRET       shared secret for the Arventiq integration (see auth middleware).
@@ -133,7 +135,7 @@ services:
       RABBITMQ_PORT: "5672"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TESTING_PLATFORM_KEY: ${TESTING_PLATFORM_KEY:?TESTING_PLATFORM_KEY is required}
-      JUDGE0_SHIM_KEY: ${JUDGE0_SHIM_KEY:?JUDGE0_SHIM_KEY is required}
+      CODEASSESS_SHIM_KEY: ${CODEASSESS_SHIM_KEY:?CODEASSESS_SHIM_KEY is required}
       ARVENTIQ_SECRET: ${ARVENTIQ_SECRET:?ARVENTIQ_SECRET is required}
       JUDGE_SERVICE_URL: http://judge-service-go:8081
       # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if unset.

@@ -9,7 +9,7 @@ import adminRoutes from "./admin.routes.js";
 import integrationRoutes from "./integration.routes.js";
 import questionsRoutes from "./questions.routes.js";
 import arventiqRoutes from "./arventiq.routes.js";
-import judge0ShimRoutes from "./judge0Shim.routes.js";
+import codeAssessShimRoutes from "./codeAssessShim.routes.js";
 import billingRoutes from "./billing.routes.js";
 
 const router = express.Router();
@@ -24,7 +24,7 @@ router.use("/admin", adminRoutes);
 router.use("/integration", integrationRoutes);
 router.use("/questions", questionsRoutes);
 router.use("/arventiq", arventiqRoutes);
-router.use("/judge0", judge0ShimRoutes);
+router.use("/codeAssess", codeAssessShimRoutes);
 router.use("/billing", billingRoutes);
 
 export default router;

@@ -11,11 +11,11 @@ export const env = {
   JWT_SECRET: process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? null : "dev_secret_change_me"),
   TESTING_PLATFORM_KEY: process.env.TESTING_PLATFORM_KEY || (process.env.NODE_ENV === "production" ? null : "testing_platform_secret"),
   ARVENTIQ_SECRET: process.env.ARVENTIQ_SECRET || (process.env.NODE_ENV === "production" ? null : "arventiq_dev_secret"),
-  // Shared secret for the Judge0-compatible /judge0/submissions shim. Kept separate
-  // from TESTING_PLATFORM_KEY so it can be rotated independently of the main
+  // Shared secret for the Judge0-wire-compatible /codeAssess/submissions shim. Kept
+  // separate from TESTING_PLATFORM_KEY so it can be rotated independently of the main
   // integration key, and because the caller sends it as `x-rapidapi-key` (it's
-  // impersonating a Judge0 instance), not `x-service-key`.
-  JUDGE0_SHIM_KEY: process.env.JUDGE0_SHIM_KEY || (process.env.NODE_ENV === "production" ? null : "judge0_shim_secret"),
+  // built to talk to a Judge0-shaped instance), not `x-service-key`.
+  CODEASSESS_SHIM_KEY: process.env.CODEASSESS_SHIM_KEY || (process.env.NODE_ENV === "production" ? null : "codeassess_shim_secret"),
   JUDGE_SERVICE_URL: process.env.JUDGE_SERVICE_URL || "http://judge-service-go:8081",
   // H5 fair-scheduling quota: submissions per college allowed within the rolling
   // window below, enforced in quota.service.js before a submission is queued.
@@ -47,6 +47,6 @@ if (process.env.NODE_ENV === "production" && !env.ARVENTIQ_SECRET) {
   throw new Error("FATAL: ARVENTIQ_SECRET is required in production environment");
 }
 
-if (process.env.NODE_ENV === "production" && !env.JUDGE0_SHIM_KEY) {
-  throw new Error("FATAL: JUDGE0_SHIM_KEY is required in production environment");
+if (process.env.NODE_ENV === "production" && !env.CODEASSESS_SHIM_KEY) {
+  throw new Error("FATAL: CODEASSESS_SHIM_KEY is required in production environment");
 }
