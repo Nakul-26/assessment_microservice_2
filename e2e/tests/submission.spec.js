@@ -12,8 +12,13 @@ test.describe('Student Submissions', () => {
   });
 
   test('student can solve Two Sum problem', async ({ page }) => {
-    // Find and click on "Two Sum" problem
-    await page.click('text=Two Sum');
+    // Search for "Two Sum" — with a large problem set, it may not be on the
+    // default first page, so filter for it like a real student would. Wait for
+    // the filtered response so the initial unfiltered fetch can't race back in
+    // and detach the card mid-click.
+    await page.fill('input[name="search"]', 'Two Sum');
+    await page.waitForResponse((res) => res.url().includes('/api/v1/problems') && res.url().includes('search=Two'));
+    await page.click('h3:text("Two Sum (Certification)")');
     await expect(page).toHaveURL(/\/problems\/[a-f0-9]+/);
 
     // Select Python

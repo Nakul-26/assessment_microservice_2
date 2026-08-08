@@ -27,10 +27,14 @@ test.describe('Assessment Lifecycle', () => {
     await expect(page).toHaveURL(/\/assessments\/[a-f0-9]+/);
     const startButton = page.locator('button:has-text("Start Assessment")');
     await expect(startButton).toBeVisible();
-    
-    // Handle the confirmation dialog
-    page.once('dialog', dialog => dialog.accept());
     await startButton.click();
+
+    // 3a. Instructions/anti-cheating modal: agree, then continue
+    await page.check('input[type="checkbox"]');
+    await page.click('button:has-text("I Understand & Continue")');
+
+    // 3b. Fullscreen prompt: entering fullscreen starts the attempt
+    await page.click('button:has-text("Enter Fullscreen and Start")');
 
     // 4. Workspace
     await expect(page).toHaveURL(/\/assessment-attempt\/[a-f0-9]+/);
@@ -59,6 +63,6 @@ test.describe('Assessment Lifecycle', () => {
     // 7. View Results
     await expect(page).toHaveURL(/\/assessment-attempt\/[a-f0-9]+\/result/);
     await expect(page.locator('h2')).toContainText('Assessment Result');
-    await expect(page.locator('.problem-card')).toBeVisible();
+    await expect(page.locator('.problem-card').first()).toBeVisible();
   });
 });

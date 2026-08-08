@@ -63,12 +63,49 @@ That file was deleted back in commit `12d4020` ("Removed redundant/legacy seed a
 utility scripts") and replaced by `assessment-api/scripts/seed_certification_set.mjs`,
 but root `package.json`'s `seed:problems` script was never updated to match — it's been
 broken since that commit, just never actually exercised in CI until now. Fixed
-`package.json`'s `seed:problems` to point at `seed_certification_set.mjs`; verified
-locally against the running dev stack (`npm run seed:problems` → `Seed complete.
-Created=0 Updated=73 Total=86`, no errors). This is a new uncommitted change, needs your
-commit/push. Once pushed, worth watching the run once more to confirm the full `e2e`
-job (including the actual Playwright tests, still unexercised on a real runner) goes
-green.
+`package.json`'s `seed:problems` to point at `seed_certification_set.mjs`. Committed/
+pushed as `4949f87`, confirmed on run `31254962938`: "Start services", "Wait for
+services", and "Seed problems" all now pass, along with every other job — leaving only
+the actual "Run E2E tests" step, which had genuinely never been reached before.
+
+**Update 2026-08-08 (later):** that run exposed the real, final layer — the Playwright
+suite itself. Root cause: `student@test.com`/`faculty@test.com` (hardcoded in
+`e2e/tests/*.spec.js`) were never seeded anywhere in the codebase. No script ever created
+them; they only ever existed in whichever dev Mongo happened to have been manually
+signed-up-into by hand at some point, so the suite could only ever have passed against a
+specific stale local DB, never a fresh one (never in CI, and not even for a fresh
+Codespace). Fixed by adding `assessment-api/scripts/seed_e2e_users.mjs` (upserts the
+student/faculty test accounts with a real bcrypt hash of `password123`, plus a
+`Published` "E2E Smoke Assessment" referencing 2 already-seeded problems, matching the
+shape `verify_assessment_lifecycle.mjs` uses) and wiring it in as `npm run seed:e2e`, a
+new CI step right after "Seed problems".
+
+That in turn surfaced three genuine, pre-existing test bugs — the suite had literally
+never run to completion against real data before, so none of this had ever been caught:
+- `submission.spec.js` blindly did `page.click('text=Two Sum')` on the unfiltered
+  problem list. With the certification set now at 86 problems, `Two Sum (Certification)`
+  falls off the default page-1/limit-50 result and the click hung until timeout. Fixed
+  by having the test search for it first (like a real student would), and waiting for
+  the filtered response before clicking, since the initial unfiltered fetch racing back
+  in was intermittently detaching the card mid-click.
+- `assessment_lifecycle.spec.js` expected a single native `confirm()` dialog after
+  clicking "Start Assessment". The actual flow (`AssessmentDetailsPage.jsx`) is now a
+  3-step anti-cheating flow: an instructions modal (checkbox + "I Understand &
+  Continue"), then a fullscreen-prompt modal ("Enter Fullscreen and Start") — the
+  `confirm()` call this test was written against doesn't exist anymore. Fixed the test to
+  click through the real modals; confirmed headless Chromium's Fullscreen API works fine
+  here (the attempt actually starts and the timer begins).
+- Same test's final assertion, `expect(page.locator('.problem-card')).toBeVisible()`,
+  hit a Playwright strict-mode violation — the results page reuses the `.problem-card`
+  class for both the score card and a separate "Challenge/Appeal Score" card, so the
+  locator matched 2 elements. Fixed with `.first()`.
+
+All 7 E2E tests now pass locally end-to-end against a fresh seed (`npx playwright test`
+in `e2e/`, 14.9s). Everything above (`package.json`'s new `seed:e2e` script,
+`assessment-api/scripts/seed_e2e_users.mjs`, the CI step, and the two `.spec.js` fixes)
+is new and uncommitted — needs your commit/push. Once pushed, watch one more real run to
+confirm `e2e` goes fully green on GitHub's runners too — this will be the first time
+that's ever happened.
 
 ## 4. Scope H12 horizontal scale-out (item #11)
 
