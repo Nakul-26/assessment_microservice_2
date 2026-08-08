@@ -55,9 +55,20 @@ Tests, Judge Unit Tests, Secret Scan, and Dependency Audit. The only failure was
 found` (exit 127). Root cause — GitHub's `ubuntu-latest` runners dropped the legacy
 Compose v1 `docker-compose` binary; only the `docker compose` v2 plugin is preinstalled
 now. Fixed in `.github/workflows/ci.yml` line 124 (`docker-compose up -d` →
-`docker compose up -d`) — this is a new uncommitted change, needs your commit/push.
-Once pushed, worth watching the run to confirm `e2e` goes green too (it's never
-actually been exercised end-to-end on a real runner before).
+`docker compose up -d`) and committed/pushed as `7110c72`.
+
+That got the E2E job one step further, exposing a second, older bug: the "Seed
+problems" step failed with `Cannot find module '/usr/src/app/scripts/seed_problems_api.mjs'`.
+That file was deleted back in commit `12d4020` ("Removed redundant/legacy seed and
+utility scripts") and replaced by `assessment-api/scripts/seed_certification_set.mjs`,
+but root `package.json`'s `seed:problems` script was never updated to match — it's been
+broken since that commit, just never actually exercised in CI until now. Fixed
+`package.json`'s `seed:problems` to point at `seed_certification_set.mjs`; verified
+locally against the running dev stack (`npm run seed:problems` → `Seed complete.
+Created=0 Updated=73 Total=86`, no errors). This is a new uncommitted change, needs your
+commit/push. Once pushed, worth watching the run once more to confirm the full `e2e`
+job (including the actual Playwright tests, still unexercised on a real runner) goes
+green.
 
 ## 4. Scope H12 horizontal scale-out (item #11)
 
