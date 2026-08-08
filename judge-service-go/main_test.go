@@ -267,11 +267,16 @@ func TestIsCentralCompareEnabled_DefaultsAndOverrides(t *testing.T) {
 	})
 
 	t.Run("unsupported language stays legacy", func(t *testing.T) {
-		if isCentralCompareEnabled("c") {
-			t.Fatalf("expected c to remain on legacy path")
+		// c and ruby both gained real central-compare adapters (see
+		// pkg/central/adapters.AdapterRegistry) and are covered by their own
+		// cases/defaults above and in "modern languages always enabled" — use a
+		// language absent from both isCentralCompareEnabled and the adapter registry
+		// to exercise the actual default:false fallback.
+		if isCentralCompareEnabled("cobol") {
+			t.Fatalf("expected cobol to remain on legacy path")
 		}
-		if isCentralCompareEnabled("ruby") {
-			t.Fatalf("expected ruby to remain on legacy path")
+		if isCentralCompareEnabled("haskell") {
+			t.Fatalf("expected haskell to remain on legacy path")
 		}
 	})
 
@@ -323,8 +328,11 @@ func TestAppendBatchedResultsParsesJSONLines(t *testing.T) {
 		CompareConfig: models.CompareConfig{Mode: "EXACT"},
 	}
 
-	stdout := "{\"test\":1,\"output\":3}\n{\"test\":2,\"error\":\"boom\"}\n"
-	processed, err := appendBatchedResults(result, strings.NewReader(stdout), strings.NewReader(""), problem)
+	// Judge metadata (the JSON lines the wrapper emits) goes to stderr, not stdout —
+	// see central_runner.go's appendBatchedResults comment and the wrapper templates'
+	// `fmt.Fprintln(os.Stderr, ...)`. stdout is reserved for the student's own prints.
+	stderr := "{\"test\":1,\"output\":3}\n{\"test\":2,\"error\":\"boom\"}\n"
+	processed, err := appendBatchedResults(result, strings.NewReader(""), strings.NewReader(stderr), problem)
 	if err != nil {
 		t.Fatalf("appendBatchedResults failed: %v", err)
 	}

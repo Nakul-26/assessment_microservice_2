@@ -86,6 +86,7 @@ tmp/
 temp/
 **/tmp/
 **/temp/
+backups/
 
 # Misc / Unused
 image.png

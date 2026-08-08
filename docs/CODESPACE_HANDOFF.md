@@ -1,5 +1,32 @@
 # Codespace / Docker environment handoff
 
+## Session update — 2026-08-08
+
+Worked through the full Priority 1/2 checklist below in this Codespace. Summary (details
+inline at each numbered item):
+
+- **Priority 1 (#1-8): all done.** Verified in an earlier pass this session (Go
+  toolchain, `backup_db.sh`, H4 usage metering, H8 cookie auth, H10 exceljs exports,
+  draft-conflict banner, `problemDifficultyStats`, harness login) — no real bugs found,
+  only the pre-existing non-blocking `getMyAnalytics` N+1 query noted previously.
+- **#9 (docker-socket-proxy): done, not deployed.** Implemented and verified against the
+  local dev stack (`docker-compose.yml`), then the identical change was ported to
+  `docker-compose.prod.yml`. Both are uncommitted working-tree changes — see
+  `docs/USER_ACTION_ITEMS.md` for what's left for you to commit/deploy.
+- **#10 (H11 restore drill): done.** Full backup → simulated data loss → restore →
+  verify cycle run against the dev Mongo — see the item below for the result.
+- **#11 (H12 scale-out): not started.** Large infra/design work, wasn't in your
+  requested scope — flagged in `docs/USER_ACTION_ITEMS.md` for a scoping decision.
+- **#12 (CI gates smoke test): mostly done, one inconclusive result.** Simulated every
+  CI job locally (lint, unit tests, `npm audit`/`audit-ci`, gitleaks secret scan) —
+  found and fixed two real high-severity dependency vulnerabilities that would have
+  failed the `security-audit` job. The Docker-heavy integration/certification Go suite
+  timed out under this Codespace's resource contention (65 containers on 4 CPUs) —
+  inconclusive locally; needs a real push to confirm on GitHub's dedicated runners. Full
+  detail at the item below.
+- **#13 (`backfill_college_id.mjs` against prod): untouched, as you asked** — this
+  needs real prod DB access this Codespace doesn't have.
+
 ## ✅ INCIDENT RESOLVED AND CONFIRMED LIVE ON PROD
 
 **Deployed and verified against `coding.fortifyhub.net`** — `/api/health` reports mongodb/redis/
@@ -328,10 +355,32 @@ Treat any failure as a real bug to fix, not a false alarm.
    `coding.fortifyhub.net`. Getting the allow-list wrong silently breaks code execution for
    every tenant — this is the reason it was deferred rather than guessed at blind.
 
+    **✅ Done 2026-08-08 — implemented, not deployed.** Added a `tecnativa/docker-socket-proxy`
+    service to both `docker-compose.yml` and `docker-compose.prod.yml`, allow-listing exactly
+    `CONTAINERS/POST/DELETE/EXEC/IMAGES` (matches the exact call surface in `pool.go`/
+    `executor.go` — no networks/volumes/build/swarm/secrets calls exist). `judge-service-go`
+    no longer bind-mounts `docker.sock` or needs `group_add`/`DOCKER_GROUP_GID`; it talks to
+    the proxy via `DOCKER_HOST=tcp://docker-socket-proxy:2375` (zero Go code changes needed —
+    `docker.NewClientFromEnv()` already respects `DOCKER_HOST`). Verified live against the
+    local dev stack: pool warm-up, orphan-container cleanup, and real Python/Java submissions
+    (interpreted + compiled, exercising exec + container-update calls) all work through the
+    proxy; `GET /networks` and `GET /volumes` correctly 403. `docker-compose.prod.yml` edit is
+    validated via `docker compose config` (with dummy secrets) but **not committed/deployed** —
+    see `docs/USER_ACTION_ITEMS.md`.
+
 10. **H11 remainder — real replication + tested restore path** for Mongo/Redis/RabbitMQ. The
     backup script itself is fixed (see Priority 1 #2); there is still no replication/clustering
     and no one has ever actually run a *restore* from one of these backups. Worth doing a full
     backup → simulate data loss → restore → verify drill before calling this closed.
+
+    **✅ Done 2026-08-08 (dev DB only)** — ran the full drill against this Codespace's dev
+    Mongo: inserted a marker doc, `./scripts/backup_db.sh`, `db.dropDatabase()` (simulated total
+    loss), `mongorestore --archive --gzip` from the backup. All 245 documents across all 10
+    collections restored with 0 failures, all indexes (including unique constraints) rebuilt
+    correctly, marker doc round-tripped intact, and `/api/health` reported all services
+    connected immediately after. The *replication/clustering* half of this item (no
+    multi-node Mongo/Redis/RabbitMQ setup exists) is still open — that's a bigger infra change,
+    not attempted here.
 
 11. **H12 / Phase 3 — horizontal scale-out**. judge-service-go is bound to a single host's
     Docker socket with sandbox images built locally, no shared registry. Motivated by the
@@ -339,6 +388,9 @@ Treat any failure as a real bug to fix, not a false alarm.
     ~8-12 req/min slow-compile languages — see the `capacity_vps_limits` context, or just
     re-measure). Real work: get sandbox images into a registry, decouple judge-service-go from
     one host (Docker-in-Docker or Kubernetes Jobs-based executor pool).
+
+    **🔲 Not started** — large infra/design decision, out of this session's scope. See
+    `docs/USER_ACTION_ITEMS.md`.
 
 12. **CI gates smoke test**. `.github/workflows/ci.yml` now has `security-audit` (npm audit /
     audit-ci), `secret-scan` (gitleaks), and blocking lint on both `assessment-api` and
@@ -348,10 +400,51 @@ Treat any failure as a real bug to fix, not a false alarm.
     non-blocking to blocking) and the `frontend` `audit-ci` allowlist for its one
     documented-unfixable `react-router` advisory.
 
+    **⚠️ Simulated locally 2026-08-08, one job inconclusive** (`act`/GitHub CLI not available in
+    this Codespace, so ran each job's actual commands by hand instead of the workflow runner
+    itself):
+    - `judge-unit` (`go build ./...`, `go test ./...`): clean.
+    - `backend-unit` / `frontend-unit` (`npm test`, `npm run lint`): clean in both repos.
+    - `secret-scan`: ran gitleaks (`zricethezav/gitleaks:latest` container) against the full
+      182-commit history — no leaks found.
+    - `security-audit`: **found 2 real high-severity vulnerabilities that would have failed
+      this job** — `nanoid <3.3.17` (transitive via `postcss`←`vite`, both repos) and
+      `ip-address <=10.3.0` (transitive via `express-rate-limit`, `assessment-api` only).
+      Fixed with `npm audit fix` in both repos (transitive patch/minor bumps only, no
+      manifest/major changes — `package-lock.json` updated in both, `package.json`
+      untouched). Re-verified clean: `npm audit --audit-level=high` → 0 vulnerabilities,
+      `npm run audit:ci` (frontend, respecting the documented `react-router` allowlist) →
+      passed, and both repos' tests + lint re-run clean after the bump.
+      **Follow-up 2026-08-08:** the `npm audit fix` run left `assessment-api/package-lock.json`
+      internally inconsistent (stray/duplicate `@emnapi/*` entries, one version mismatch) —
+      `npm install` tolerated it silently but `npm ci` (what CI and
+      `assessment-api/Dockerfile` both use) rejected it with `EUSAGE`, which broke
+      `docker compose up --build`. Fixed by deleting `node_modules`/`package-lock.json` and
+      regenerating clean via `npm install` from `package.json`. Re-verified: `npm ci` clean,
+      `npm audit --audit-level=high` → 0 vulnerabilities, `npm test` → 79/79, and a full
+      `docker compose up --build -d` now brings up every container with `/api/health`
+      reporting all of mongodb/redis/rabbitmq/judge `connected`. `frontend/package-lock.json`
+      never had this problem.
+    - `judge-certification` (`go test -tags=integration ./...`, spawns real containers):
+      **inconclusive** — timed out (10 min) mid-run. Root cause traced to this Codespace's
+      resource contention, not a code/proxy regression: the dev stack's own warm pool was
+      already running (48 containers) when the suite added ~17 more on top, on only 4 CPUs
+      (load average hit 4.43). `DOCKER_HOST` was unset in the host shell for this run, so it
+      exercised the raw socket, not the new proxy — ruling out the proxy migration as the
+      cause. Needs a real run on GitHub's dedicated runners (or a Codespace with the dev stack
+      stopped first) to get a clean signal — flagged in `docs/USER_ACTION_ITEMS.md` rather than
+      guessed at further here.
+    - `e2e` (Playwright): not exercised — only runs on push to `main`/`master`, and is heavy
+      (fresh `docker-compose up`, browser install); out of scope for a same-session smoke test
+      given the integration-suite contention already observed.
+
 13. **`scripts/backfill_college_id.mjs`** — still needs to be run against the real production
     database before/at any second-customer cutover (per the C2 tenant-scoping fix). Confirm
     it's idempotent-safe to run again if it's ever unclear whether it already ran, then run it
     for real once there's DB access to prod (or its staging equivalent).
+
+    **🔲 Deliberately untouched** — per your explicit instruction, left entirely for you/whoever
+    has prod DB access. This Codespace has no prod credentials.
 
 ---
 

@@ -4,6 +4,7 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:3000/api";
 const HARNESS_EMAIL = process.env.HARNESS_EMAIL || "judge-harness@example.com";
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || "HarnessPass123!";
 const HARNESS_NAME = process.env.HARNESS_NAME || "Judge Harness";
+const HARNESS_COLLEGE_NAME = process.env.HARNESS_COLLEGE_NAME || "Judge Harness College";
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 1000);
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS || 30000);
 const READY_MAX_RETRIES = Number(process.env.HARNESS_READY_RETRIES || 20);
@@ -45,7 +46,17 @@ const TEST_PROBLEM = {
       expected: [1, 2],
       isSample: false
     }
-  ]
+  ],
+  // Required for createProblem's mandatory deep validation (preview.service.js
+  // Stage 4) to run at all — without both fields it silently fails with no errors.
+  solutionLanguage: "python",
+  referenceSolution: [
+    "def twoSum(nums, target):",
+    "    for i in range(len(nums)):",
+    "        for j in range(i + 1, len(nums)):",
+    "            if nums[i] + nums[j] == target:",
+    "                return [i, j]"
+  ].join("\n")
 };
 
 const CASES = [
@@ -280,7 +291,7 @@ function authHeaders(token) {
 }
 
 async function registerOrLogin() {
-  // Try login first (registration endpoint may be protected in deployments)
+  // Try login first — the harness user/college may already exist from a prior run.
   try {
     const loggedIn = await request("/auth/login", {
       method: "POST",
@@ -289,26 +300,33 @@ async function registerOrLogin() {
     });
     return loggedIn;
   } catch (err) {
-    // If login failed because user doesn't exist, attempt to register (some dev envs allow it)
+    // If login failed because the user doesn't exist yet, fall through to signup.
     if (err.status && err.status !== 401 && err.status !== 404) {
       throw err;
     }
   }
 
+  // /auth/register is superadmin-only post-multi-tenancy (auth.routes.js) — an
+  // anonymous harness has no way to call it. /auth/signup is the public equivalent:
+  // it creates a brand-new College tenant plus its first user, always as that
+  // college's "admin" (role/collegeId are derived server-side, never client-supplied
+  // — see college.service.js). "admin" can create problems (problems.routes.js) and
+  // submit solutions (submissions.routes.js only requires verifyToken), so it covers
+  // everything this harness needs.
   const payload = {
+    collegeName: HARNESS_COLLEGE_NAME,
     name: HARNESS_NAME,
     email: HARNESS_EMAIL,
-    password: HARNESS_PASSWORD,
-    role: "faculty"
+    password: HARNESS_PASSWORD
   };
 
   try {
-    const registered = await request("/auth/register", {
+    const signedUp = await request("/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    return registered;
+    return signedUp;
   } catch (err) {
     if (err.status !== 409) {
       throw err;

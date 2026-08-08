@@ -75,6 +75,29 @@ services:
     networks:
       - assessment-net
 
+  # Scopes judge-service-go's Docker access to only the endpoints it actually
+  # calls (container create/start/stop/remove/inspect/update, exec, image
+  # inspect/pull) instead of the raw docker.sock, which is full unscoped admin
+  # access to the host's Docker daemon. See docs/CODESPACE_HANDOFF.md item #9.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: codespace_docker_socket_proxy
+    environment:
+      - LOG_LEVEL=info
+      - CONTAINERS=1
+      - POST=1
+      - DELETE=1
+      - EXEC=1
+      - IMAGES=1
+      # Everything else (NETWORKS, VOLUMES, BUILD, SWARM, SERVICES, NODES,
+      # PLUGINS, SECRETS, CONFIGS, SYSTEM, etc.) stays at its default of 0 —
+      # judge-service-go never calls those endpoints.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - assessment-net
+    restart: unless-stopped
+
   judge-service-go:
     build:
       context: ./judge-service-go
@@ -82,11 +105,8 @@ services:
     container_name: codespace_judge_service_go
     working_dir: /src
     command: sh -c "go build -o ./tmp/go-judge-service . && ./tmp/go-judge-service"
-    group_add:
-      - "103"
     volumes:
       - ./judge-service-go:/src
-      - /var/run/docker.sock:/var/run/docker.sock # Needed for Docker-in-Docker functionality
       - /tmp:/tmp
     environment:
       - MONGO_URI=${DB_CONNECTION_STRING:-mongodb://mongo:27017/assessment_db}
@@ -100,12 +120,15 @@ services:
       - JUDGE_CENTRAL_COMPARE_JAVA=true
       - JUDGE_CENTRAL_COMPARE_CPP=true
       - JUDGE_CENTRAL_COMPARE_C=true
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     depends_on:
       rabbitmq:
         condition: service_healthy
       mongo:
         condition: service_started
       redis:
+        condition: service_started
+      docker-socket-proxy:
         condition: service_started
     networks:
       - assessment-net

@@ -150,6 +150,8 @@ export async function validateProblemDefinition(problem) {
       console.error(`[Validation] Reference solution verification crashed: ${err.message}`);
       report.errors.push(`Reference solution verification crashed: ${err.message}`);
     }
+  } else if (report.wrapperGeneration) {
+    report.errors.push("referenceSolution and solutionLanguage are required to pass deep validation.");
   }
 
   return report;
