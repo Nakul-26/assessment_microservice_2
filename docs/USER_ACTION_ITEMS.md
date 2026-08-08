@@ -7,12 +7,14 @@ this list as items get done or new ones come up; don't let it go stale.
 
 ## 1. Review, commit, and push the working-tree changes
 
-Nothing in this Codespace has been committed or pushed — that's deliberately left to you.
-Current uncommitted files (`git status`):
+**Resolved 2026-08-08.** Everything below has been committed and pushed across
+`59199d7`, `7110c72`, `4949f87`, and `2186628`. The working tree is clean and in sync
+with `origin/main`. Kept for history:
 
 - `docker-compose.yml`, `docker-compose.prod.yml` — the docker-socket-proxy migration
   (item #9). Verified working against the local dev stack; `docker-compose.prod.yml` is
-  validated via `docker compose config` but never deployed.
+  validated via `docker compose config` but still **not deployed** to prod (see item #2
+  below — that's the actual open action).
 - `assessment-api/src/services/preview.service.js`, `judge-service-go/main_test.go`,
   `scripts/test_submission.js` — smaller fixes/test corrections from earlier this session
   (see git diff for each; already described in prior handoff context).
@@ -30,6 +32,9 @@ Current uncommitted files (`git status`):
   vulnerabilities, `npm test` → 79/79, and a full `docker compose up --build -d` now
   brings up all containers with `/api/health` reporting mongodb/redis/rabbitmq/judge
   all `connected`. `frontend/package-lock.json` did not have this problem.
+- `package.json`, `.github/workflows/ci.yml`, `assessment-api/scripts/seed_e2e_users.mjs`,
+  `e2e/tests/assessment_lifecycle.spec.js`, `e2e/tests/submission.spec.js` — the E2E
+  test-data seeding and Playwright spec fixes from item #3/#12 below.
 
 ## 2. Deploy the docker-socket-proxy change to prod (item #9)
 
@@ -100,12 +105,14 @@ never run to completion against real data before, so none of this had ever been 
   class for both the score card and a separate "Challenge/Appeal Score" card, so the
   locator matched 2 elements. Fixed with `.first()`.
 
-All 7 E2E tests now pass locally end-to-end against a fresh seed (`npx playwright test`
-in `e2e/`, 14.9s). Everything above (`package.json`'s new `seed:e2e` script,
-`assessment-api/scripts/seed_e2e_users.mjs`, the CI step, and the two `.spec.js` fixes)
-is new and uncommitted — needs your commit/push. Once pushed, watch one more real run to
-confirm `e2e` goes fully green on GitHub's runners too — this will be the first time
-that's ever happened.
+**Resolved 2026-08-08.** Committed/pushed as `2186628`. CI run `31266652187` confirms
+`Playwright E2E Tests` passed fully green on GitHub's hosted runners (3m54s) — the first
+time that's ever happened — along with every other job (Backend/Frontend Unit, Judge
+Unit, Judge Certification, Secret Scan, Dependency Audit). Only harmless annotations
+(Node 20 deprecation notices, a Go module cache-miss note since there's no root
+`go.sum`). Item #12 (CI E2E confirmation) is now fully closed — the whole chain of bugs
+from the `docker-compose` v1 issue through missing test users and stale test assumptions
+is fixed and verified in production CI, not just locally.
 
 ## 4. Scope H12 horizontal scale-out (item #11)
 

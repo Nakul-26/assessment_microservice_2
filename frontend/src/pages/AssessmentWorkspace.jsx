@@ -7,7 +7,7 @@ import SubmissionOutput from '../components/SubmissionOutput';
 import buildTemplate from '../utils/buildTemplate';
 
 
-const supportedLanguages = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go'];
+const supportedLanguages = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go', 'ruby', 'php'];
 
 function loadDraft(attemptId) {
   try {

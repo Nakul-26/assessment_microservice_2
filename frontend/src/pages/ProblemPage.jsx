@@ -6,7 +6,7 @@ import api, { problems } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import buildTemplate from '../utils/buildTemplate';
 
-const supportedLanguages = ['python', 'javascript', 'java', 'cpp', 'c', 'csharp', 'go'];
+const supportedLanguages = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go', 'ruby', 'php'];
 
 const ProblemPage = ({ user }) => {
   const { _id } = useParams();

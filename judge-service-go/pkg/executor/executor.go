@@ -56,6 +56,20 @@ func (e *Executor) Client() *docker.Client {
 	return e.cli
 }
 
+// compilationMemoryFloorMb returns the minimum memory (MB) to grant a container during
+// compilation. kotlinc's JVM-based compiler daemon needs materially more than the usual
+// 1024MB floor to compile even trivial submissions without being OOM-killed (observed:
+// a plain two-argument function reliably OOMs at 1024MB once the wrapper it's compiled
+// alongside registers a few Gson TypeAdapters).
+func compilationMemoryFloorMb(compileCmd []string) int64 {
+	for _, arg := range compileCmd {
+		if strings.Contains(arg, "kotlinc") {
+			return 2048
+		}
+	}
+	return 1024
+}
+
 // UpdateContainerResources updates the resource limits of a running container.
 func (e *Executor) UpdateContainerResources(ctx context.Context, containerID string, memoryMb int64) error {
 	if memoryMb <= 0 {
@@ -524,8 +538,8 @@ func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID stri
 
 	if memoryLimitMb > 0 {
 		compilationLimit := memoryLimitMb
-		if compilationLimit < 1024 {
-			compilationLimit = 1024
+		if floor := compilationMemoryFloorMb(compileCmd); compilationLimit < floor {
+			compilationLimit = floor
 		}
 		if err := e.UpdateContainerResources(subCtx, containerID, compilationLimit); err != nil {
 			slog.Warn("failed to apply compilation memory limit", "containerId", containerID, "error", err)
@@ -618,8 +632,8 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 	// Apply a reasonable limit during compilation if a strict limit is requested for run
 	if memoryLimitMb > 0 {
 		compilationLimit := memoryLimitMb
-		if compilationLimit < 1024 {
-			compilationLimit = 1024
+		if floor := compilationMemoryFloorMb(compileCmd); compilationLimit < floor {
+			compilationLimit = floor
 		}
 		if err := e.UpdateContainerResources(subCtx, containerID, compilationLimit); err != nil {
 			slog.Warn("failed to apply compilation memory limit", "containerId", containerID, "error", err)
@@ -804,8 +818,8 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 
 	if memoryLimitMb > 0 {
 		compilationLimit := memoryLimitMb
-		if compilationLimit < 1024 {
-			compilationLimit = 1024
+		if floor := compilationMemoryFloorMb(compileCmd); compilationLimit < floor {
+			compilationLimit = floor
 		}
 		if err := e.UpdateContainerResources(subCtx, containerID, compilationLimit); err != nil {
 			slog.Warn("failed to apply compilation memory limit", "containerId", containerID, "error", err)

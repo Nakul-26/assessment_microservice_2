@@ -188,6 +188,25 @@ export default function buildTemplate(language, functionName, parameters = [], r
     return defsC;
   }
 
+  if (lang === 'ruby') {
+    let defsRb = '';
+    if (usesList) defsRb += `# class ListNode\n#   attr_accessor :val, :next\n#   def initialize(val = 0, nxt = nil)\n#     @val = val\n#     @next = nxt\n#   end\n# end\n\n`;
+    if (usesTree) defsRb += `# class TreeNode\n#   attr_accessor :val, :left, :right\n#   def initialize(val = 0, left = nil, right = nil)\n#     @val = val\n#     @left = left\n#     @right = right\n#   end\n# end\n\n`;
+    if (usesGraph) defsRb += `# class Node\n#   attr_accessor :val, :neighbors\n#   def initialize(val = 0, neighbors = [])\n#     @val = val\n#     @neighbors = neighbors\n#   end\n# end\n\n`;
+    defsRb += `class Solution\n  def ${functionName}(${params})\n    # your code here\n  end\nend`;
+    return defsRb;
+  }
+
+  if (lang === 'php') {
+    let defsPhp = `<?php\n\n`;
+    if (usesList) defsPhp += `/*\nclass ListNode {\n    public $val;\n    public $next;\n    function __construct($val = 0, $next = null) { $this->val = $val; $this->next = $next; }\n}\n*/\n\n`;
+    if (usesTree) defsPhp += `/*\nclass TreeNode {\n    public $val;\n    public $left;\n    public $right;\n    function __construct($val = 0, $left = null, $right = null) { $this->val = $val; $this->left = $left; $this->right = $right; }\n}\n*/\n\n`;
+    if (usesGraph) defsPhp += `/*\nclass Node {\n    public $val;\n    public $neighbors;\n    function __construct($val = 0, $neighbors = []) { $this->val = $val; $this->neighbors = $neighbors; }\n}\n*/\n\n`;
+    const phpParams = paramNames.map(p => `$${p}`).join(', ');
+    defsPhp += `class Solution {\n    function ${functionName}(${phpParams}) {\n        // your code here\n    }\n}`;
+    return defsPhp;
+  }
+
   // Generic fallback: include brief placeholders
   let out = '';
   if (usesList) out += `/* ListNode definition placeholder */\n`;
