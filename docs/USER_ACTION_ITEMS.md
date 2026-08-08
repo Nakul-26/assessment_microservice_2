@@ -47,15 +47,17 @@ commit/push and redeploy via Dokploy:
 
 ## 3. Confirm the CI `judge-certification` job on a real push (item #12)
 
-Local simulation of every CI job passed except one inconclusive result: the Docker-heavy
-integration/certification Go suite (`go test -tags=integration ./...`) timed out after
-10 minutes in this Codespace — traced to resource contention (65 containers competing
-for 4 CPUs, since the dev stack's own 48-container warm pool was already running), not a
-code or docker-socket-proxy regression (`DOCKER_HOST` was unset for that run, so it hit
-the raw socket, not the proxy). GitHub's hosted runners won't have that contention, but
-this hasn't actually been watched run on one yet. Push a trivial branch/PR (or use
-`gh workflow run`) and confirm `judge-certification` and the Playwright `e2e` job (not
-exercised locally at all) both go green.
+**Update 2026-08-08:** confirmed — CI actually ran on your `59199d7` push
+(`gh run view 31252971891`). `Judge Certification Suite` passed cleanly (1m50s, no
+contention/timeout like the earlier local simulation), along with Backend/Frontend Unit
+Tests, Judge Unit Tests, Secret Scan, and Dependency Audit. The only failure was
+`Playwright E2E Tests`, at its "Start services" step: `docker-compose: command not
+found` (exit 127). Root cause — GitHub's `ubuntu-latest` runners dropped the legacy
+Compose v1 `docker-compose` binary; only the `docker compose` v2 plugin is preinstalled
+now. Fixed in `.github/workflows/ci.yml` line 124 (`docker-compose up -d` →
+`docker compose up -d`) — this is a new uncommitted change, needs your commit/push.
+Once pushed, worth watching the run to confirm `e2e` goes green too (it's never
+actually been exercised end-to-end on a real runner before).
 
 ## 4. Scope H12 horizontal scale-out (item #11)
 

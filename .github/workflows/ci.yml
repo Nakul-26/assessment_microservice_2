@@ -121,7 +121,7 @@ jobs:
       - name: Install Playwright Browsers
         run: cd e2e && npx playwright install --with-deps chromium
       - name: Start services
-        run: docker-compose up -d
+        run: docker compose up -d
       - name: Wait for services
         run: sleep 30
       - name: Seed problems
