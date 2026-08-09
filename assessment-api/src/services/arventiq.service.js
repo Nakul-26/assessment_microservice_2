@@ -195,7 +195,18 @@ export async function getArventiqSubmissionResult(submissionId, auth) {
   if (result.notFound || result.forbidden) {
     return result;
   }
-  const verdict = mapSubmissionToArventiqVerdict(result.submission);
+  // The Arventiq service account carries role:"admin" with no collegeId, and
+  // canAccessSubmission() lets any admin/faculty through whenever a submission has no
+  // collegeId — true for every Arventiq submission (and, until the collegeId backfill
+  // runs, most pre-existing ones too). Without this check, the shared ARVENTIQ_SECRET
+  // could read ANY submission in the system by ID, not just ones Arventiq created.
+  // externalStudentId/externalAssessmentId are only ever stamped by submitArventiqSolution,
+  // so requiring one here scopes reads to genuinely Arventiq-originated submissions.
+  const sub = result.submission;
+  if (!sub || (!sub.externalStudentId && !sub.externalAssessmentId)) {
+    return { forbidden: true };
+  }
+  const verdict = mapSubmissionToArventiqVerdict(sub);
   return { pending: verdict === null, verdict };
 }
 

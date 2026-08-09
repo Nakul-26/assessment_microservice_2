@@ -268,7 +268,10 @@ router.post("/banner", verifyToken, authorizeRoles("admin", "superadmin", "facul
   }
 });
 
-router.get("/backup", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+// superadmin-only: this dumps/overwrites every college's data in one shot (no tenant
+// scoping, no field exclusion — it's a full-fidelity disaster-recovery tool, not a
+// per-college feature). A per-college "admin" role must never reach this.
+router.get("/backup", verifyToken, authorizeRoles("superadmin"), async (req, res) => {
   try {
     const data = await systemService.exportDatabase();
     
@@ -290,7 +293,8 @@ router.get("/backup", verifyToken, authorizeRoles("admin", "superadmin"), async 
   }
 });
 
-router.post("/restore", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+// superadmin-only — see the /backup comment above; restore is the destructive twin.
+router.post("/restore", verifyToken, authorizeRoles("superadmin"), async (req, res) => {
   try {
     const results = await systemService.importDatabase(req.body);
     

@@ -1,10 +1,11 @@
 import { env } from "../config/env.js";
 import { verifyToken } from "./auth.mjs";
+import { safeCompare } from "../utils/safeCompare.js";
 
 export const verifyService = (req, res, next) => {
   const serviceKey = req.headers["x-service-key"];
 
-  if (!serviceKey || serviceKey !== env.TESTING_PLATFORM_KEY) {
+  if (!safeCompare(serviceKey, env.TESTING_PLATFORM_KEY)) {
     return res.status(401).json({
       success: false,
       message: "Unauthorized service"

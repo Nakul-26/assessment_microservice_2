@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { env } from "../config/env.js";
+import { safeCompare } from "../utils/safeCompare.js";
 import User from "../../models/User.mjs";
 
 const SERVICE_ACCOUNT_EMAIL = "arventiq-service@system.internal";
@@ -40,7 +41,7 @@ export const verifyArventiq = async (req, res, next) => {
   const authHeader = req.headers["authorization"] || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
 
-  if (!token || !env.ARVENTIQ_SECRET || token !== env.ARVENTIQ_SECRET) {
+  if (!safeCompare(token, env.ARVENTIQ_SECRET)) {
     return res.status(401).json({
       success: false,
       message: "Unauthorized: invalid Arventiq credentials"

@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
@@ -11,6 +12,10 @@ import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger.js";
 
 const app = express();
+
+// Sets X-Frame-Options, Content-Security-Policy, X-Content-Type-Options, HSTS, etc.
+// This is a JSON API with no server-rendered HTML, so helmet's defaults are safe as-is.
+app.use(helmet());
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
