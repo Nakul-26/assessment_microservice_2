@@ -473,9 +473,7 @@ func jsonAddOutput(sb *strings.Builder, returnType string, varName string) {
 }
 
 // rustJSONHelpers returns the (fromJSON, toJSON) helper function names (defined
-// statically in rust_wrapper.tpl) for a given parsed type. Only number, string,
-// boolean, array<...> and matrix<...> of those are supported for Rust — the Rust
-// judge intentionally does not support linkedlist/tree/graph types.
+// statically in rust_wrapper.tpl) for a given parsed type.
 func rustJSONHelpers(t types.ParsedType) (fromJSON string, toJSON string, ok bool) {
 	switch t.Kind {
 	case types.NumberKind:
@@ -484,6 +482,12 @@ func rustJSONHelpers(t types.ParsedType) (fromJSON string, toJSON string, ok boo
 		return "json_to_string", "string_to_json", true
 	case types.BooleanKind:
 		return "json_to_bool", "bool_to_json", true
+	case types.LinkedListKind:
+		return "json_to_list", "list_to_json", true
+	case types.TreeKind:
+		return "json_to_tree", "tree_to_json", true
+	case types.GraphKind:
+		return "json_to_graph", "graph_to_json", true
 	case types.ArrayKind:
 		if t.Element == nil {
 			return "", "", false

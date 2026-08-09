@@ -116,9 +116,82 @@ is fixed and verified in production CI, not just locally.
 
 ## 4. Scope H12 horizontal scale-out (item #11)
 
-Not started — this is a real infra/design project (getting sandbox images into a
-registry, decoupling judge-service-go from a single host's Docker socket), not something
-to guess at. Worth a deliberate conversation about scope/timeline before picking it up.
+Paused at your instruction ("wait", then explicitly redirected to judge language/problem
+coverage instead — see below). Not started — this is a real infra/design project (getting
+sandbox images into a registry, decoupling judge-service-go from a single host's Docker
+socket), not something to guess at. Worth a deliberate conversation about scope/timeline
+before picking it up whenever you're ready to return to it.
+
+## 4a. Judge language coverage: Kotlin/Rust data structures + exposing Ruby/PHP/Kotlin/Rust
+
+**2026-08-09.** In place of H12, worked the judge/problem-coverage angle instead. Found two
+real, separate gaps:
+
+- **Kotlin, Rust, Ruby, and PHP were fully implemented in `judge-service-go` (images,
+  wrappers, adapters) but invisible in the frontend** — `ProblemPage.jsx`,
+  `AssessmentWorkspace.jsx`, `AddAssessmentPage.jsx`, and `EditAssessmentPage.jsx` all
+  hardcoded the same 7-8 language list that omitted them. Students could never select
+  these languages at all.
+- **Kotlin and Rust couldn't handle `tree<T>`/`linkedlist<T>`/`graph<T>` problems** — every
+  other language (Python/JS/TS/Java/C/C++/C#/Go/Ruby/PHP) supported these types; Kotlin and
+  Rust's wrapper templates explicitly didn't (commented as intentional gaps). Checked the
+  actual certification set: 10 tree, 9 linked-list, 2 graph, and 1 nested
+  `array<linkedlist<number>>` problem — about a quarter of the 86-problem set — would have
+  been unsolvable in these two languages.
+
+Fixed, in order:
+- Ruby and PHP exposed in all four frontend language lists, plus real starter-code
+  templates added to `frontend/src/utils/buildTemplate.js` (they previously fell through to
+  an unhelpful generic placeholder). Verified via direct API submissions — Two Sum and a
+  linked-list problem (Add Two Numbers), both Accepted.
+- Kotlin's `pkg/wrappers/kotlin_wrapper.tpl` rewritten to register Gson `TypeAdapter`s for
+  `TreeNode`/`ListNode`/`Node`, mirroring the same pattern Java already used. Verified tree,
+  linked-list, and graph problems all Accepted, plus a regression check (Two Sum) still
+  passes.
+- Rust's `pkg/wrappers/rust_wrapper.tpl` given real `TreeNode`/`ListNode`/`Node` struct
+  definitions (matching LeetCode's own Rust convention: `Option<Box<ListNode>>`,
+  `Option<Rc<RefCell<TreeNode>>>`) plus hand-rolled JSON conversion helpers (the wrapper has
+  no external JSON crate available offline), and `pkg/wrapper/generator.go`'s
+  `rustJSONHelpers` extended to wire them in for the static per-parameter codegen path.
+  Verified tree, linked-list, and graph problems all Accepted, plus a Two Sum regression
+  check.
+- **Real, pre-existing bug found and fixed along the way**: `pkg/executor/executor.go`'s
+  `CompileInContainer` (used by the central-per-test comparator's separate compile phase —
+  the actual path Kotlin/Rust/Ruby/PHP submissions take) had no memory floor at all during
+  compilation, unlike its sibling `RunInContainer*` functions which already floor at
+  1024MB. `kotlinc` needs meaningfully more than that even for trivial code — every Kotlin
+  submission through this path was silently OOM-killed during compilation before this fix,
+  regardless of anything to do with tree/list/graph. Added a shared
+  `compilationMemoryFloorMb()` helper (1024MB default, 2048MB when the compile command is
+  `kotlinc`) and applied it at all four call sites.
+- **Also found and fixed separately**: `judge-service-go/Dockerfile`'s `ENTRYPOINT` bakes in
+  a binary built at image-build time; docker-compose.yml's dev-mode `command:` override
+  (intended to `go build` fresh on every container start against the bind-mounted source)
+  gets silently swallowed as ignored CLI args to that entrypoint rather than replacing it.
+  Practical effect: `docker compose restart judge-service-go` **never actually applies Go
+  source changes** — only `docker compose build judge-service-go` (or `up -d --build`) does.
+  This cost real time mid-session (two restarts that silently kept running the stale
+  binary before the real fix was traced). Worth fixing properly at some point — either give
+  the Dockerfile a `CMD` instead of baking `command:` assumptions into compose, or drop the
+  dev-mode live-rebuild pretense and just always `--build`. Not changed in this session
+  since it's a deliberate infra/Dockerfile decision, not a drive-by fix.
+- Type-conversion tables extended for completeness: `frontend/src/utils/typeValidator.js`
+  now maps `tree`/`linkedlist`/`graph`/etc. for Kotlin and Rust too, and
+  `frontend/src/pages/ProblemPage.jsx`'s language list picked up `typescript`, which had
+  been missing there (present everywhere else) — a small pre-existing inconsistency fixed
+  along the way.
+
+Note: this platform's Rust convention requires `&self` as the first parameter on Solution
+methods (`impl Solution { pub fn twoSum(&self, ...) }`), which differs from real
+LeetCode's usual associated-function style — that's how the existing (pre-this-session)
+Rust wrapper already called user code, not something introduced now. Kotlin/Ruby/PHP don't
+have this quirk.
+
+All of `judge-service-go`'s unit tests (`go test ./...`) and the frontend's unit tests
+(`npm test`) and lint (`npx eslint src/`) pass clean. Everything above is uncommitted —
+needs your review/commit/push. `judge-service-go`'s Docker image will need a real rebuild
+wherever this deploys (see the Dockerfile/entrypoint note above) — a plain container
+restart is not sufficient.
 
 ## 5. Run `scripts/backfill_college_id.mjs` against production (item #13)
 

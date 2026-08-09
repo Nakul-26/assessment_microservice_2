@@ -1,5 +1,24 @@
 # Codespace / Docker environment handoff
 
+## Session update — 2026-08-09
+
+Short pointer, not a rewrite — full detail lives in `docs/USER_ACTION_ITEMS.md`, which is
+now the more current running log:
+
+- **#12 (CI gates) is fully resolved**, superseding the "mostly done, one inconclusive
+  result" note below — a real push confirmed every CI job green on GitHub's hosted
+  runners, including the previously-inconclusive `judge-certification` job and, in a
+  follow-up push, `Playwright E2E Tests` passing end-to-end for the first time ever.
+- **New work not tracked anywhere in this doc**: closed a real judge/problem-coverage gap
+  — Kotlin and Rust couldn't handle `tree`/`linkedlist`/`graph` problems (~1/4 of the
+  certification set), and Kotlin/Rust/Ruby/PHP were fully built in `judge-service-go` but
+  invisible in the frontend's language pickers. Both fixed and verified. Also found two
+  independent real bugs along the way: `CompileInContainer` had no compile-time memory
+  floor (Kotlin submissions were silently OOM-killed regardless of data structures), and
+  `judge-service-go`'s Dockerfile `ENTRYPOINT` means `docker compose restart` never
+  actually applies Go source changes — only `docker compose build` does. See
+  `docs/USER_ACTION_ITEMS.md` §4a for the full writeup.
+
 ## Session update — 2026-08-08
 
 Worked through the full Priority 1/2 checklist below in this Codespace. Summary (details

@@ -131,13 +131,39 @@ export function mapType(language, typeStr) {
     graph: () => 'struct Node*',
   };
 
+  const kotlinMap = {
+    number: 'Int',
+    string: 'String',
+    boolean: 'Boolean',
+    void: 'Unit',
+    array: (t) => `Array<${mapType('kotlin', t)}>`,
+    matrix: (t) => `Array<Array<${mapType('kotlin', t)}>>`,
+    tree: () => 'TreeNode?',
+    linkedlist: () => 'ListNode?',
+    graph: () => 'Node?',
+  };
+
+  const rustMap = {
+    number: 'i32',
+    string: 'String',
+    boolean: 'bool',
+    void: '()',
+    array: (t) => `Vec<${mapType('rust', t)}>`,
+    matrix: (t) => `Vec<Vec<${mapType('rust', t)}>>`,
+    tree: () => 'Option<Rc<RefCell<TreeNode>>>',
+    linkedlist: () => 'Option<Box<ListNode>>',
+    graph: () => 'Option<Rc<RefCell<Node>>>',
+  };
+
   const maps = {
     cpp: cppMap,
     java: javaMap,
     csharp: csharpMap,
     go: goMap,
     typescript: tsMap,
-    c: cMap
+    c: cMap,
+    kotlin: kotlinMap,
+    rust: rustMap
   };
 
   const currentMap = maps[language];

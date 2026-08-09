@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api, { assessments } from '../api';
 import { getApiErrorMessage, validateAssessmentForm } from '../utils/assessmentForm';
 
-const LANGS = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go', 'ruby', 'php'];
+const LANGS = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go', 'ruby', 'php', 'kotlin', 'rust'];
 
 const EditAssessmentPage = () => {
   const { id } = useParams();

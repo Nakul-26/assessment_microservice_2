@@ -1,7 +1,52 @@
 // wrapper injected by judge (single test execution for central comparator mode)
-//
-// Note: only number / string / boolean / array<...> / matrix<...> parameter and
-// return types are supported for Rust. linkedlist/tree/graph are not supported.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::rc::Rc;
+
+// Data structures, matching LeetCode's own Rust convention: singly-owned Box for
+// the linked list, and Rc<RefCell<..>> for tree/graph since those need shared,
+// mutable references (a node can be reached via more than one path/parent).
+#[derive(Debug)]
+pub struct ListNode {
+    pub val: i32,
+    pub next: Option<Box<ListNode>>,
+}
+
+impl ListNode {
+    #[inline]
+    fn new(val: i32) -> Self {
+        ListNode { next: None, val }
+    }
+}
+
+#[derive(Debug)]
+pub struct TreeNode {
+    pub val: i32,
+    pub left: Option<Rc<RefCell<TreeNode>>>,
+    pub right: Option<Rc<RefCell<TreeNode>>>,
+}
+
+impl TreeNode {
+    #[inline]
+    fn new(val: i32) -> Self {
+        TreeNode { val, left: None, right: None }
+    }
+}
+
+#[derive(Debug)]
+pub struct Node {
+    pub val: i32,
+    pub neighbors: Vec<Option<Rc<RefCell<Node>>>>,
+}
+
+impl Node {
+    #[inline]
+    fn new(val: i32) -> Self {
+        Node { val, neighbors: vec![] }
+    }
+}
 
 #[derive(Debug, Clone)]
 enum Json {
@@ -263,6 +308,155 @@ fn json_to_matrix_bool(v: &Json) -> Vec<Vec<bool>> {
         Json::Arr(a) => a.iter().map(json_to_vec_bool).collect(),
         _ => Vec::new(),
     }
+}
+
+fn json_to_list(v: &Json) -> Option<Box<ListNode>> {
+    let items = match v {
+        Json::Arr(a) => a,
+        _ => return None,
+    };
+    let mut dummy = Box::new(ListNode::new(0));
+    let mut curr = &mut dummy;
+    for item in items {
+        curr.next = Some(Box::new(ListNode::new(json_to_i32(item))));
+        curr = curr.next.as_mut().unwrap();
+    }
+    dummy.next
+}
+
+fn list_to_json(head: &Option<Box<ListNode>>) -> String {
+    let mut parts = Vec::new();
+    let mut curr = head;
+    while let Some(node) = curr {
+        parts.push(node.val.to_string());
+        curr = &node.next;
+    }
+    format!("[{}]", parts.join(","))
+}
+
+fn json_to_tree(v: &Json) -> Option<Rc<RefCell<TreeNode>>> {
+    let data = match v {
+        Json::Arr(a) => a,
+        _ => return None,
+    };
+    if data.is_empty() || matches!(data[0], Json::Null) {
+        return None;
+    }
+    let root = Rc::new(RefCell::new(TreeNode::new(json_to_i32(&data[0]))));
+    let mut queue: VecDeque<Rc<RefCell<TreeNode>>> = VecDeque::new();
+    queue.push_back(Rc::clone(&root));
+    let mut i = 1;
+    while let Some(node) = queue.pop_front() {
+        if i < data.len() {
+            if !matches!(data[i], Json::Null) {
+                let left = Rc::new(RefCell::new(TreeNode::new(json_to_i32(&data[i]))));
+                node.borrow_mut().left = Some(Rc::clone(&left));
+                queue.push_back(left);
+            }
+            i += 1;
+        }
+        if i < data.len() {
+            if !matches!(data[i], Json::Null) {
+                let right = Rc::new(RefCell::new(TreeNode::new(json_to_i32(&data[i]))));
+                node.borrow_mut().right = Some(Rc::clone(&right));
+                queue.push_back(right);
+            }
+            i += 1;
+        }
+    }
+    Some(root)
+}
+
+fn tree_to_json(root: &Option<Rc<RefCell<TreeNode>>>) -> String {
+    if root.is_none() {
+        return "[]".to_string();
+    }
+    let mut result: Vec<Option<i32>> = Vec::new();
+    let mut queue: VecDeque<Option<Rc<RefCell<TreeNode>>>> = VecDeque::new();
+    queue.push_back(root.clone());
+    while let Some(item) = queue.pop_front() {
+        match item {
+            Some(node) => {
+                let n = node.borrow();
+                result.push(Some(n.val));
+                queue.push_back(n.left.clone());
+                queue.push_back(n.right.clone());
+            }
+            None => result.push(None),
+        }
+    }
+    while let Some(None) = result.last() {
+        result.pop();
+    }
+    let parts: Vec<String> = result
+        .iter()
+        .map(|v| match v {
+            Some(x) => x.to_string(),
+            None => "null".to_string(),
+        })
+        .collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn json_to_graph(v: &Json) -> Option<Rc<RefCell<Node>>> {
+    let adj = match v {
+        Json::Arr(a) => a,
+        _ => return None,
+    };
+    if adj.is_empty() {
+        return None;
+    }
+    let nodes: Vec<Rc<RefCell<Node>>> = (0..adj.len())
+        .map(|i| Rc::new(RefCell::new(Node::new((i + 1) as i32))))
+        .collect();
+    for (i, neighbors) in adj.iter().enumerate() {
+        if let Json::Arr(ns) = neighbors {
+            for nb in ns {
+                let idx = (json_to_i32(nb) - 1) as usize;
+                nodes[i].borrow_mut().neighbors.push(Some(Rc::clone(&nodes[idx])));
+            }
+        }
+    }
+    Some(Rc::clone(&nodes[0]))
+}
+
+fn graph_to_json(node: &Option<Rc<RefCell<Node>>>) -> String {
+    let start = match node {
+        Some(n) => Rc::clone(n),
+        None => return "[]".to_string(),
+    };
+    let mut map: HashMap<i32, Rc<RefCell<Node>>> = HashMap::new();
+    let mut queue: VecDeque<Rc<RefCell<Node>>> = VecDeque::new();
+    queue.push_back(Rc::clone(&start));
+    map.insert(start.borrow().val, Rc::clone(&start));
+    while let Some(curr) = queue.pop_front() {
+        let neighbors = curr.borrow().neighbors.clone();
+        for nb_opt in neighbors {
+            if let Some(nb) = nb_opt {
+                let v = nb.borrow().val;
+                if !map.contains_key(&v) {
+                    map.insert(v, Rc::clone(&nb));
+                    queue.push_back(nb);
+                }
+            }
+        }
+    }
+    let n = map.len();
+    let mut res: Vec<String> = Vec::new();
+    for i in 1..=n {
+        match map.get(&(i as i32)) {
+            Some(node) => {
+                let neighbors = &node.borrow().neighbors;
+                let parts: Vec<String> = neighbors
+                    .iter()
+                    .filter_map(|nb| nb.as_ref().map(|x| x.borrow().val.to_string()))
+                    .collect();
+                res.push(format!("[{}]", parts.join(",")));
+            }
+            None => res.push("[]".to_string()),
+        }
+    }
+    format!("[{}]", res.join(","))
 }
 
 fn i32_to_json(v: &i32) -> String {

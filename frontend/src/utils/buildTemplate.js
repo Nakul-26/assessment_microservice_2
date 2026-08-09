@@ -207,6 +207,28 @@ export default function buildTemplate(language, functionName, parameters = [], r
     return defsPhp;
   }
 
+  if (lang === 'kotlin') {
+    const ktReturnType = mapType('kotlin', returnType) || 'Unit';
+    const ktParams = (parameters || []).map(p => `${p.name}: ${mapType('kotlin', p.type) || 'Int'}`).join(', ');
+    let defsKt = '';
+    if (usesList) defsKt += `/*\nclass ListNode(var \`val\`: Int = 0) {\n    var next: ListNode? = null\n}\n*/\n\n`;
+    if (usesTree) defsKt += `/*\nclass TreeNode(var \`val\`: Int = 0) {\n    var left: TreeNode? = null\n    var right: TreeNode? = null\n}\n*/\n\n`;
+    if (usesGraph) defsKt += `/*\nclass Node(var \`val\`: Int = 0) {\n    var neighbors: MutableList<Node> = mutableListOf()\n}\n*/\n\n`;
+    defsKt += `class Solution {\n    fun ${functionName}(${ktParams}): ${ktReturnType} {\n        // your code here\n    }\n}`;
+    return defsKt;
+  }
+
+  if (lang === 'rust') {
+    const rustReturnType = mapType('rust', returnType) || '()';
+    const rustParams = (parameters || []).map(p => `${p.name}: ${mapType('rust', p.type) || 'i32'}`).join(', ');
+    let defsRs = '';
+    if (usesList) defsRs += `/*\npub struct ListNode {\n    pub val: i32,\n    pub next: Option<Box<ListNode>>,\n}\n*/\n\n`;
+    if (usesTree) defsRs += `/*\npub struct TreeNode {\n    pub val: i32,\n    pub left: Option<Rc<RefCell<TreeNode>>>,\n    pub right: Option<Rc<RefCell<TreeNode>>>,\n}\n*/\n\n`;
+    if (usesGraph) defsRs += `/*\npub struct Node {\n    pub val: i32,\n    pub neighbors: Vec<Option<Rc<RefCell<Node>>>>,\n}\n*/\n\n`;
+    defsRs += `struct Solution;\n\nimpl Solution {\n    pub fn ${functionName}(&self, ${rustParams}) -> ${rustReturnType} {\n        // your code here\n    }\n}`;
+    return defsRs;
+  }
+
   // Generic fallback: include brief placeholders
   let out = '';
   if (usesList) out += `/* ListNode definition placeholder */\n`;

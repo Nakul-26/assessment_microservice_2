@@ -592,15 +592,13 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 
 	// Apply memory limit before compilation
 	if memoryLimitMb > 0 {
-		if err := e.UpdateContainerResources(subCtx, containerID, memoryLimitMb); err != nil {
+		compilationLimit := memoryLimitMb
+		if floor := compilationMemoryFloorMb(compileCmd); compilationLimit < floor {
+			compilationLimit = floor
+		}
+		if err := e.UpdateContainerResources(subCtx, containerID, compilationLimit); err != nil {
 			slog.Warn("failed to apply memory limit for compilation", "containerId", containerID, "error", err)
 		}
-		defer func() {
-			// Reset limit after compilation if needed, but usually we just keep it for run
-			// However, CompileInContainer is sometimes used standalone.
-			// For safety, let's NOT reset it here if it's going to be used by Run immediately.
-			// Actually, the caller should handle reset if they know it's the end.
-		}()
 	}
 
 	compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
