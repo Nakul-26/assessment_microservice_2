@@ -23,6 +23,37 @@ type Executor struct {
 	cli *docker.Client
 }
 
+// maxCapturedOutputBytes caps how much of a single exec's stdout/stderr this process
+// will buffer in memory, well above the 64KB/4KB limits main.go later truncates to for
+// storage, but bounded so a submission that prints in a tight loop can't grow
+// judge-service-go's own heap without limit for the full exec timeout window. The
+// container's memory cgroup limits the child process, not this buffer — it lives here,
+// in the judge service's process, so it needs its own cap.
+const maxCapturedOutputBytes = 1 * 1024 * 1024
+
+// boundedWriter buffers up to limit bytes and silently discards the rest, always
+// reporting a full, successful write so the Docker output stream keeps draining
+// (a short/failed write here would stall or error the exec mid-run) instead of
+// buffering an unbounded amount of flood output.
+type boundedWriter struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	if remaining := w.limit - w.buf.Len(); remaining > 0 {
+		if remaining > len(p) {
+			remaining = len(p)
+		}
+		w.buf.Write(p[:remaining])
+	}
+	return len(p), nil
+}
+
+func (w *boundedWriter) String() string {
+	return w.buf.String()
+}
+
 type ExecStream struct {
 	Stdout io.ReadCloser
 	Stderr io.ReadCloser
@@ -99,7 +130,8 @@ func (s *ExecStream) Wait() (int, error) {
 
 // runExecWithTimeout handles the full lifecycle of creating, running, and waiting for an exec instance.
 func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration) (string, string, int, error) {
-	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}
+	stderrBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 
 	execOpts := docker.CreateExecOptions{
 		Container:    containerID,
@@ -120,8 +152,8 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 	defer cancel()
 
 	startExecOptions := docker.StartExecOptions{
-		OutputStream: &stdoutBuf,
-		ErrorStream:  &stderrBuf,
+		OutputStream: stdoutBuf,
+		ErrorStream:  stderrBuf,
 		Context:      childCtx,
 	}
 	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
@@ -196,7 +228,8 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 // function-mode path — covered by the existing test suite — is provably
 // untouched.
 func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, stdinInput string, timeout time.Duration) (string, string, int, error) {
-	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}
+	stderrBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 
 	execOpts := docker.CreateExecOptions{
 		Container:    containerID,
@@ -218,8 +251,8 @@ func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID stri
 
 	startExecOptions := docker.StartExecOptions{
 		InputStream:  strings.NewReader(stdinInput),
-		OutputStream: &stdoutBuf,
-		ErrorStream:  &stderrBuf,
+		OutputStream: stdoutBuf,
+		ErrorStream:  stderrBuf,
 		Context:      childCtx,
 	}
 	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
@@ -483,18 +516,19 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 }
 
 func (e *Executor) collectStream(stream *ExecStream) (string, string, int, error) {
-	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}
+	stderrBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(&stdoutBuf, stream.Stdout)
+		_, _ = io.Copy(stdoutBuf, stream.Stdout)
 		_ = stream.Stdout.Close()
 	}()
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(&stderrBuf, stream.Stderr)
+		_, _ = io.Copy(stderrBuf, stream.Stderr)
 		_ = stream.Stderr.Close()
 	}()
 
@@ -703,7 +737,8 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 // to the process, then signals EOF so blocking readers (input()/scanf/Scanner...)
 // unblock once all bytes have been consumed.
 func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration, stdinData []byte) (string, string, int, error) {
-	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}
+	stderrBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 
 	execOpts := docker.CreateExecOptions{
 		Container:    containerID,
@@ -725,8 +760,8 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 
 	startExecOptions := docker.StartExecOptions{
 		InputStream:  bytes.NewReader(stdinData),
-		OutputStream: &stdoutBuf,
-		ErrorStream:  &stderrBuf,
+		OutputStream: stdoutBuf,
+		ErrorStream:  stderrBuf,
 		Context:      childCtx,
 	}
 	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)

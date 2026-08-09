@@ -203,14 +203,19 @@ export async function bulkRegister(users, defaultPassword, collegeId) {
   return results;
 }
 
+// Fixed bcrypt hash of an unrelated, unguessable string — used only so bcrypt.compare
+// always runs on an unknown-email login attempt, matching the cost of the real
+// user.password comparison below. Without this, a nonexistent email short-circuits
+// before bcrypt.compare and returns much faster than a wrong-password attempt on a real
+// account, letting the ~50-100ms gap be used to enumerate valid emails even though both
+// cases return identical error text.
+const DUMMY_PASSWORD_HASH = "$2b$10$SHhjQgShaXsISHR6GrxOo.wWzSWSHx.SZEgIfGUxxS1BupxLT17ci";
+
 export async function login({ email, password }, auditInfo = {}) {
   const user = await User.findOne({ email: email.toLowerCase() });
-  if (!user) {
-    throw new HttpError(401, "Invalid credentials", { message: "Invalid credentials" });
-  }
 
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) {
+  const ok = await bcrypt.compare(password, user ? user.password : DUMMY_PASSWORD_HASH);
+  if (!user || !ok) {
     await auditService.logEvent({
       event: "LOGIN_FAILED",
       details: { email: email.toLowerCase() },
