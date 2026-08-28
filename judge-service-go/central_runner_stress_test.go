@@ -108,7 +108,7 @@ func setupCentralStress(t *testing.T, languageID string) (*executor.Executor, *p
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	if err := p.WarmUp(ctx, lang.ID, lang.Image, stressPoolSize); err != nil {
+	if err := p.WarmUp(ctx, lang.ID, lang.Image, stressPoolSize, stressPoolSize); err != nil {
 		t.Skipf("%s container warm-up failed (is %q image available?): %v", lang.ID, lang.Image, err)
 	}
 

@@ -55,7 +55,7 @@ func benchmarkCentralRunnerPython(b *testing.B, threshold string) {
 	p := pool.NewPool(exec.Client(), 1)
 	warmCtx, warmCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer warmCancel()
-	if err := p.WarmUp(warmCtx, lang.ID, lang.Image, 1); err != nil {
+	if err := p.WarmUp(warmCtx, lang.ID, lang.Image, 1, 1); err != nil {
 		b.Skipf("python container warm-up failed (is %q image available?): %v", lang.Image, err)
 	}
 

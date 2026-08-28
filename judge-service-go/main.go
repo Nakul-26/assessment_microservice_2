@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,7 +53,142 @@ const (
 	maxLogOutputBytes       = 4 * 1024
 	maxTestsBytes           = 1 << 20 // 1MB
 	defaultPoolSizePerLang  = 2
+
+	// Per-language container pool autoscaling (see pkg/pool.StartAutoscaler). All of these
+	// have env var overrides parsed in main(); see docker-compose.prod.yml's header comment
+	// for the operator-facing summary.
+	defaultPoolGlobalCap          = 60
+	defaultWorkerConcurrency      = 24
+	defaultAutoscaleInterval      = 15 * time.Second
+	defaultScaleUpThresholdMs     = 150.0
+	defaultScaleDownThresholdMs   = 20.0
+	defaultScaleUpCooldown        = 20 * time.Second
+	defaultScaleDownCooldown      = 180 * time.Second
 )
+
+// langPoolAbbrev maps each supported language ID to the abbreviation used in its
+// JUDGE_POOL_MIN_<ABBR>/JUDGE_POOL_MAX_<ABBR> env vars — matches the abbreviation convention
+// already established by JUDGE_CENTRAL_COMPARE_*/JUDGE_BATCH_THRESHOLD_* (PY, JS, JAVA, CPP, C)
+// and extends it to the remaining 7 languages that had no precedent yet.
+var langPoolAbbrev = map[string]string{
+	"python":     "PY",
+	"javascript": "JS",
+	"typescript": "TS",
+	"java":       "JAVA",
+	"c":          "C",
+	"cpp":        "CPP",
+	"csharp":     "CS",
+	"go":         "GO",
+	"rust":       "RS",
+	"ruby":       "RB",
+	"php":        "PHP",
+	"kotlin":     "KT",
+}
+
+// langPoolMaxDefault is each language's default pool Max when JUDGE_POOL_MAX_<ABBR> is unset.
+// Only takes effect once JUDGE_POOL_AUTOSCALE_ENABLED is on — Min alone governs behavior
+// otherwise, so this doesn't change today's default (min=max=DEFAULT_POOL_SIZE) behavior.
+// Grouped by toolchain weight, based on this session's live load test at pool=2/3/4:
+//   - java/cpp: measured directly, benefited most from extra containers (heavy multi-stage
+//     compile + JVM/native runtime). csharp/kotlin grouped with them (same JVM/heavy-toolchain
+//     profile — dotnet build / kotlinc are comparably slow).
+//   - python: measured directly; its relative gain (pool2->4) was larger than expected for an
+//     interpreted language, so it gets the same headroom as the compiled bucket rather than a
+//     conservative one, pending Phase 2's real wait-time data.
+//   - javascript/typescript/ruby/php: interpreted, unmeasured beyond javascript (whose gain was
+//     smaller than python's) — conservative default.
+//   - c/go/rust: unmeasured. Go/Rust compilers are typically much faster/single-pass than
+//     javac's or g++'s multi-stage builds, so grouped with the conservative bucket rather than
+//     assumed to belong with java/cpp.
+var langPoolMaxDefault = map[string]int{
+	"java":       8,
+	"cpp":        8,
+	"csharp":     8,
+	"kotlin":     8,
+	"python":     8,
+	"javascript": 6,
+	"typescript": 6,
+	"ruby":       6,
+	"php":        6,
+	"c":          6,
+	"go":         6,
+	"rust":       6,
+}
+
+// poolLangConfig is one language's resolved [Min, Max] pool bounds.
+type poolLangConfig struct {
+	Min int
+	Max int
+}
+
+// resolvePoolConfig computes one language's pool Min/Max from env vars, falling back to
+// defaultPoolSize (the existing single JUDGE_POOL_SIZE value) for Min, and to
+// langPoolMaxDefault for Max, so that with zero new env vars set, Min == Max ==
+// defaultPoolSize everywhere — byte-for-byte identical behavior to before this change.
+func resolvePoolConfig(langID string, defaultPoolSize int) poolLangConfig {
+	abbr := langPoolAbbrev[langID]
+
+	min := defaultPoolSize
+	if abbr != "" {
+		if raw := strings.TrimSpace(os.Getenv("JUDGE_POOL_MIN_" + abbr)); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				min = parsed
+			}
+		}
+	}
+
+	max := defaultPoolSize
+	if bucketDefault, ok := langPoolMaxDefault[langID]; ok {
+		max = bucketDefault
+	}
+	if abbr != "" {
+		if raw := strings.TrimSpace(os.Getenv("JUDGE_POOL_MAX_" + abbr)); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				max = parsed
+			}
+		}
+	}
+
+	// Guarantee the invariant WarmUp/the autoscaler rely on: Max is never below Min, even if
+	// an operator's env vars would otherwise produce that (e.g. a high JUDGE_POOL_SIZE with an
+	// unadjusted bucket-default Max).
+	if max < min {
+		max = min
+	}
+
+	return poolLangConfig{Min: min, Max: max}
+}
+
+// getIntEnv reads an env var as a positive int, falling back to def if unset/invalid.
+func getIntEnv(name string, def int) int {
+	if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return def
+}
+
+// getFloatEnv reads an env var as a positive float64, falling back to def if unset/invalid.
+func getFloatEnv(name string, def float64) float64 {
+	if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return def
+}
+
+// getDurationSecondsEnv reads an env var as a positive whole-second duration, falling back to
+// def if unset/invalid.
+func getDurationSecondsEnv(name string, def time.Duration) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			return time.Duration(parsed) * time.Second
+		}
+	}
+	return def
+}
 
 // MaxExecutionsPerContainer controls how many times a pooled container may be
 // used before being evicted. Can be changed at startup from env.
@@ -1302,6 +1436,35 @@ func main() {
 		}
 	}
 
+	// Resolve each language's [Min, Max] pool bounds. With no JUDGE_POOL_MIN_*/MAX_* env
+	// vars set, Min == Max == poolSize for every language — identical to pre-autoscaling
+	// behavior. Max only matters once JUDGE_POOL_AUTOSCALE_ENABLED is on.
+	poolConfigs := make(map[string]poolLangConfig, len(languages.GetSupportedLanguages()))
+	sumMin := 0
+	for _, lang := range languages.GetSupportedLanguages() {
+		cfg := resolvePoolConfig(lang.ID, poolSize)
+		poolConfigs[lang.ID] = cfg
+		sumMin += cfg.Min
+	}
+
+	globalCap := getIntEnv("JUDGE_POOL_GLOBAL_CAP", defaultPoolGlobalCap)
+	if sumMin > globalCap {
+		slog.Error("sum of per-language pool minimums exceeds JUDGE_POOL_GLOBAL_CAP; refusing to start",
+			"sumMin", sumMin, "globalCap", globalCap)
+		os.Exit(1)
+	}
+
+	autoscaleEnabled := isTruthyEnv(os.Getenv("JUDGE_POOL_AUTOSCALE_ENABLED"))
+	autoscaleCfg := pool.AutoscaleConfig{
+		Interval:        getDurationSecondsEnv("JUDGE_POOL_AUTOSCALE_INTERVAL", defaultAutoscaleInterval),
+		UpThresholdMs:   getFloatEnv("JUDGE_POOL_SCALE_UP_THRESHOLD_MS", defaultScaleUpThresholdMs),
+		DownThresholdMs: getFloatEnv("JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS", defaultScaleDownThresholdMs),
+		UpCooldown:      getDurationSecondsEnv("JUDGE_POOL_SCALE_UP_COOLDOWN", defaultScaleUpCooldown),
+		DownCooldown:    getDurationSecondsEnv("JUDGE_POOL_SCALE_DOWN_COOLDOWN", defaultScaleDownCooldown),
+	}
+
+	workerConcurrency := getIntEnv("JUDGE_WORKER_CONCURRENCY", defaultWorkerConcurrency)
+
 	// Max executions per pooled container before eviction
 	maxExecs := 100
 	if val := os.Getenv("MAX_EXECUTIONS_PER_CONTAINER"); val != "" {
@@ -1317,8 +1480,8 @@ func main() {
 	failOnError(err, "Failed to create Docker executor")
 
 	// Initialize Container Pool
-	containerPool := pool.NewPool(executor.Client(), poolSize)
-	slog.Info("Warming up container pool...")
+	containerPool := pool.NewPool(executor.Client(), globalCap)
+	slog.Info("Warming up container pool...", "globalCap", globalCap, "autoscaleEnabled", autoscaleEnabled)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1340,8 +1503,9 @@ func main() {
 		wg.Add(1)
 		go func(l *languages.Language) {
 			defer wg.Done()
-			slog.Info("Warming up pool", "language", l.ID)
-			err := containerPool.WarmUp(ctx, l.ID, l.Image, poolSize)
+			cfg := poolConfigs[l.ID]
+			slog.Info("Warming up pool", "language", l.ID, "min", cfg.Min, "max", cfg.Max)
+			err := containerPool.WarmUp(ctx, l.ID, l.Image, cfg.Min, cfg.Max)
 			if err != nil {
 				slog.Error("Failed to warm up pool", "language", l.ID, "error", err)
 			}
@@ -1355,8 +1519,22 @@ func main() {
 	// Start periodic GC to remove exited/dead judge-managed containers every 5 minutes
 	StartPeriodicOrphanGC(ctx, executor.Client(), 5*time.Minute)
 
-	// Start pool reconciler to keep pool sizes stable
+	// Start pool reconciler to keep pool sizes stable (self-healing safety net — this runs
+	// regardless of autoscaling, converging each language's live count to its current target).
 	containerPool.StartReconciler(ctx, time.Minute)
+
+	// Autoscaling ships disabled by default (JUDGE_POOL_AUTOSCALE_ENABLED unset/false) — the
+	// static per-language Min/Max above already improves on one global pool size even with
+	// this off, and turning it on is a deliberate operator decision once the wait-time signal
+	// (see /stats -> metrics.acquire_wait) has been observed to look sane.
+	if autoscaleEnabled {
+		slog.Info("Pool autoscaling enabled", "interval", autoscaleCfg.Interval,
+			"upThresholdMs", autoscaleCfg.UpThresholdMs, "downThresholdMs", autoscaleCfg.DownThresholdMs,
+			"upCooldown", autoscaleCfg.UpCooldown, "downCooldown", autoscaleCfg.DownCooldown)
+		containerPool.StartAutoscaler(ctx, autoscaleCfg)
+	} else {
+		slog.Info("Pool autoscaling disabled (JUDGE_POOL_AUTOSCALE_ENABLED not set)")
+	}
 
 	// Connect to MongoDB
 	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
@@ -1417,7 +1595,10 @@ func main() {
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 
-	err = ch.Qos(runtime.NumCPU(), 0, false)
+	// Prefetch count matches worker concurrency below rather than runtime.NumCPU(): these
+	// workers spend most of their time blocked on Docker API calls (compile/run), not local
+	// Go CPU work, so sizing this to the host's core count under-provisions an I/O-bound pool.
+	err = ch.Qos(workerConcurrency, 0, false)
 	failOnError(err, "Failed to set QoS")
 
 	// Declare DLX and DLQ
@@ -1476,7 +1657,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	workerWg := sync.WaitGroup{}
-	numWorkers := runtime.NumCPU()
+	numWorkers := workerConcurrency
+	slog.Info("Starting submission workers", "count", numWorkers)
 
 	for i := 0; i < numWorkers; i++ {
 		workerWg.Add(1)

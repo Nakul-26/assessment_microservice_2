@@ -80,11 +80,21 @@ Thresholds are configurable per-language via environment variables. Batching is 
 
 ### Container Pool
 
-A pool of pre-warmed Docker containers is maintained for each language (default 2 per language). This eliminates Docker startup latency from the hot path.
+A pool of pre-warmed Docker containers is maintained for each language. Each language has its
+own `[Min, Max]` bounds (`JUDGE_POOL_MIN_<ABBR>`/`JUDGE_POOL_MAX_<ABBR>`, both falling back to
+`DEFAULT_POOL_SIZE` if unset) rather than one global size — `Min` containers are always kept
+warm; `Max` is only reached if autoscaling grows a language's pool under load. This eliminates
+Docker startup latency from the hot path.
 
 - Containers are evicted after **100 executions** (configurable) to prevent state contamination between submissions.
 - Containers are automatically discarded on timeout, OOM, or runtime crash and replaced by the pool reconciler.
 - Orphaned containers from previous service restarts are cleaned up at startup.
+- **Autoscaling** (`JUDGE_POOL_AUTOSCALE_ENABLED`, off by default): a background loop grows a
+  language's live pool toward its `Max` when callers are queueing to acquire a container (rising
+  `Acquire()` wait time, or any acquire timeouts), and shrinks it back toward `Min` when idle,
+  bounded by `JUDGE_POOL_GLOBAL_CAP` — a hard ceiling on the total container count summed across
+  *all* languages, since they all share the same host's CPU. See `pkg/pool/pool.go`
+  (`StartAutoscaler`, `decideScale`) for the algorithm.
 
 ---
 
@@ -177,7 +187,14 @@ All configuration is via environment variables:
 | `MONGO_URI` | `mongodb://mongo:27017/assessment_db` | MongoDB connection URI |
 | `REDIS_URI` | `redis://redis:6379` | Redis connection URI |
 | `HEALTH_PORT` | `8081` | Port for internal HTTP server |
-| `DEFAULT_POOL_SIZE` | `2` | Docker containers per language in pool |
+| `DEFAULT_POOL_SIZE` | `2` | Fallback Min (and Max, unless overridden) pool size for any language without a per-language override below |
+| `JUDGE_POOL_MIN_<ABBR>` / `JUDGE_POOL_MAX_<ABBR>` | see `main.go` | Per-language pool bounds. `<ABBR>` is one of `PY, JS, TS, JAVA, C, CPP, CS, GO, RS, RB, PHP, KT`. Max only matters once autoscaling is enabled |
+| `JUDGE_POOL_GLOBAL_CAP` | `60` | Hard ceiling on total containers summed across all languages combined |
+| `JUDGE_POOL_AUTOSCALE_ENABLED` | `false` | Grow/shrink each language's live pool between its Min/Max based on Acquire() wait time |
+| `JUDGE_POOL_AUTOSCALE_INTERVAL` | `15` (seconds) | How often the autoscaler re-evaluates each language |
+| `JUDGE_POOL_SCALE_UP_THRESHOLD_MS` / `JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS` | `150` / `20` | Average Acquire() wait (ms) above/below which a language scales up/down |
+| `JUDGE_POOL_SCALE_UP_COOLDOWN` / `JUDGE_POOL_SCALE_DOWN_COOLDOWN` | `20` / `180` (seconds) | Minimum time between consecutive scale-ups/scale-downs for one language (asymmetric — scale up fast, down slow) |
+| `JUDGE_WORKER_CONCURRENCY` | `24` | Concurrent RabbitMQ submission workers / prefetch count (deliberately above core count — workers are I/O-bound on Docker calls) |
 | `MAX_EXECUTIONS_PER_CONTAINER` | `100` | Evict container after N executions |
 | `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `JUDGE_CENTRAL_COMPARE_PY` | `true` | Enable central compare for Python |
@@ -206,12 +223,27 @@ Returns a simple liveness check.
 
 ### `GET /stats`
 
-Returns container pool and GC metrics.
+Returns container pool and GC/reconcile/acquire-wait metrics. `pool` now includes each
+language's configured `min`/`max`/current `target` alongside live `available`/`in_use` counts,
+and `metrics.acquire_wait` has per-language cumulative Acquire() call counts, average wait, and
+timeout counts — the signal the autoscaler acts on.
 
 ```json
 {
-  "pool": { ... },
-  "metrics": { ... }
+  "pool": {
+    "available": { "python": 3, "java": 1 },
+    "in_use": { "python": 1, "java": 3 },
+    "min": { "python": 4, "java": 4 },
+    "max": { "python": 8, "java": 8 },
+    "target": { "python": 4, "java": 6 },
+    "global_cap": 60
+  },
+  "metrics": {
+    "acquire_wait": {
+      "python": { "count": 120, "wait_nanos": 450000, "waited_count": 3, "timeout_count": 0 },
+      "java": { "count": 40, "wait_nanos": 8200000, "waited_count": 22, "timeout_count": 1 }
+    }
+  }
 }
 ```
 

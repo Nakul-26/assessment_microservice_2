@@ -26,30 +26,52 @@ type PooledContainer struct {
 	ExecutionCount int32
 }
 
-// ContainerPool manages a pool of pre-warmed Docker containers.
+// LangLimits is one language's configured pool bounds. target (tracked separately on
+// ContainerPool, not here) is always kept within [Min, Max] — Min containers exist
+// unconditionally from WarmUp onward; anything above Min is what the autoscaler grows/shrinks.
+type LangLimits struct {
+	Min int
+	Max int
+}
+
+// ContainerPool manages a pool of pre-warmed Docker containers, per language.
 type ContainerPool struct {
 	cli        *docker.Client
 	mu         sync.Mutex
 	availChans map[string]chan *PooledContainer // language -> idle containers
 	inUse      map[string]*PooledContainer      // containerID -> container
-	maxPerLang int
-	images     map[string]string // language -> image name
+	limits     map[string]LangLimits            // language -> configured min/max
+	targets    map[string]int                   // language -> current scaling target (min <= target <= max)
+	globalCap  int                              // max containers across ALL languages combined
+	images     map[string]string                // language -> image name
 }
 
-// NewPool creates a new container pool.
-func NewPool(cli *docker.Client, maxPerLang int) *ContainerPool {
+// NewPool creates a new container pool. globalCap bounds the total container count summed
+// across every language — it exists because all languages ultimately share the same host CPU
+// budget, so no single language's Max should be trusted in isolation (see StartAutoscaler).
+func NewPool(cli *docker.Client, globalCap int) *ContainerPool {
 	return &ContainerPool{
 		cli:        cli,
 		availChans: make(map[string]chan *PooledContainer),
 		inUse:      make(map[string]*PooledContainer),
-		maxPerLang: maxPerLang,
+		limits:     make(map[string]LangLimits),
+		targets:    make(map[string]int),
+		globalCap:  globalCap,
 		images:     make(map[string]string),
 	}
 }
 
 // Acquire gets a container from the pool for the given language.
 // It blocks until a container is available or the context is cancelled.
+//
+// Every call is recorded to metrics.RecordAcquire (wait duration, and whether it timed out
+// rather than succeeding) — this is the load signal StartAutoscaler reads to decide whether a
+// language needs more containers. Recording happens on both exit paths, including the
+// ctx.Done() case, since a caller timing out waiting for a container is itself a stronger
+// signal than an elevated-but-successful wait.
 func (p *ContainerPool) Acquire(ctx context.Context, lang string) *PooledContainer {
+	start := time.Now()
+
 	p.mu.Lock()
 	ch, ok := p.availChans[lang]
 	p.mu.Unlock()
@@ -60,12 +82,14 @@ func (p *ContainerPool) Acquire(ctx context.Context, lang string) *PooledContain
 
 	select {
 	case container := <-ch:
+		metrics.RecordAcquire(lang, time.Since(start), false)
 		p.mu.Lock()
 		container.Busy = true
 		p.inUse[container.ID] = container
 		p.mu.Unlock()
 		return container
 	case <-ctx.Done():
+		metrics.RecordAcquire(lang, time.Since(start), true)
 		return nil
 	}
 }
@@ -97,7 +121,8 @@ func (p *ContainerPool) Release(container *PooledContainer) {
 	case ch <- container:
 		// success
 	default:
-		// Channel full? Should not happen if maxPerLang is respected
+		// Channel full? Should never happen — WarmUp sizes the channel to the
+		// language's configured Max, and target/inUse+avail never exceed Max.
 		slog.Warn("Container pool channel full during release", "language", container.Language)
 		p.removeContainer(container)
 	}
@@ -149,13 +174,23 @@ func (p *ContainerPool) Discard(ctx context.Context, container *PooledContainer,
 	}
 }
 
-// WarmUp creates an initial set of containers for a given language.
-func (p *ContainerPool) WarmUp(ctx context.Context, lang string, image string, count int) error {
+// WarmUp creates the initial (min) set of containers for a given language, and records that
+// language's [min, max] bounds for the reconciler/autoscaler to converge against later.
+//
+// The channel is sized to max, not min: capacity is set once here and never resized, so
+// sizing it to the initial container count would mean any later scale-up past that count
+// silently fails (the reconciler's create-missing branch would push onto an already-full
+// channel and immediately destroy what it just created — see StartReconciler). Channel
+// capacity itself is free; only the containers filling it cost real resources, and only `min`
+// of those are actually created here.
+func (p *ContainerPool) WarmUp(ctx context.Context, lang string, image string, min, max int) error {
 	p.mu.Lock()
 	p.images[lang] = image
 	if p.availChans[lang] == nil {
-		p.availChans[lang] = make(chan *PooledContainer, count)
+		p.availChans[lang] = make(chan *PooledContainer, max)
 	}
+	p.limits[lang] = LangLimits{Min: min, Max: max}
+	p.targets[lang] = min
 	ch := p.availChans[lang]
 	p.mu.Unlock()
 
@@ -163,7 +198,7 @@ func (p *ContainerPool) WarmUp(ctx context.Context, lang string, image string, c
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
 
-	for i := 0; i < count; i++ {
+	for i := 0; i < min; i++ {
 		id, workDir, err := p.createContainer(ctx, image, lang)
 		if err != nil {
 			return err
@@ -178,6 +213,8 @@ func (p *ContainerPool) WarmUp(ctx context.Context, lang string, image string, c
 		case ch <- c:
 			// success
 		default:
+			// Can't happen given the channel is sized to max >= min above, but guard
+			// against a future caller passing min > max and leaking a container.
 			slog.Warn("WarmUp: channel full, discarding extra container", "language", lang)
 			p.removeContainer(c)
 		}
@@ -232,6 +269,10 @@ func (p *ContainerPool) Shutdown(ctx context.Context) {
 type PoolStats struct {
 	Available map[string]int `json:"available"`
 	InUse     map[string]int `json:"in_use"`
+	Min       map[string]int `json:"min"`
+	Max       map[string]int `json:"max"`
+	Target    map[string]int `json:"target"`
+	GlobalCap int            `json:"global_cap"`
 }
 
 // GetStats returns the current statistics of the container pool.
@@ -242,6 +283,10 @@ func (p *ContainerPool) GetStats() PoolStats {
 	stats := PoolStats{
 		Available: make(map[string]int),
 		InUse:     make(map[string]int),
+		Min:       make(map[string]int),
+		Max:       make(map[string]int),
+		Target:    make(map[string]int),
+		GlobalCap: p.globalCap,
 	}
 
 	for lang, ch := range p.availChans {
@@ -250,6 +295,15 @@ func (p *ContainerPool) GetStats() PoolStats {
 
 	for _, c := range p.inUse {
 		stats.InUse[c.Language]++
+	}
+
+	for lang, l := range p.limits {
+		stats.Min[lang] = l.Min
+		stats.Max[lang] = l.Max
+	}
+
+	for lang, target := range p.targets {
+		stats.Target[lang] = target
 	}
 
 	return stats
@@ -271,7 +325,13 @@ func (p *ContainerPool) StartMonitor(ctx context.Context, interval time.Duration
 	}()
 }
 
-// StartReconciler periodically ensures the pool size per language matches maxPerLang.
+// StartReconciler periodically ensures each language's live container count (in-use +
+// available) matches its current target. This is the self-healing safety net — crash
+// recovery, drift correction — that runs continuously regardless of whether autoscaling is
+// enabled; StartAutoscaler only ever changes *what* the target is, this loop is what actually
+// makes reality match it. Kept on a slower, fixed cadence (see main.go, currently 1 minute)
+// separate from the faster autoscaling decision interval, since this loop's job (catch drift)
+// doesn't need to react as quickly as a live load signal does.
 func (p *ContainerPool) StartReconciler(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		return
@@ -294,60 +354,192 @@ func (p *ContainerPool) StartReconciler(ctx context.Context, interval time.Durat
 				metrics.SetReconcileLastRun(time.Now())
 
 				for _, lang := range langs {
-					p.mu.Lock()
-					ch := p.availChans[lang]
-					image := p.images[lang]
-					inUseCount := 0
-					for _, c := range p.inUse {
-						if c.Language == lang {
-							inUseCount++
-						}
-					}
-					availCount := 0
-					if ch != nil {
-						availCount = len(ch)
-					}
-					current := inUseCount + availCount
-					target := p.maxPerLang
-					p.mu.Unlock()
+					p.convergeLang(ctx, lang)
+				}
+			}
+		}
+	}()
+}
 
-					if current < target {
-						// create missing containers
-						missing := target - current
-						for i := 0; i < missing; i++ {
-							repl, err := p.newPooledContainer(ctx, image, lang)
-							if err != nil {
-								slog.Error("reconciler: failed to create replacement", "language", lang, "error", err)
-								break
-							}
-							metrics.AddReconcileRepairs(1)
-							p.mu.Lock()
-							if ch2, ok := p.availChans[lang]; ok {
-								select {
-								case ch2 <- repl:
-								default:
-									p.removeContainer(repl)
-								}
-							} else {
-								p.removeContainer(repl)
-							}
-							p.mu.Unlock()
+// convergeLang creates or removes containers for one language so its live count (in-use +
+// available) matches p.targets[lang]. Called by StartReconciler on every tick for every
+// language (self-healing), and by StartAutoscaler immediately after it changes a target (so a
+// scale-up/down decision takes effect right away instead of waiting for the next reconciler
+// tick, which could be up to a minute later).
+func (p *ContainerPool) convergeLang(ctx context.Context, lang string) {
+	p.mu.Lock()
+	ch := p.availChans[lang]
+	image := p.images[lang]
+	inUseCount := 0
+	for _, c := range p.inUse {
+		if c.Language == lang {
+			inUseCount++
+		}
+	}
+	availCount := 0
+	if ch != nil {
+		availCount = len(ch)
+	}
+	current := inUseCount + availCount
+	target := p.targets[lang]
+	p.mu.Unlock()
+
+	if current < target {
+		// create missing containers
+		missing := target - current
+		for i := 0; i < missing; i++ {
+			repl, err := p.newPooledContainer(ctx, image, lang)
+			if err != nil {
+				slog.Error("reconciler: failed to create replacement", "language", lang, "error", err)
+				break
+			}
+			metrics.AddReconcileRepairs(1)
+			p.mu.Lock()
+			if ch2, ok := p.availChans[lang]; ok {
+				select {
+				case ch2 <- repl:
+				default:
+					// Should never happen — the channel is sized to this language's Max at
+					// WarmUp time, and target never exceeds Max, so there's always room.
+					p.removeContainer(repl)
+				}
+			} else {
+				p.removeContainer(repl)
+			}
+			p.mu.Unlock()
+		}
+	} else if current > target {
+		// remove excess available containers (prefer idle ones)
+		excess := current - target
+		if excess > 0 && ch != nil {
+			for i := 0; i < excess; i++ {
+				select {
+				case c := <-ch:
+					p.removeContainer(c)
+				default:
+					// no more idle containers to remove
+				}
+			}
+		}
+	}
+}
+
+// AutoscaleConfig bundles the tunables for StartAutoscaler. See main.go for where these are
+// read from env vars (JUDGE_POOL_AUTOSCALE_INTERVAL, JUDGE_POOL_SCALE_UP_THRESHOLD_MS, etc.)
+// and their defaults.
+type AutoscaleConfig struct {
+	Interval        time.Duration
+	UpThresholdMs   float64
+	DownThresholdMs float64
+	UpCooldown      time.Duration
+	DownCooldown    time.Duration
+}
+
+// globalLiveTotal returns the current container count (in-use + available) summed across
+// every language — what StartAutoscaler compares against globalCap before allowing any
+// language to scale up, since all languages share the same underlying host CPU budget.
+func (p *ContainerPool) globalLiveTotal() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	total := len(p.inUse)
+	for _, ch := range p.availChans {
+		total += len(ch)
+	}
+	return total
+}
+
+// StartAutoscaler runs the per-language scaling loop: every cfg.Interval, it diffs each
+// language's cumulative Acquire wait-time counters (metrics.SnapshotAcquire) against the
+// previous tick to get a rate for just that interval, feeds it through the pure decideScale
+// function alongside that language's cooldown state and current global headroom, and — if the
+// decision changes the target — updates it and calls convergeLang immediately so the change
+// takes effect right away rather than waiting for the next (slower, fixed-cadence)
+// StartReconciler tick.
+//
+// Language mins are never touched here (WarmUp creates them unconditionally and convergeLang
+// never lets target below min) — this loop only ever moves target within [min, max].
+func (p *ContainerPool) StartAutoscaler(ctx context.Context, cfg AutoscaleConfig) {
+	if cfg.Interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(cfg.Interval)
+	go func() {
+		defer ticker.Stop()
+
+		prev := map[string]metrics.AcquireSnapshot{}
+		lastScaleUp := map[string]time.Time{}
+		lastScaleDown := map[string]time.Time{}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				now := time.Now()
+				snap := metrics.SnapshotAcquire()
+
+				p.mu.Lock()
+				langs := make([]string, 0, len(p.limits))
+				for lang := range p.limits {
+					langs = append(langs, lang)
+				}
+				p.mu.Unlock()
+
+				for _, lang := range langs {
+					cur := snap[lang]
+					prior := prev[lang]
+
+					deltaCount := cur.Count - prior.Count
+					deltaWaitNanos := cur.WaitNanos - prior.WaitNanos
+					deltaTimeouts := cur.TimeoutCount - prior.TimeoutCount
+					hadTraffic := deltaCount > 0
+
+					var avgWaitMs float64
+					if deltaCount > 0 {
+						avgWaitMs = float64(deltaWaitNanos) / float64(deltaCount) / 1e6
+					}
+
+					p.mu.Lock()
+					limits, ok := p.limits[lang]
+					target := p.targets[lang]
+					p.mu.Unlock()
+					if !ok {
+						continue
+					}
+
+					upElapsed := lastScaleUp[lang].IsZero() || now.Sub(lastScaleUp[lang]) >= cfg.UpCooldown
+					downElapsed := lastScaleDown[lang].IsZero() || now.Sub(lastScaleDown[lang]) >= cfg.DownCooldown
+					headroom := p.globalLiveTotal() < p.globalCap
+
+					decision := decideScale(
+						limits.Min, limits.Max, target,
+						avgWaitMs, hadTraffic, deltaTimeouts,
+						cfg.UpThresholdMs, cfg.DownThresholdMs,
+						upElapsed, downElapsed,
+						headroom,
+					)
+
+					if decision.NewTarget != target {
+						p.mu.Lock()
+						p.targets[lang] = decision.NewTarget
+						p.mu.Unlock()
+
+						switch decision.Action {
+						case scaleActionUp:
+							lastScaleUp[lang] = now
+						case scaleActionDown:
+							lastScaleDown[lang] = now
 						}
-					} else if current > target {
-						// remove excess available containers (prefer idle ones)
-						excess := current - target
-						if excess > 0 && ch != nil {
-							for i := 0; i < excess; i++ {
-								select {
-								case c := <-ch:
-									p.removeContainer(c)
-								default:
-									// no more idle containers to remove
-								}
-							}
-						}
+
+						slog.Info("autoscaler: adjusted target",
+							"language", lang, "action", decision.Action, "newTarget", decision.NewTarget,
+							"avgWaitMs", avgWaitMs, "timeouts", deltaTimeouts)
+
+						p.convergeLang(ctx, lang)
 					}
 				}
+
+				prev = snap
 			}
 		}
 	}()

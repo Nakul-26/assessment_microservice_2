@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -45,6 +46,93 @@ func AddContainerReplacement(n int) {
 	atomic.AddInt64(&containerReplacementsTotal, int64(n))
 }
 
+// acquireCounters is a cumulative-since-start set of counters for one language's
+// ContainerPool.Acquire calls. All fields are updated via sync/atomic so RecordAcquire
+// never needs to hold acquireMu on the hot path once the entry exists.
+type acquireCounters struct {
+	count        int64 // number of Acquire calls that returned (success or timeout)
+	waitNanos    int64 // sum of wait duration across all calls
+	waitedCount  int64 // calls where wait > 0 (i.e. didn't get a container immediately)
+	timeoutCount int64 // calls where the context was cancelled/timed out before a container freed up
+}
+
+var (
+	acquireMu     sync.Mutex
+	acquireByLang = map[string]*acquireCounters{}
+)
+
+func acquireBucket(lang string) *acquireCounters {
+	acquireMu.Lock()
+	defer acquireMu.Unlock()
+	c, ok := acquireByLang[lang]
+	if !ok {
+		c = &acquireCounters{}
+		acquireByLang[lang] = c
+	}
+	return c
+}
+
+// RecordAcquire records the outcome of one ContainerPool.Acquire(ctx, lang) call. This is
+// the load signal the pool autoscaler reads: rising average wait (or any timeouts) for a
+// language means callers are queueing for containers faster than they're freeing up.
+func RecordAcquire(lang string, wait time.Duration, timedOut bool) {
+	c := acquireBucket(lang)
+	atomic.AddInt64(&c.count, 1)
+	atomic.AddInt64(&c.waitNanos, wait.Nanoseconds())
+	if wait > 0 {
+		atomic.AddInt64(&c.waitedCount, 1)
+	}
+	if timedOut {
+		atomic.AddInt64(&c.timeoutCount, 1)
+	}
+}
+
+// AcquireSnapshot is a point-in-time (cumulative since process start) read of one
+// language's Acquire counters.
+type AcquireSnapshot struct {
+	Count        int64 `json:"count"`
+	WaitNanos    int64 `json:"wait_nanos"`
+	WaitedCount  int64 `json:"waited_count"`
+	TimeoutCount int64 `json:"timeout_count"`
+}
+
+// AvgWaitMs returns the average Acquire wait time in milliseconds across Count calls.
+// Returns 0 if Count is 0 (no calls yet — callers should treat this as "no signal", not
+// "zero wait").
+func (s AcquireSnapshot) AvgWaitMs() float64 {
+	if s.Count == 0 {
+		return 0
+	}
+	return float64(s.WaitNanos) / float64(s.Count) / 1e6
+}
+
+// SnapshotAcquire returns a per-language snapshot of cumulative Acquire counters. Callers
+// that need a rate (e.g. the autoscaler) diff two consecutive snapshots themselves rather
+// than this package tracking windows — this stays a single source of truth for the raw
+// cumulative counts.
+func SnapshotAcquire() map[string]AcquireSnapshot {
+	acquireMu.Lock()
+	langs := make([]string, 0, len(acquireByLang))
+	buckets := make([]*acquireCounters, 0, len(acquireByLang))
+	for lang, c := range acquireByLang {
+		langs = append(langs, lang)
+		buckets = append(buckets, c)
+	}
+	acquireMu.Unlock()
+
+	out := make(map[string]AcquireSnapshot, len(langs))
+	for i, lang := range langs {
+		c := buckets[i]
+		out[lang] = AcquireSnapshot{
+			Count:        atomic.LoadInt64(&c.count),
+			WaitNanos:    atomic.LoadInt64(&c.waitNanos),
+			WaitedCount:  atomic.LoadInt64(&c.waitedCount),
+			TimeoutCount: atomic.LoadInt64(&c.timeoutCount),
+		}
+	}
+	return out
+}
+
 // Snapshot returns metrics in primitive values for JSON encoding.
 func Snapshot() map[string]interface{} {
 	lastGCRun := atomic.LoadInt64(&gcLastRunUnixNano)
@@ -69,5 +157,6 @@ func Snapshot() map[string]interface{} {
 		"last_reconcile_run":           lastReconcileRunStr,
 		"reconcile_repairs_total":      atomic.LoadInt64(&reconcileRepairsTotal),
 		"container_replacements_total": atomic.LoadInt64(&containerReplacementsTotal),
+		"acquire_wait":                 SnapshotAcquire(),
 	}
 }

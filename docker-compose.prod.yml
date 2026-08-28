@@ -24,8 +24,36 @@
 #   MONGO_DB_NAME          (default: assessment_db)
 #   ASSESSMENT_API_PORT    (default: 3000)
 #   JUDGE_LOG_LEVEL        (default: info)
-#   JUDGE_POOL_SIZE        (default: 2)
+#   JUDGE_POOL_SIZE        (default: 2) — used as the Min (and, unless overridden below, Max)
+#                          pool size for every language that has no per-language override.
 #   JUDGE_MAX_EXECS        (default: 100)
+#
+# Per-language pool sizing / autoscaling (all optional — see judge-service-go/main.go for the
+# full per-language default table and pkg/pool/pool.go for the autoscaling algorithm):
+#   JUDGE_POOL_MAX_JAVA / JUDGE_POOL_MAX_CPP   (default: 8) — these two were the most
+#                          container-starved languages in live load testing (slow multi-stage
+#                          compile + JVM/native runtime), so they get the highest headroom.
+#   JUDGE_POOL_GLOBAL_CAP  (default: 60) — hard ceiling on total containers summed across ALL
+#                          languages, since they all share the same host CPU. Only matters once
+#                          autoscaling is on; startup refuses to boot if the sum of every
+#                          language's Min already exceeds this.
+#   JUDGE_POOL_AUTOSCALE_ENABLED  (default: false) — per-language pool sizes (Min only) apply
+#                          regardless; this additionally lets each language's live pool grow
+#                          toward its Max under sustained load and shrink back under its Min-
+#                          floor when idle. Ships off — flip on deliberately once /stats's
+#                          metrics.acquire_wait numbers have been observed and look sane.
+#   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
+#                          and processed concurrently. Deliberately set above the host's core
+#                          count: these workers spend most of their time blocked on Docker API
+#                          calls (compile/run), not local CPU work, so an I/O-bound pool this
+#                          size keeps more of the container pool's headroom actually reachable
+#                          than sizing it to cores would.
+#   Every other language's JUDGE_POOL_MIN_<ABBR>/JUDGE_POOL_MAX_<ABBR> (PY, JS, TS, C, CS, GO,
+#   RS, RB, PHP, KT), and the autoscaling thresholds/cooldowns
+#   (JUDGE_POOL_SCALE_UP_THRESHOLD_MS, JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS,
+#   JUDGE_POOL_SCALE_UP_COOLDOWN, JUDGE_POOL_SCALE_DOWN_COOLDOWN, JUDGE_POOL_AUTOSCALE_INTERVAL
+#   — cooldowns/interval in whole seconds) are available but not wired through this compose
+#   file by default; their defaults are documented in judge-service-go/main.go's const block.
 #
 # Phase 2 billing (all optional — unset until a real Stripe account exists):
 #   STRIPE_SECRET_KEY      Stripe secret key. Billing routes soft-fail with 503 while unset —
@@ -228,6 +256,14 @@ services:
       LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
       DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-2}
       MAX_EXECUTIONS_PER_CONTAINER: ${JUDGE_MAX_EXECS:-100}
+      # Per-language pool sizing / autoscaling — see the header comment above for the full
+      # list of additional per-language and threshold/cooldown vars available but not wired
+      # here by default (their Go-side defaults apply unless set directly in Dokploy env).
+      JUDGE_POOL_MAX_JAVA: ${JUDGE_POOL_MAX_JAVA:-8}
+      JUDGE_POOL_MAX_CPP: ${JUDGE_POOL_MAX_CPP:-8}
+      JUDGE_POOL_GLOBAL_CAP: ${JUDGE_POOL_GLOBAL_CAP:-60}
+      JUDGE_POOL_AUTOSCALE_ENABLED: ${JUDGE_POOL_AUTOSCALE_ENABLED:-false}
+      JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
       JUDGE_CENTRAL_COMPARE_PY: "true"
       JUDGE_CENTRAL_COMPARE_JS: "true"
       JUDGE_CENTRAL_COMPARE_JAVA: "true"
