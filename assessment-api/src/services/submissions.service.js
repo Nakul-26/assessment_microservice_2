@@ -4,7 +4,7 @@ import * as attemptsRepo from "../repositories/assessmentAttempts.repo.js";
 import * as assessmentsRepo from "../repositories/assessments.repo.js";
 import { publishSubmissionMessage } from "./evaluation.service.js";
 import { getCacheJSON, setCacheJSON } from "./cache.service.js";
-import { checkCollegeSubmissionQuota } from "./quota.service.js";
+import { checkCollegeSubmissionQuota, checkStudentSubmissionQuota } from "./quota.service.js";
 import { checkPlanUsageLimit, collegeAllowsPremium } from "./billing.service.js";
 import { HttpError } from "../utils/httpError.js";
 
@@ -217,9 +217,19 @@ export function sanitizeSubmissionForStudent(submission, problem) {
 export async function submitSolution({ problemId, code, language, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
 
+  // Checked before any submission record is created so a rejected request never
+  // leaves behind an orphan "Pending" submission that nothing will process. Student
+  // limit first: a student hitting their own cap gets a specific, actionable message
+  // instead of a confusing "your whole college is rate-limited" when it's really just
+  // them submitting too fast.
+  const studentQuota = await checkStudentSubmissionQuota(userId);
+  if (!studentQuota.allowed) {
+    throw new HttpError(429, "Submission quota exceeded", {
+      msg: `You've submitted too many times in a short period (${studentQuota.limit} per ${studentQuota.windowSeconds}s). Please wait a moment and try again.`
+    });
+  }
+
   if (collegeId) {
-    // Checked before any submission record is created so a rejected request never
-    // leaves behind an orphan "Pending" submission that nothing will process.
     const quota = await checkCollegeSubmissionQuota(collegeId);
     if (!quota.allowed) {
       throw new HttpError(429, "Submission quota exceeded", {

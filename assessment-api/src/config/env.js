@@ -19,8 +19,22 @@ export const env = {
   JUDGE_SERVICE_URL: process.env.JUDGE_SERVICE_URL || "http://judge-service-go:8081",
   // H5 fair-scheduling quota: submissions per college allowed within the rolling
   // window below, enforced in quota.service.js before a submission is queued.
+  // Sized for inter-college fairness on a shared judge, not per-user throttling —
+  // see STUDENT_SUBMISSION_QUOTA below for that. 30/60s was measured to be too
+  // strict for a single college running a real exam (500 students sharing one
+  // pool); raise via env, e.g. COLLEGE_SUBMISSION_QUOTA=300, once judge capacity
+  // (container pool autoscaling, language mix) has been sized for that cohort —
+  // see docker-compose.prod.yml's "Submission quota" section.
   COLLEGE_SUBMISSION_QUOTA: Number(process.env.COLLEGE_SUBMISSION_QUOTA) || 30,
   COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS: Number(process.env.COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS) || 60,
+  // Per-student companion to the college-wide quota above: caps how much of the
+  // (now much larger) shared college pool any single student can consume, so a
+  // runaway auto-submit loop or one impatient student can't starve the other
+  // 499 students in the same exam. Checked first in submissions.service.js so a
+  // student hitting their own limit gets a clear, specific message rather than a
+  // confusing "college quota exceeded".
+  STUDENT_SUBMISSION_QUOTA: Number(process.env.STUDENT_SUBMISSION_QUOTA) || 10,
+  STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS: Number(process.env.STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS) || 60,
   // Phase 2 billing (Stripe). Unlike the secrets above, these have no production
   // fail-fast guard on purpose: billing isn't live yet, so a missing key must not crash
   // the whole API. billing.service.js/stripe.js soft-fail (503) at call time instead.

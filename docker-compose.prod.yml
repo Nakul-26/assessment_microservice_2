@@ -55,6 +55,21 @@
 #   — cooldowns/interval in whole seconds) are available but not wired through this compose
 #   file by default; their defaults are documented in judge-service-go/main.go's const block.
 #
+# Submission quota (both optional — see assessment-api's env.js / quota.service.js):
+#   COLLEGE_SUBMISSION_QUOTA          (default: 30) — inter-college fairness cap on a shared
+#                          judge, per 60s. NOT sized for a real exam cohort: 30/60s is the
+#                          WHOLE college combined, measured too strict for ~500 students
+#                          sharing one college during a live exam. Recommend 300 once judge
+#                          capacity (pool autoscaling above, language mix) has been sized for
+#                          that cohort — this doesn't add processing capacity, it only stops
+#                          rejecting legitimate admission before the judge's own throughput
+#                          ceiling (see capacity notes) becomes the real constraint.
+#   STUDENT_SUBMISSION_QUOTA          (default: 10) — per-student companion, same 60s window.
+#                          Caps how much of the (now larger) college-wide pool one student can
+#                          consume, so a runaway auto-submit loop can't starve the rest of the
+#                          cohort once COLLEGE_SUBMISSION_QUOTA is raised to something generous.
+#   Both *_WINDOW_SECONDS variants (default: 60) are also available.
+#
 # Phase 2 billing (all optional — unset until a real Stripe account exists):
 #   STRIPE_SECRET_KEY      Stripe secret key. Billing routes soft-fail with 503 while unset —
 #                          deliberately no fail-fast guard here, unlike JWT_SECRET/etc, since
@@ -164,9 +179,23 @@ services:
       CODEASSESS_SHIM_KEY: ${CODEASSESS_SHIM_KEY:?CODEASSESS_SHIM_KEY is required}
       ARVENTIQ_SECRET: ${ARVENTIQ_SECRET:?ARVENTIQ_SECRET is required}
       JUDGE_SERVICE_URL: http://judge-service-go:8081
-      # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if unset.
+      # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if
+      # unset. That default is a fairness guard sized for small/incidental multi-college
+      # traffic, not a real exam cohort — measured too strict for ~500 students sharing one
+      # college during a live exam (only 30 submissions/min *total* for the whole college).
+      # Recommend COLLEGE_SUBMISSION_QUOTA=300 once judge capacity (pool autoscaling,
+      # language mix — see judge-service-go's env vars above) has been sized for that
+      # cohort; see docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md capacity notes. This still isn't
+      # the judge's own throughput ceiling — see STUDENT_SUBMISSION_QUOTA below for the
+      # per-student companion that keeps the larger shared pool from being monopolized.
       COLLEGE_SUBMISSION_QUOTA: ${COLLEGE_SUBMISSION_QUOTA:-}
       COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS: ${COLLEGE_SUBMISSION_QUOTA_WINDOW_SECONDS:-}
+      # Per-student companion quota — optional, falls back to 10 per 60s (see env.js) if
+      # unset. Caps how much of the college-wide pool above one student can consume, so a
+      # runaway auto-submit loop (or one impatient student) can't starve the rest of the
+      # cohort once the college-wide number is raised to something generous.
+      STUDENT_SUBMISSION_QUOTA: ${STUDENT_SUBMISSION_QUOTA:-}
+      STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS: ${STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS:-}
       # Phase 2 billing — all optional, see the comment block at the top of this file.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
